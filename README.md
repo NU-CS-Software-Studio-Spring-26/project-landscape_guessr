@@ -65,7 +65,7 @@ Each guess belongs to one game and one image. A game has many guesses (and, thro
 
 ## Contributing
 
-- Branch from `main`: `git checkout -b feat/your-thing`
+- Branch from `main`: `git checkout -b branch-name`
 - Keep migrations reversible
 - After seed changes, run `bin/rails db:reset` locally to verify a clean setup works
 - Open a PR against `main`
