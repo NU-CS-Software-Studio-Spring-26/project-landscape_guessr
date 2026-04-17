@@ -6,6 +6,13 @@ class ImagesController < ApplicationController
     @images = Image.all
   end
 
+  # GET /images/map
+  def map
+    @image_data = Image.pluck(:id, :latitude, :longitude, :title, :url).map do |id, lat, lng, title, url|
+      { id: id, lat: lat.to_f, lng: lng.to_f, title: title, url: url }
+    end
+  end
+
   # GET /images/1 or /images/1.json
   def show
   end

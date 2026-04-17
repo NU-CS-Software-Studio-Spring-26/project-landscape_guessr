@@ -1,0 +1,43 @@
+<% content_for :title, "Images map" %>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+
+<div class="w-full space-y-4">
+  <div class="flex justify-between items-center">
+    <h1 class="font-bold text-4xl">Images map (<%= @image_data.size %>)</h1>
+    <%= link_to "List view", images_path, class: "rounded-md px-3.5 py-2.5 bg-gray-100 hover:bg-gray-50 font-medium" %>
+  </div>
+  <div id="images-map" class="w-full h-[80vh] rounded-md border border-gray-200"></div>
+</div>
+
+<script type="application/json" id="images-map-data"><%== @image_data.to_json %></script>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+  (function () {
+    const data = JSON.parse(document.getElementById("images-map-data").textContent);
+    const map = L.map("images-map").setView([20, 0], 2);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(map);
+
+    const cluster = L.markerClusterGroup({ chunkedLoading: true });
+    data.forEach(function (img) {
+      const marker = L.marker([img.lat, img.lng]);
+      const popup = `
+        <div style="min-width:200px">
+          <img src="${img.url}?width=300" loading="lazy" style="width:100%;height:120px;object-fit:cover;border-radius:4px" alt="">
+          <div style="margin-top:6px;font-weight:600">${img.title.replace(/</g,"&lt;")}</div>
+          <div style="font-size:12px;color:#666">${img.lat.toFixed(4)}, ${img.lng.toFixed(4)}</div>
+          <a href="/images/${img.id}" style="color:#2563eb;font-size:12px">Details →</a>
+        </div>`;
+      marker.bindPopup(popup);
+      cluster.addLayer(marker);
+    });
+    map.addLayer(cluster);
+  })();
+</script>
