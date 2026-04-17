@@ -12,8 +12,8 @@ A GeoGuessr-style web game: players see a landscape photograph (mountain, lake, 
 
 ## Prerequisites
 
-- [rbenv](https://github.com/rbenv/rbenv) — then `rbenv install 4.0.2`
-- PostgreSQL 14+ running locally (`brew install postgresql@16 && brew services start postgresql@16`)
+- Ruby 4.0.2 — install via your version manager (rbenv, asdf, mise, rvm). `.ruby-version` is honored by all of them.
+- PostgreSQL 14+ running locally. On macOS: `brew install postgresql@16 && brew services start postgresql@16`.
 
 ## Setup
 
@@ -40,13 +40,13 @@ longitude      completed_at    latitude    (user's guess)
 title                          longitude
 ```
 
-A `Game` `has_many :guesses`. Each `Guess` references one `Image` (the prompt) and stores the player's lat/lng. Through the join, `Game` `has_many :images, through: :guesses`.
+Each guess belongs to one game and one image. A game has many guesses (and, through those, many images). The image holds the "correct answer" lat/lng; the guess holds the player's lat/lng.
 
 ## Seed data
 
 `db/seeds.rb` fetches ~1400 landmarks from Wikidata's SPARQL endpoint across 14 landform types (mountains, lakes, waterfalls, volcanoes, canyons, islands, glaciers, valleys, rivers, fjords, cliffs, beaches, capes, lagoons). Each re-seed pulls a fresh random sample. Idempotent — re-running won't duplicate.
 
-**Limitation:** Wikidata's coordinates mark the _subject's_ location, not the photographer's. For a mountain photo, this is the mountain's peak — fine for a "where is this thing?" guessing game, but not the exact photo viewpoint. We investigated camera-location sources (Commons GeoData, SDC P1259, EXIF) and all were too sparse or noisy to be worth the added complexity.
+**Limitation:** Wikidata's coordinates mark the _subject's_ location, not the photographer's. For a mountain photo, this is the mountain's peak — fine for a "where is this thing?" guessing game, but not the exact photo viewpoint.
 
 | Command                    | Effect                                                              |
 | -------------------------- | ------------------------------------------------------------------- |
