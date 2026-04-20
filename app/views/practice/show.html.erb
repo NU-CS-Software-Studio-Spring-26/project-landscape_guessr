@@ -41,7 +41,8 @@
     <p data-practice-target="result" class="text-lg font-medium"></p>
 
     <%= link_to "View image details", @image,
-          data: { practice_target: "imageLink", turbo: false },
+          target: "_blank",
+          data: { practice_target: "imageLink" },
           class: "hidden text-blue-600 hover:underline font-medium" %>
   </div>
 </div>

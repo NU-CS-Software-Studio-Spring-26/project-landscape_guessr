@@ -9,7 +9,7 @@ export default class extends Controller {
   connect() {
     this.map = new maplibregl.Map({
       container: this.containerTarget,
-      style: "https://tiles.openfreemap.org/styles/liberty",
+      style: "https://api.maptiler.com/maps/streets-v2/style.json?key=RWz2xTwJMGVfRP9y6hhf",
       center: [0, 20],
       zoom: 1.5
     })
