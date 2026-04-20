@@ -3,10 +3,17 @@ import { Controller } from "@hotwired/stimulus"
 export default class extends Controller {
   static targets = ["guessBtn", "nextBtn", "result", "imageLink"]
   static values = { lat: Number, lng: Number }
+  #boundKeydown
 
   connect() {
     this.guessLat = null
     this.guessLng = null
+    this.#boundKeydown = this.#handleKeydown.bind(this)
+    document.addEventListener("keydown", this.#boundKeydown)
+  }
+
+  disconnect() {
+    document.removeEventListener("keydown", this.#boundKeydown)
   }
 
   pinChanged(event) {
@@ -51,6 +58,17 @@ export default class extends Controller {
 
   next() {
     window.location.reload()
+  }
+
+  #handleKeydown(event) {
+    if (event.code !== "Space") return
+    event.preventDefault()
+
+    if (!this.guessBtnTarget.classList.contains("hidden") && !this.guessBtnTarget.disabled) {
+      this.submitGuess()
+    } else if (!this.nextBtnTarget.classList.contains("hidden")) {
+      this.next()
+    }
   }
 
   #haversine(lat1, lng1, lat2, lng2) {
