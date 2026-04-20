@@ -9,7 +9,7 @@ export default class extends Controller {
   connect() {
     this.map = new maplibregl.Map({
       container: this.containerTarget,
-      style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+      style: "https://tiles.openfreemap.org/styles/liberty",
       center: [0, 20],
       zoom: 1.5
     })
