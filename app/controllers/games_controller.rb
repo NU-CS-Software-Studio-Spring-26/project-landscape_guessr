@@ -8,6 +8,10 @@ class GamesController < ApplicationController
 
   # GET /games/1 or /games/1.json
   def show
+    @total_rounds = 5
+    @round = @game.guesses.count + 1
+    guessed_ids = @game.guesses.pluck(:image_id)
+    @image = Image.where.not(id: guessed_ids).order("RANDOM()").first if @round <= @total_rounds
   end
 
   # GET /games/new
