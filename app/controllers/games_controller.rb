@@ -3,7 +3,8 @@ class GamesController < ApplicationController
 
   # GET /games or /games.json
   def index
-    @games = Game.all
+    @games = Game.includes(:guesses).order(created_at: :desc)
+    @total_rounds = 5
   end
 
   # GET /games/1 or /games/1.json
@@ -28,11 +29,11 @@ class GamesController < ApplicationController
 
   # POST /games or /games.json
   def create
-    @game = Game.new(game_params)
+    @game = Game.new(status: "in_progress")
 
     respond_to do |format|
       if @game.save
-        format.html { redirect_to @game, notice: "Game was successfully created." }
+        format.html { redirect_to @game }
         format.json { render :show, status: :created, location: @game }
       else
         format.html { render :new, status: :unprocessable_entity }
@@ -79,6 +80,10 @@ class GamesController < ApplicationController
 
     @total_distance_km = @rounds.sum { |r| r[:distance_km] }
     @total_rounds = total_rounds
+
+    if @game.status != "completed"
+      @game.update!(status: "completed", score: @total_distance_km, completed_at: Time.current)
+    end
   end
 
   private
