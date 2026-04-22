@@ -2,7 +2,7 @@
 
 A GeoGuessr-style web game: players see a landscape photograph (mountain, lake, waterfall, etc.) and guess where it is on a world map. Rails 8 + PostgreSQL + TailwindCSS.
 
-## Heroku deployment: INSERT LINK
+## Heroku deployment: https://landscape-guessr-cc7bc949a622.herokuapp.com/
 
 ## Team
 
