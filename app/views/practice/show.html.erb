@@ -1,0 +1,49 @@
+<% content_for :title, "Practice" %>
+<% content_for :head do %>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.css" />
+  <script src="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.js"></script>
+<% end %>
+
+<div data-controller="practice"
+     data-action="guess-map:pinned->practice#pinChanged"
+     data-practice-lat-value="<%= @image.latitude %>"
+     data-practice-lng-value="<%= @image.longitude %>"
+     class="w-full space-y-6">
+
+  <h1 class="font-bold text-3xl">Where is this?</h1>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <%# Image %>
+    <div class="flex items-center justify-center">
+      <img src="<%= @image.url %>?width=800"
+           alt="Guess this location"
+           class="max-w-full max-h-[60vh] rounded-md border border-gray-200" />
+    </div>
+
+    <%# Map %>
+    <%= render "shared/guess_map" %>
+  </div>
+
+  <%# Controls %>
+  <div class="flex items-center gap-4">
+    <button data-practice-target="guessBtn"
+            data-action="practice#submitGuess"
+            disabled
+            class="rounded-md px-5 py-2.5 bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed">
+      Submit guess
+    </button>
+
+    <button data-practice-target="nextBtn"
+            data-action="practice#next"
+            class="hidden rounded-md px-5 py-2.5 bg-gray-100 hover:bg-gray-50 font-medium">
+      Next image
+    </button>
+
+    <p data-practice-target="result" class="text-lg font-medium"></p>
+
+    <%= link_to "View image details", @image,
+          target: "_blank",
+          data: { practice_target: "imageLink" },
+          class: "hidden text-blue-600 hover:underline font-medium" %>
+  </div>
+</div>

@@ -12,7 +12,7 @@ PER_TYPE_LIMIT = 100
 NON_PHOTO_PATTERNS = [
   /ASTER|MODIS|Landsat|LANDSAT|Sentinel|MISR|Messtischblatt/i,
   /_map[._]|location[_\s-]map|relief[_\s-]map/i,
-  /topographic|schematic|Harper.?s[_\s-]New/i,
+  /topographic|schematic|Harper.?s[_\s-]New/i
 ]
 
 subqueries = LANDFORM_TYPES.map do |qid|

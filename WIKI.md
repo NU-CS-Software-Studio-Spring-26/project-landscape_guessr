@@ -8,7 +8,7 @@ A GeoGuessr-style web game: players see a landscape photograph (mountain, lake, 
 - **Rails** 8.1.3
 - **PostgreSQL** (dev and production — Heroku-compatible)
 - **TailwindCSS** via `tailwindcss-rails`
-- **Leaflet.js** for the world map view
+- **MapLibre GL** for interactive maps
 
 ## Prerequisites
 

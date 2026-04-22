@@ -1,0 +1,10 @@
+{
+  "ignored_warnings": [
+    {
+      "fingerprint": "39c01c1e8312f353125fdea3a3bf83b05311abab36ddd537eb44f1bb96f68faf",
+      "note": "Image URLs come from Wikidata seeds, not user input"
+    }
+  ],
+  "updated": "2026-04-22",
+  "brakeman_version": "8.0.4"
+}

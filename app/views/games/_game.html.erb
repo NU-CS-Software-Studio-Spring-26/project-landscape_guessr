@@ -1,14 +1,9 @@
-<div id="<%= dom_id game %>" class="w-full sm:w-auto my-5 space-y-5">
-  <div>
-    <strong class="block font-medium mb-1">Status:</strong>
-    <%= game.status %>
-  </div>
-  <div>
-    <strong class="block font-medium mb-1">Score:</strong>
-    <%= game.score %>
-  </div>
-  <div>
-    <strong class="block font-medium mb-1">Completed at:</strong>
-    <%= game.completed_at %>
-  </div>
+<div id="<%= dom_id game %>" class="w-full sm:w-auto my-5">
+  <% if game.status == "completed" %>
+    <p class="font-medium">Score: <%= number_with_delimiter(game.score) %> km</p>
+    <p class="text-sm text-gray-500">Completed <%= time_ago_in_words(game.completed_at) %> ago</p>
+  <% else %>
+    <p class="font-medium">Round <%= [game.guesses.size + 1, @total_rounds].min %> / <%= @total_rounds %></p>
+    <p class="text-sm text-gray-500">In progress</p>
+  <% end %>
 </div>

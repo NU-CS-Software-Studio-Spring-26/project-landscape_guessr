@@ -1,0 +1,50 @@
+<% content_for :title, "Results — Game ##{@game.id}" %>
+
+<div class="w-full max-w-2xl mx-auto space-y-6 py-6">
+
+  <%# Header %>
+  <div class="text-center space-y-1">
+    <h1 class="text-3xl font-bold">Game Over!</h1>
+    <p class="text-gray-500">Here's how you did across <%= @total_rounds %> rounds.</p>
+  </div>
+
+  <%# Total distance card %>
+  <div class="rounded-xl border border-gray-200 bg-gray-50 px-6 py-5 text-center">
+    <p class="text-sm font-medium text-gray-500 uppercase tracking-wide">Total Distance</p>
+    <p class="text-5xl font-bold text-blue-600 mt-1"><%= number_with_delimiter(@total_distance_km) %> km</p>
+    <p class="text-xs text-gray-400 mt-1">Lower is better</p>
+  </div>
+
+  <%# Per-round breakdown %>
+  <div class="space-y-3">
+    <h2 class="font-semibold text-lg">Round Breakdown</h2>
+    <% @rounds.each_with_index do |row, idx| %>
+      <div class="rounded-lg border border-gray-200 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div>
+          <span class="text-xs font-semibold text-gray-400 uppercase">Round <%= idx + 1 %></span>
+          <p class="font-medium text-gray-800 truncate"><%= row[:guess].image.title %></p>
+          <p class="text-xs text-gray-500">
+            Your guess: <%= row[:guess].latitude.to_f.round(3) %>, <%= row[:guess].longitude.to_f.round(3) %>
+          </p>
+        </div>
+        <div class="flex gap-4 sm:text-right shrink-0">
+          <div>
+            <p class="text-xs text-gray-400">Distance</p>
+            <p class="font-semibold text-gray-700"><%= number_with_delimiter(row[:distance_km]) %> km</p>
+          </div>
+        </div>
+      </div>
+    <% end %>
+  </div>
+
+  <%# Action buttons %>
+  <div class="flex gap-3 pt-2">
+    <%= button_to "Play Again", games_path,
+          method: :post,
+          data: { turbo: false },
+          class: "flex-1 rounded-md px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-center cursor-pointer" %>
+    <%= link_to "Back to Games", games_path,
+          class: "flex-1 rounded-md px-4 py-2.5 bg-gray-100 hover:bg-gray-50 font-medium text-center" %>
+  </div>
+
+</div>

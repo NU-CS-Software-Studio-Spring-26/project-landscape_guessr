@@ -1,13 +1,13 @@
 # Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
 
 one:
-  url: MyString
+  url: https://example.com/mountain.jpg
   latitude: 9.99
   longitude: 9.99
-  title: MyString
+  title: Test Mountain
 
 two:
-  url: MyString
+  url: https://example.com/valley.jpg
   latitude: 9.99
   longitude: 9.99
-  title: MyString
+  title: Test Valley
