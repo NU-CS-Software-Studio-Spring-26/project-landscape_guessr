@@ -20,7 +20,7 @@ class GuessesControllerTest < ActionDispatch::IntegrationTest
       post guesses_url, params: { guess: { game_id: @guess.game_id, image_id: @guess.image_id, latitude: @guess.latitude, longitude: @guess.longitude } }
     end
 
-    assert_redirected_to guess_url(Guess.last)
+    assert_redirected_to game_url(Guess.last.game)
   end
 
   test "should show guess" do
