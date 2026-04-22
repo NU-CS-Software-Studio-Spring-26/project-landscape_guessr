@@ -3,7 +3,7 @@
     <p class="font-medium">Score: <%= number_with_delimiter(game.score) %> km</p>
     <p class="text-sm text-gray-500">Completed <%= time_ago_in_words(game.completed_at) %> ago</p>
   <% else %>
-    <p class="font-medium">Round <%= game.guesses.size %> / <%= @total_rounds %></p>
+    <p class="font-medium">Round <%= [game.guesses.size + 1, @total_rounds].min %> / <%= @total_rounds %></p>
     <p class="text-sm text-gray-500">In progress</p>
   <% end %>
 </div>

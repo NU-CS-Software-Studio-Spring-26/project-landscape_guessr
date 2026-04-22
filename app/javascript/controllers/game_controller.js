@@ -49,7 +49,12 @@ export default class extends Controller {
       body: JSON.stringify({ guess: body })
     })
 
-    if (!response.ok) return
+    if (!response.ok) {
+      this.readoutTarget.textContent = "Something went wrong. Please try again."
+      this.readoutTarget.classList.add("text-red-600")
+      this.submitTarget.disabled = false
+      return
+    }
 
     const data = await response.json()
     const answerLat = data.answer.latitude

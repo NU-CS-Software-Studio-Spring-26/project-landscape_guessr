@@ -16,6 +16,10 @@ class GamesController < ApplicationController
     end
     guessed_ids = @game.guesses.pluck(:image_id)
     @image = Image.where.not(id: guessed_ids).order("RANDOM()").first
+
+    if @image.nil?
+      redirect_to results_game_path(@game) and return
+    end
   end
 
   # GET /games/new
