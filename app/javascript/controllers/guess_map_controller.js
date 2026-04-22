@@ -1,12 +1,32 @@
 import { Controller } from "@hotwired/stimulus"
 
+const MAPLIBRE_CSS = "https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.css"
+const MAPLIBRE_JS  = "https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.js"
+
+function ensureMaplibre() {
+  if (window.maplibregl) return Promise.resolve()
+
+  if (!document.querySelector(`link[href="${MAPLIBRE_CSS}"]`)) {
+    const link = Object.assign(document.createElement("link"), { rel: "stylesheet", href: MAPLIBRE_CSS })
+    document.head.appendChild(link)
+  }
+
+  return new Promise((resolve, reject) => {
+    const script = Object.assign(document.createElement("script"), { src: MAPLIBRE_JS })
+    script.onload = resolve
+    script.onerror = reject
+    document.head.appendChild(script)
+  })
+}
+
 export default class extends Controller {
   static targets = ["container"]
   static values = {
-    answer: { type: Array, default: [] } // [lat, lng] — set after guess to show the answer
+    answer: { type: Array, default: [] }
   }
 
-  connect() {
+  async connect() {
+    await ensureMaplibre()
     this.map = new maplibregl.Map({
       container: this.containerTarget,
       style: "https://api.maptiler.com/maps/streets-v2/style.json?key=RWz2xTwJMGVfRP9y6hhf",

@@ -1,6 +1,8 @@
 <% content_for :title, "Game ##{@game.id}" %>
-
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<% content_for :head do %>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.css" />
+  <script src="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.js"></script>
+<% end %>
 
 <div class="w-full space-y-4">
   <div class="flex justify-between items-center">
@@ -15,51 +17,26 @@
   </div>
 
   <% if @image %>
-    <div class="grid md:grid-cols-2 gap-4" style="display:grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+    <div data-controller="game"
+         data-action="guess-map:pinned->game#pinChanged"
+         class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <div>
         <img src="<%= @image.url %>?width=800" alt="<%= @image.title %>"
-             style="width:100%; height:60vh; object-fit:cover; border-radius:6px; border:1px solid #e5e7eb;">
+             class="w-full h-[60vh] object-cover rounded-md border border-gray-200">
       </div>
       <div class="space-y-3">
-        <div id="guess-map" style="width:100%; height:60vh; border-radius:6px; border:1px solid #e5e7eb;"></div>
+        <%= render "shared/guess_map" %>
         <%= form_with url: guesses_path, local: true, class: "flex items-center gap-2" do |f| %>
           <%= hidden_field_tag "guess[game_id]", @game.id %>
           <%= hidden_field_tag "guess[image_id]", @image.id %>
-          <%= hidden_field_tag "guess[latitude]", "", id: "guess_latitude" %>
-          <%= hidden_field_tag "guess[longitude]", "", id: "guess_longitude" %>
-          <span id="guess-readout" class="text-sm text-gray-600">Click the map to drop a pin.</span>
-          <%= submit_tag "Submit guess", id: "guess-submit", disabled: true,
+          <%= hidden_field_tag "guess[latitude]", "", data: { game_target: "latitude" } %>
+          <%= hidden_field_tag "guess[longitude]", "", data: { game_target: "longitude" } %>
+          <span data-game-target="readout" class="text-sm text-gray-600">Click the map to drop a pin.</span>
+          <%= submit_tag "Submit guess", data: { game_target: "submit" }, disabled: true,
               class: "ml-auto rounded-md px-3.5 py-2.5 bg-blue-600 text-white font-medium disabled:bg-gray-300 cursor-pointer" %>
         <% end %>
       </div>
     </div>
-
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script>
-      (function () {
-        const map = L.map("guess-map").setView([20, 0], 2);
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          maxZoom: 19,
-          attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>'
-        }).addTo(map);
-
-        let marker = null;
-        const latInput = document.getElementById("guess_latitude");
-        const lngInput = document.getElementById("guess_longitude");
-        const readout = document.getElementById("guess-readout");
-        const submit = document.getElementById("guess-submit");
-
-        map.on("click", function (e) {
-          const { lat, lng } = e.latlng;
-          if (marker) { marker.setLatLng(e.latlng); }
-          else { marker = L.marker(e.latlng).addTo(map); }
-          latInput.value = lat;
-          lngInput.value = lng;
-          readout.textContent = `Pin: ${lat.toFixed(3)}, ${lng.toFixed(3)}`;
-          submit.disabled = false;
-        });
-      })();
-    </script>
   <% else %>
     <p class="text-lg text-gray-700">You've guessed all <%= @total_rounds %> rounds. Results view coming soon.</p>
     <ul class="text-sm text-gray-600 list-disc pl-5">

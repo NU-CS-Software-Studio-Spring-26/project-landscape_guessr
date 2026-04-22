@@ -5,6 +5,7 @@
 <% end %>
 
 <div data-controller="practice"
+     data-action="guess-map:pinned->practice#pinChanged"
      data-practice-lat-value="<%= @image.latitude %>"
      data-practice-lng-value="<%= @image.longitude %>"
      class="w-full space-y-6">
