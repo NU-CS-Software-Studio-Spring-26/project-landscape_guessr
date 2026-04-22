@@ -19,9 +19,10 @@
   <% if @image %>
     <div data-controller="game"
          data-action="guess-map:pinned->game#pinChanged"
+         data-game-game-path-value="<%= game_path(@game) %>"
          class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <div>
-        <img src="<%= @image.url %>?width=800" alt="<%= @image.title %>"
+        <img src="<%= @image.url %>?width=800" alt="Guess this location"
              class="w-full h-[60vh] object-cover rounded-md border border-gray-200">
       </div>
       <div class="space-y-3">
@@ -32,8 +33,13 @@
           <%= hidden_field_tag "guess[latitude]", "", data: { game_target: "latitude" } %>
           <%= hidden_field_tag "guess[longitude]", "", data: { game_target: "longitude" } %>
           <span data-game-target="readout" class="text-sm text-gray-600">Click the map to drop a pin.</span>
-          <%= submit_tag "Submit guess", data: { game_target: "submit" }, disabled: true,
+          <p data-game-target="result" class="text-lg font-medium"></p>
+          <%= submit_tag "Submit guess", data: { game_target: "submit", action: "game#submitGuess" }, disabled: true,
               class: "ml-auto rounded-md px-3.5 py-2.5 bg-blue-600 text-white font-medium disabled:bg-gray-300 cursor-pointer" %>
+          <button type="button" data-game-target="next" data-action="game#nextRound"
+                  class="hidden ml-auto rounded-md px-3.5 py-2.5 bg-blue-600 text-white font-medium hover:bg-blue-700 cursor-pointer">
+            Next round
+          </button>
         <% end %>
       </div>
     </div>
