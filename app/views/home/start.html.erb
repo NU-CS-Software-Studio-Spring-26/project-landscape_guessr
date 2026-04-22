@@ -1,0 +1,15 @@
+<% content_for :title, "Start" %>
+
+<div class="w-full max-w-lg mx-auto space-y-8 text-center">
+  <div class="space-y-2">
+    <h1 class="font-bold text-4xl">Landscape Guessr</h1>
+    <p class="text-gray-600">Guess where each photo was taken, round by round.</p>
+  </div>
+
+  <div class="flex flex-col sm:flex-row gap-3 justify-center items-stretch">
+    <%= link_to "Start new game", new_game_path,
+        class: "rounded-md px-3.5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium text-center" %>
+    <%= link_to "Show previous games", games_path,
+        class: "rounded-md px-3.5 py-2.5 bg-gray-100 hover:bg-gray-50 font-medium text-center border border-gray-200" %>
+  </div>
+</div>
