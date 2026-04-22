@@ -41,7 +41,7 @@
   <div class="flex gap-3 pt-2">
     <%= button_to "Play Again", games_path,
           method: :post,
-          params: {},
+          data: { turbo: false },
           class: "flex-1 rounded-md px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-center cursor-pointer" %>
     <%= link_to "Back to Games", games_path,
           class: "flex-1 rounded-md px-4 py-2.5 bg-gray-100 hover:bg-gray-50 font-medium text-center" %>
