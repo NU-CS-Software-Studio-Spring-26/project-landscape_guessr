@@ -1,6 +1,8 @@
 Rails.application.routes.draw do
   resources :guesses
-  resources :games
+  resources :games do
+    member { get :results }
+  end
   resources :images do
     collection { get :map }
   end
