@@ -56,18 +56,20 @@ bin/dev                                  # starts Puma (port 3000) + Tailwind wa
 
 `bin/dev` uses foreman — if you hit `foreman: not found`, run `gem install foreman`.
 
+To play, sign up at `/registration/new`. Practice mode (`/practice`) and image browsing are available without an account; starting/playing games requires sign-in.
+
 ## Data model
 
-```
-Image          Game            Guess
------          ----            -----
-url            status          game_id     -> Game
-latitude       score           image_id    -> Image
-longitude      completed_at    latitude    (user's guess)
-title                          longitude
-```
+| Model | Belongs to | Has many | Key columns |
+|---|---|---|---|
+| `User` | — | `sessions`, `games` | `email_address`, `password_digest` |
+| `Session` | `User` | — | `ip_address`, `user_agent` |
+| `Game` | `User` | `game_images`, `guesses`, `images` (through `game_images`) | `status`, `score`, `completed_at` |
+| `GameImage` | `Game`, `Image` | — | `position` (1–5) |
+| `Image` | — | `guesses`, `game_images` | `url`, `latitude`, `longitude`, `title` |
+| `Guess` | `Game`, `Image` | — | `latitude`, `longitude` (player's pick) |
 
-Each guess belongs to one game and one image. A game has many guesses (and, through those, many images). The image holds the "correct answer" lat/lng; the guess holds the player's lat/lng.
+Each game materializes a fixed 5-image set on creation (`game_images` rows with positions 1–5), so the same game can later be replayed by a challenger against the identical image sequence. The `Image` row holds the correct answer; the `Guess` row holds the player's pick.
 
 ## Seed data
 
@@ -78,6 +80,32 @@ Each guess belongs to one game and one image. A game has many guesses (and, thro
 | `bin/rails db:seed`        | Adds new records, skips existing                                    |
 | `bin/rails db:reset`       | Destroys DB -> recreates -> migrates -> seeds (wipes Games/Guesses too) |
 | `bin/rails db:seed:replant`| Truncates tables, then seeds (keeps schema)                         |
+
+## Conventions
+
+A few patterns that aren't obvious from the code but are easy to break.
+
+### Auth scoping (security-critical)
+
+Any controller action touching a user-owned record must scope through `Current.user`, never `Model.find` directly. So:
+
+```ruby
+# Right — wrong-owner request returns 404 because the scope filters it out
+@game = Current.user.games.find(params[:id])
+
+# Wrong — silently exposes other users' games
+@game = Game.find(params[:id])
+```
+
+Same for nested writes: `Current.user.games.find(...).guesses.create!(...)`. Tests cover the cross-user 404 case in `test/controllers/games_controller_test.rb` and `guesses_controller_test.rb`.
+
+### Turbo + inline `<script>` tags
+
+Turbo Drive swaps the body in place on link clicks, which means inline scripts that initialize JS libraries (e.g., MapLibre on `/images/map`) don't re-run. Links pointing to such pages need `data: { turbo: false }` to force a full page load.
+
+### Wikidata seeder
+
+`db/seeds.rb` uses **`SERVICE bd:sample`** for random sampling — not `ORDER BY RAND()` or hashed orderings, both of which time out at scale when unioning multiple landform types. `bd:sample` accepts only a single triple pattern, so the seeder samples by `wdt:P31` (instance-of) inside the `SERVICE` block and joins `wdt:P18`/`wdt:P625` outside. Over-sampling (`limit 2000`) is intentional — only ~5–20% of any landform type has both an image and coordinates. Filenames are filtered for non-photo contamination (satellite imagery, maps); when adding new landform types, spot-check for new junk patterns.
 
 ## Contributing
 
