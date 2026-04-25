@@ -11,6 +11,7 @@ class RegistrationsController < ApplicationController
       start_new_session_for @user
       redirect_to after_authentication_url, notice: "Welcome!"
     else
+      flash.now[:alert] = @user.errors.full_messages.first
       render :new, status: :unprocessable_entity
     end
   end

@@ -38,12 +38,12 @@
       </div>
     </nav>
 
-    <main class="container mx-auto mt-20 px-5 flex flex-col">
+    <main class="container mx-auto mt-20 px-5">
       <% if notice = flash[:notice] %>
-        <p class="py-2 px-3 mb-5 bg-green-50 text-green-600 font-medium rounded-md self-start" id="notice"><%= notice %></p>
+        <p class="py-2 px-3 mb-5 bg-green-50 text-green-600 font-medium rounded-md mx-auto md:w-2/3 w-full" id="notice"><%= notice %></p>
       <% end %>
       <% if alert = flash[:alert] %>
-        <p class="py-2 px-3 mb-5 bg-red-50 text-red-600 font-medium rounded-md self-start" id="alert"><%= alert %></p>
+        <p class="py-2 px-3 mb-5 bg-red-50 text-red-600 font-medium rounded-md mx-auto md:w-2/3 w-full" id="alert"><%= alert %></p>
       <% end %>
       <%= yield %>
     </main>

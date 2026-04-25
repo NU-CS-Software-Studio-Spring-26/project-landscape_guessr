@@ -1,8 +1,8 @@
 Rails.application.routes.draw do
   root "home#start"
 
-  resource :session
-  resources :passwords, param: :token
+  resource :session, only: %i[ new create destroy ]
+  resources :passwords, param: :token, only: %i[ new create edit update ]
   resource :registration, only: %i[ new create ]
 
   resources :guesses
