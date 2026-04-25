@@ -3,7 +3,7 @@ class GuessesController < ApplicationController
 
   # GET /guesses or /guesses.json
   def index
-    @guesses = Guess.all
+    @guesses = Guess.where(game: Current.user.games)
   end
 
   # GET /guesses/1 or /guesses/1.json
@@ -21,7 +21,8 @@ class GuessesController < ApplicationController
 
   # POST /guesses or /guesses.json
   def create
-    @guess = Guess.new(guess_params)
+    game = Current.user.games.find(params.dig(:guess, :game_id))
+    @guess = game.guesses.new(guess_params.except(:game_id))
 
     respond_to do |format|
       if @guess.save
@@ -60,7 +61,7 @@ class GuessesController < ApplicationController
   private
     # Use callbacks to share common setup or constraints between actions.
     def set_guess
-      @guess = Guess.find(params.expect(:id))
+      @guess = Guess.where(game: Current.user.games).find(params.expect(:id))
     end
 
     # Only allow a list of trusted parameters through.

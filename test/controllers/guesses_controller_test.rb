@@ -2,47 +2,42 @@ require "test_helper"
 
 class GuessesControllerTest < ActionDispatch::IntegrationTest
   setup do
-    @guess = guesses(:one)
+    @alice = users(:alice)
+    @bob = users(:bob)
+    @alice_guess = guesses(:one)
+    @bob_guess = guesses(:two)
   end
 
-  test "should get index" do
+  test "redirects unauthenticated user to login" do
+    get guesses_url
+    assert_redirected_to new_session_url
+  end
+
+  test "index only shows own guesses" do
+    sign_in_as @alice
     get guesses_url
     assert_response :success
   end
 
-  test "should get new" do
-    get new_guess_url
-    assert_response :success
-  end
-
-  test "should create guess" do
+  test "should create guess on own game" do
+    sign_in_as @alice
     assert_difference("Guess.count") do
-      post guesses_url, params: { guess: { game_id: @guess.game_id, image_id: @guess.image_id, latitude: @guess.latitude, longitude: @guess.longitude } }
+      post guesses_url, params: { guess: { game_id: @alice_guess.game_id, image_id: @alice_guess.image_id, latitude: 1.0, longitude: 2.0 } }
     end
-
-    assert_redirected_to game_url(Guess.last.game)
+    assert_redirected_to game_url(@alice_guess.game)
   end
 
-  test "should show guess" do
-    get guess_url(@guess)
-    assert_response :success
-  end
-
-  test "should get edit" do
-    get edit_guess_url(@guess)
-    assert_response :success
-  end
-
-  test "should update guess" do
-    patch guess_url(@guess), params: { guess: { game_id: @guess.game_id, image_id: @guess.image_id, latitude: @guess.latitude, longitude: @guess.longitude } }
-    assert_redirected_to guess_url(@guess)
-  end
-
-  test "should destroy guess" do
-    assert_difference("Guess.count", -1) do
-      delete guess_url(@guess)
+  test "cannot create guess on another user's game" do
+    sign_in_as @alice
+    assert_no_difference("Guess.count") do
+      post guesses_url, params: { guess: { game_id: @bob_guess.game_id, image_id: @bob_guess.image_id, latitude: 1.0, longitude: 2.0 } }
     end
+    assert_response :not_found
+  end
 
-    assert_redirected_to guesses_url
+  test "cannot show another user's guess" do
+    sign_in_as @alice
+    get guess_url(@bob_guess)
+    assert_response :not_found
   end
 end

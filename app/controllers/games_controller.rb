@@ -1,21 +1,23 @@
 class GamesController < ApplicationController
+  TOTAL_ROUNDS = 5
+
   before_action :set_game, only: %i[ show edit update destroy results ]
 
   # GET /games or /games.json
   def index
-    @games = Game.includes(:guesses).order(created_at: :desc)
-    @total_rounds = 5
+    @games = Current.user.games.includes(:guesses).order(created_at: :desc)
+    @total_rounds = TOTAL_ROUNDS
   end
 
   # GET /games/1 or /games/1.json
   def show
-    @total_rounds = 5
+    @total_rounds = TOTAL_ROUNDS
     @round = @game.guesses.count + 1
     if @round > @total_rounds
       redirect_to results_game_path(@game) and return
     end
-    guessed_ids = @game.guesses.pluck(:image_id)
-    @image = Image.where.not(id: guessed_ids).order("RANDOM()").first
+
+    @image = @game.game_images.includes(:image).find_by(position: @round)&.image
 
     if @image.nil?
       redirect_to results_game_path(@game) and return
@@ -24,7 +26,7 @@ class GamesController < ApplicationController
 
   # GET /games/new
   def new
-    @game = Game.new
+    @game = Current.user.games.new
   end
 
   # GET /games/1/edit
@@ -33,16 +35,28 @@ class GamesController < ApplicationController
 
   # POST /games or /games.json
   def create
-    @game = Game.new(status: "in_progress")
+    @game = Current.user.games.new(status: "in_progress")
+    image_ids = Image.order("RANDOM()").limit(TOTAL_ROUNDS).pluck(:id)
+
+    if image_ids.size < TOTAL_ROUNDS
+      redirect_to root_path, alert: "Not enough images to start a game." and return
+    end
+
+    Game.transaction do
+      @game.save!
+      image_ids.each_with_index do |image_id, idx|
+        @game.game_images.create!(image_id: image_id, position: idx + 1)
+      end
+    end
 
     respond_to do |format|
-      if @game.save
-        format.html { redirect_to @game }
-        format.json { render :show, status: :created, location: @game }
-      else
-        format.html { render :new, status: :unprocessable_entity }
-        format.json { render json: @game.errors, status: :unprocessable_entity }
-      end
+      format.html { redirect_to @game }
+      format.json { render :show, status: :created, location: @game }
+    end
+  rescue ActiveRecord::RecordInvalid
+    respond_to do |format|
+      format.html { render :new, status: :unprocessable_entity }
+      format.json { render json: @game.errors, status: :unprocessable_entity }
     end
   end
 
@@ -71,7 +85,6 @@ class GamesController < ApplicationController
 
   # GET /games/1/results
   def results
-    total_rounds = 5
     guesses = @game.guesses.includes(:image).order(:created_at)
 
     @rounds = guesses.map do |guess|
@@ -83,7 +96,7 @@ class GamesController < ApplicationController
     end
 
     @total_distance_km = @rounds.sum { |r| r[:distance_km] }
-    @total_rounds = total_rounds
+    @total_rounds = TOTAL_ROUNDS
 
     if @game.status != "completed"
       @game.update!(status: "completed", score: @total_distance_km, completed_at: Time.current)
@@ -93,7 +106,7 @@ class GamesController < ApplicationController
   private
     # Use callbacks to share common setup or constraints between actions.
     def set_game
-      @game = Game.find(params.expect(:id))
+      @game = Current.user.games.find(params.expect(:id))
     end
 
     # Only allow a list of trusted parameters through.

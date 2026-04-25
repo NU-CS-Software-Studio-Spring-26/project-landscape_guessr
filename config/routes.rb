@@ -1,6 +1,10 @@
 Rails.application.routes.draw do
   root "home#start"
 
+  resource :session
+  resources :passwords, param: :token
+  resource :registration, only: %i[ new create ]
+
   resources :guesses
   resources :games do
     member { get :results }

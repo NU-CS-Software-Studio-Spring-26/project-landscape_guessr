@@ -1,4 +1,6 @@
 class PracticeController < ApplicationController
+  allow_unauthenticated_access only: %i[ show ]
+
   def show
     @image = Image.order("RANDOM()").first
 

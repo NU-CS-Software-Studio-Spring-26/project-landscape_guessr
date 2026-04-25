@@ -1,4 +1,5 @@
 class ImagesController < ApplicationController
+  allow_unauthenticated_access only: %i[ index show map ]
   before_action :set_image, only: %i[ show edit update destroy ]
 
   # GET /images or /images.json

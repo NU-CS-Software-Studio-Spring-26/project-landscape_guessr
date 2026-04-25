@@ -1,11 +1,13 @@
 # Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
 
 one:
+  user: alice
   status: MyString
   score: 1
   completed_at: 2026-04-17 14:24:20
 
 two:
+  user: bob
   status: MyString
   score: 1
   completed_at: 2026-04-17 14:24:20
