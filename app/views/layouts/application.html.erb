@@ -24,7 +24,27 @@
   </head>
 
   <body>
-    <main class="container mx-auto mt-28 px-5 flex">
+    <nav class="container mx-auto px-5 pt-5 flex justify-between items-center text-sm">
+      <%= link_to "Landscape Guessr", root_path, class: "font-bold" %>
+      <div class="flex items-center gap-3">
+        <% if authenticated? %>
+          <span class="text-gray-600 hidden sm:inline"><%= Current.user.email_address %></span>
+          <%= button_to "Sign out", session_path, method: :delete,
+                class: "rounded-md px-3 py-1.5 bg-gray-100 hover:bg-gray-50 font-medium border border-gray-200 cursor-pointer" %>
+        <% else %>
+          <%= link_to "Sign in", new_session_path, class: "rounded-md px-3 py-1.5 bg-gray-100 hover:bg-gray-50 font-medium border border-gray-200" %>
+          <%= link_to "Sign up", new_registration_path, class: "rounded-md px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-medium" %>
+        <% end %>
+      </div>
+    </nav>
+
+    <main class="container mx-auto mt-20 px-5">
+      <% if notice = flash[:notice] %>
+        <p class="py-2 px-3 mb-5 bg-green-50 text-green-600 font-medium rounded-md mx-auto md:w-2/3 w-full" id="notice"><%= notice %></p>
+      <% end %>
+      <% if alert = flash[:alert] %>
+        <p class="py-2 px-3 mb-5 bg-red-50 text-red-600 font-medium rounded-md mx-auto md:w-2/3 w-full" id="alert"><%= alert %></p>
+      <% end %>
       <%= yield %>
     </main>
   </body>

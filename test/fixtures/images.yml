@@ -11,3 +11,21 @@ two:
   latitude: 9.99
   longitude: 9.99
   title: Test Valley
+
+three:
+  url: https://example.com/forest.jpg
+  latitude: 9.99
+  longitude: 9.99
+  title: Test Forest
+
+four:
+  url: https://example.com/desert.jpg
+  latitude: 9.99
+  longitude: 9.99
+  title: Test Desert
+
+five:
+  url: https://example.com/lake.jpg
+  latitude: 9.99
+  longitude: 9.99
+  title: Test Lake
