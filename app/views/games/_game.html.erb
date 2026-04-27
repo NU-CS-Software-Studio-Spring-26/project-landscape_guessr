@@ -1,6 +1,6 @@
 <div id="<%= dom_id game %>" class="w-full sm:w-auto my-5">
   <% if game.status == "completed" %>
-    <p class="font-medium">Score: <%= number_with_delimiter(game.score) %> km</p>
+    <p class="font-medium">Score: <%= number_with_precision(game.score, precision: 4) %></p>
     <p class="text-sm text-gray-500">Completed <%= time_ago_in_words(game.completed_at) %> ago</p>
   <% else %>
     <p class="font-medium">Round <%= [game.guesses.size + 1, @total_rounds].min %> / <%= @total_rounds %></p>
