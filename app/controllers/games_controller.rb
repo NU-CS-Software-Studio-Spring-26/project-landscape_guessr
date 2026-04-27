@@ -75,18 +75,24 @@ class GamesController < ApplicationController
     guesses = @game.guesses.includes(:image).order(:created_at)
 
     @rounds = guesses.map do |guess|
-      dist_km = haversine_km(
+      raw_dist_km = haversine_km(
         guess.latitude.to_f,  guess.longitude.to_f,
         guess.image.latitude.to_f, guess.image.longitude.to_f
       )
-      { guess: guess, distance_km: dist_km.round }
+      transformed_dist_km = [ raw_dist_km, 2.0 ].max
+      {
+        guess: guess,
+        distance_km: transformed_dist_km.round,
+        transformed_distance_km: transformed_dist_km
+      }
     end
 
     @total_distance_km = @rounds.sum { |r| r[:distance_km] }
+    @score = @rounds.sum { |r| 100.0 / Math.log(r[:transformed_distance_km]) }
     @total_rounds = total_rounds
 
     if @game.status != "completed"
-      @game.update!(status: "completed", score: @total_distance_km, completed_at: Time.current)
+      @game.update!(status: "completed", score: @score, completed_at: Time.current)
     end
   end
 
