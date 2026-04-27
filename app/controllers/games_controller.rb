@@ -88,7 +88,7 @@ class GamesController < ApplicationController
     end
 
     @total_distance_km = @rounds.sum { |r| r[:distance_km] }
-    @score = @rounds.sum { |r| 1.0 / Math.log(r[:transformed_distance_km]) }
+    @score = @rounds.sum { |r| 100.0 / Math.log(r[:transformed_distance_km]) }
     @total_rounds = total_rounds
 
     if @game.status != "completed"
