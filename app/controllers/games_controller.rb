@@ -1,6 +1,7 @@
 class GamesController < ApplicationController
   TOTAL_ROUNDS = 5
 
+  before_action :require_admin, only: %i[ edit update ]
   before_action :set_game, only: %i[ show edit update destroy results ]
 
   # GET /games or /games.json

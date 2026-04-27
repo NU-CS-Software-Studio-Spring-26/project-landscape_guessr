@@ -58,11 +58,13 @@ bin/dev                                  # starts Puma (port 3000) + Tailwind wa
 
 To play, sign up at `/registration/new`. Practice mode (`/practice`) and image browsing are available without an account; starting/playing games requires sign-in.
 
+To manage the image library or edit past guesses through the UI, you need an admin account. Sign up normally, then promote yourself via `bin/rails c`: `User.find_by(email_address: "you@x").update(admin: true)`. On Heroku: `heroku run rails console`.
+
 ## Data model
 
 | Model | Belongs to | Has many | Key columns |
 |---|---|---|---|
-| `User` | — | `sessions`, `games` | `email_address`, `password_digest` |
+| `User` | — | `sessions`, `games` | `email_address`, `password_digest`, `admin` |
 | `Session` | `User` | — | `ip_address`, `user_agent` |
 | `Game` | `User` | `game_images`, `guesses`, `images` (through `game_images`) | `status`, `score`, `completed_at` |
 | `GameImage` | `Game`, `Image` | — | `position` (1–5) |
@@ -98,6 +100,8 @@ Any controller action touching a user-owned record must scope through `Current.u
 ```
 
 Same for nested writes: `Current.user.games.find(...).guesses.create!(...)`. Tests cover the cross-user 404 case in `test/controllers/games_controller_test.rb` and `guesses_controller_test.rb`.
+
+Mutating the image library, editing past guesses, and editing game metadata are admin-only. Game `score`, `status`, and `completed_at` are written by the backend during gameplay (results action) — the `/games/:id/edit` form exists only as an admin debug tool. Users can still destroy their own games. Use the `require_admin` before_action in `ApplicationController` for any future controller action that should be restricted to admins.
 
 ### Turbo + inline `<script>` tags
 

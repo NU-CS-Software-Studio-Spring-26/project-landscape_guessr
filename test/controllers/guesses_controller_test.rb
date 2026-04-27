@@ -3,9 +3,10 @@ require "test_helper"
 class GuessesControllerTest < ActionDispatch::IntegrationTest
   setup do
     @alice = users(:alice)
-    @bob = users(:bob)
+    @bob   = users(:bob)
+    @admin = users(:admin)
     @alice_guess = guesses(:one)
-    @bob_guess = guesses(:two)
+    @bob_guess   = guesses(:two)
   end
 
   test "redirects unauthenticated user to login" do
@@ -39,5 +40,19 @@ class GuessesControllerTest < ActionDispatch::IntegrationTest
     sign_in_as @alice
     get guess_url(@bob_guess)
     assert_response :not_found
+  end
+
+  test "non-admin cannot edit own guess" do
+    sign_in_as @alice
+    get edit_guess_url(@alice_guess)
+    assert_redirected_to root_path
+  end
+
+  test "non-admin cannot destroy own guess" do
+    sign_in_as @alice
+    assert_no_difference("Guess.count") do
+      delete guess_url(@alice_guess)
+    end
+    assert_redirected_to root_path
   end
 end

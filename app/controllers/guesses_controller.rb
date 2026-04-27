@@ -1,4 +1,5 @@
 class GuessesController < ApplicationController
+  before_action :require_admin, only: %i[ new edit update destroy ]
   before_action :set_guess, only: %i[ show edit update destroy ]
 
   # GET /guesses or /guesses.json
