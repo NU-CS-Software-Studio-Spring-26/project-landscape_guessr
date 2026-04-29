@@ -1,0 +1,29 @@
+alice_round1:
+  game: one
+  image: one
+  position: 1
+
+alice_round2:
+  game: one
+  image: two
+  position: 2
+
+alice_round3:
+  game: one
+  image: three
+  position: 3
+
+alice_round4:
+  game: one
+  image: four
+  position: 4
+
+alice_round5:
+  game: one
+  image: five
+  position: 5
+
+bob_round1:
+  game: two
+  image: one
+  position: 1

@@ -17,9 +17,13 @@ class GameTest < ActiveSupport::TestCase
   end
 
   test "new game can be created with in_progress status" do
-    game = Game.create!(status: "in_progress")
+    game = users(:alice).games.create!(status: "in_progress")
     assert_equal "in_progress", game.status
     assert_nil game.score
     assert_nil game.completed_at
+  end
+
+  test "belongs to a user" do
+    assert_equal :belongs_to, Game.reflect_on_association(:user).macro
   end
 end
