@@ -10,6 +10,12 @@ class GamesController < ApplicationController
     @total_rounds = TOTAL_ROUNDS
   end
 
+  # GET /games/leaderboard
+  def leaderboard
+    @games = Game.leaderboard
+    @total_rounds = TOTAL_ROUNDS
+  end
+
   # GET /games/1 or /games/1.json
   def show
     @total_rounds = TOTAL_ROUNDS
