@@ -8,6 +8,7 @@ Rails.application.routes.draw do
   resources :guesses
   resources :games do
     member { get :results }
+    collection { get :leaderboard }
   end
   resources :images do
     collection { get :map }
