@@ -1,27 +1,16 @@
 <%= form_with model: image_set, class: "space-y-4" do |f| %>
-  <% if image_set.errors.any? %>
-    <div class="rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-      <ul class="list-disc pl-4 space-y-1">
-        <% image_set.errors.full_messages.each do |msg| %>
-          <li><%= msg %></li>
-        <% end %>
-      </ul>
-    </div>
-  <% end %>
+  <%= render "shared/form_errors", record: image_set %>
 
   <div class="space-y-1">
     <%= f.label :name, class: "block text-sm font-medium text-gray-700" %>
-    <%= f.text_field :name, class: "block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500",
-          placeholder: "My Landscape Set" %>
+    <%= f.text_field :name, class: field_class(image_set, :name), placeholder: "My Landscape Set" %>
   </div>
 
   <div class="space-y-1">
     <%= f.label :visibility, class: "block text-sm font-medium text-gray-700" %>
     <%= f.select :visibility, [["Private (only you)", "private"], ["Public (anyone can play)", "public"]],
-          {},
-          class: "block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" %>
+          {}, class: field_class(image_set, :visibility) %>
   </div>
 
-  <%= f.submit image_set.persisted? ? "Save changes" : "Create set",
-        class: "rounded-md px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium cursor-pointer" %>
+  <%= f.submit image_set.persisted? ? "Save changes" : "Create set", class: "btn-primary" %>
 <% end %>

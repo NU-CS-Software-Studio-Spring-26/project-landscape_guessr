@@ -19,4 +19,11 @@ module ApplicationHelper
       datetime: time.iso8601,
       data: { controller: "local-time" }
   end
+
+  # Returns "form-input" or "form-input-error" depending on whether the
+  # given record has errors on the field. Use in form views to keep the
+  # input red when validation fails.
+  def field_class(record, field)
+    record.errors[field].any? ? "form-input-error" : "form-input"
+  end
 end

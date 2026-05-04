@@ -3,25 +3,25 @@
 
   <div class="my-5">
     <%= form.label :url %>
-    <%= form.text_field :url, class: ["block shadow-sm rounded-md border px-3 py-2 mt-2 w-full", {"border-gray-400 focus:outline-blue-600": image.errors[:url].none?, "border-red-400 focus:outline-red-600": image.errors[:url].any?}] %>
+    <%= form.text_field :url, class: field_class(image, :url) %>
   </div>
 
   <div class="my-5">
     <%= form.label :latitude %>
-    <%= form.text_field :latitude, class: ["block shadow-sm rounded-md border px-3 py-2 mt-2 w-full", {"border-gray-400 focus:outline-blue-600": image.errors[:latitude].none?, "border-red-400 focus:outline-red-600": image.errors[:latitude].any?}] %>
+    <%= form.text_field :latitude, class: field_class(image, :latitude) %>
   </div>
 
   <div class="my-5">
     <%= form.label :longitude %>
-    <%= form.text_field :longitude, class: ["block shadow-sm rounded-md border px-3 py-2 mt-2 w-full", {"border-gray-400 focus:outline-blue-600": image.errors[:longitude].none?, "border-red-400 focus:outline-red-600": image.errors[:longitude].any?}] %>
+    <%= form.text_field :longitude, class: field_class(image, :longitude) %>
   </div>
 
   <div class="my-5">
     <%= form.label :title %>
-    <%= form.text_field :title, class: ["block shadow-sm rounded-md border px-3 py-2 mt-2 w-full", {"border-gray-400 focus:outline-blue-600": image.errors[:title].none?, "border-red-400 focus:outline-red-600": image.errors[:title].any?}] %>
+    <%= form.text_field :title, class: field_class(image, :title) %>
   </div>
 
   <div class="inline">
-    <%= form.submit class: "w-full sm:w-auto rounded-md px-3.5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white inline-block font-medium cursor-pointer" %>
+    <%= form.submit class: "btn-primary w-full sm:w-auto" %>
   </div>
 <% end %>

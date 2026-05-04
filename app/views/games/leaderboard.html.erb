@@ -9,7 +9,7 @@
         &middot; Top <%= @games.size %> games — highest score over <%= @total_rounds %> rounds wins.
       </p>
     </div>
-    <%= link_to "Back to games", games_path, class: "rounded-md px-3 py-2 bg-gray-100 hover:bg-gray-50 font-medium" %>
+    <%= link_to "Back to games", games_path, class: "btn-secondary text-sm py-2" %>
   </div>
 
   <% if @games.any? %>

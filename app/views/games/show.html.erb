@@ -12,7 +12,7 @@
         Game complete
       <% end %>
     </h1>
-    <%= link_to "Back to games", games_path, class: "rounded-md px-3 py-2 bg-gray-100 hover:bg-gray-50 font-medium" %>
+    <%= link_to "Back to games", games_path, class: "btn-secondary text-sm py-2" %>
   </div>
 
   <% if @image %>
@@ -34,9 +34,9 @@
           <span data-game-target="readout" class="text-sm text-gray-600">Click the map to drop a pin.</span>
           <p data-game-target="result" class="text-lg font-medium"></p>
           <%= submit_tag "Submit guess", data: { game_target: "submit", action: "game#submitGuess" }, disabled: true,
-              class: "ml-auto rounded-md px-3.5 py-2.5 bg-blue-600 text-white font-medium disabled:bg-gray-300 cursor-pointer" %>
+              class: "btn-primary ml-auto disabled:opacity-40" %>
           <button type="button" data-game-target="next" data-action="game#nextRound"
-                  class="hidden ml-auto rounded-md px-3.5 py-2.5 bg-blue-600 text-white font-medium hover:bg-blue-700 cursor-pointer">
+                  class="btn-primary hidden ml-auto">
             Next round
           </button>
         <% end %>

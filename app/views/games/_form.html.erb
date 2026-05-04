@@ -3,20 +3,20 @@
 
   <div class="my-5">
     <%= form.label :status %>
-    <%= form.text_field :status, class: ["block shadow-sm rounded-md border px-3 py-2 mt-2 w-full", {"border-gray-400 focus:outline-blue-600": game.errors[:status].none?, "border-red-400 focus:outline-red-600": game.errors[:status].any?}] %>
+    <%= form.text_field :status, class: field_class(game, :status) %>
   </div>
 
   <div class="my-5">
     <%= form.label :score %>
-    <%= form.number_field :score, class: ["block shadow-sm rounded-md border px-3 py-2 mt-2 w-full", {"border-gray-400 focus:outline-blue-600": game.errors[:score].none?, "border-red-400 focus:outline-red-600": game.errors[:score].any?}] %>
+    <%= form.number_field :score, class: field_class(game, :score) %>
   </div>
 
   <div class="my-5">
     <%= form.label :completed_at %>
-    <%= form.datetime_field :completed_at, class: ["block shadow-sm rounded-md border px-3 py-2 mt-2 w-full", {"border-gray-400 focus:outline-blue-600": game.errors[:completed_at].none?, "border-red-400 focus:outline-red-600": game.errors[:completed_at].any?}] %>
+    <%= form.datetime_field :completed_at, class: field_class(game, :completed_at) %>
   </div>
 
   <div class="inline">
-    <%= form.submit class: "w-full sm:w-auto rounded-md px-3.5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white inline-block font-medium cursor-pointer" %>
+    <%= form.submit class: "btn-primary w-full sm:w-auto" %>
   </div>
 <% end %>

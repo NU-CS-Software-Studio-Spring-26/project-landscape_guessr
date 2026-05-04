@@ -4,11 +4,10 @@
 
   <div class="flex items-center justify-between gap-4">
     <div>
-      <h1 class="text-2xl font-bold">Edit Locations</h1>
+      <h1 class="heading-page">Edit Locations</h1>
       <p class="muted mt-0.5"><%= @image_set.name %></p>
     </div>
-    <%= link_to "Back to set", @image_set,
-          class: "rounded-md px-4 py-2 bg-gray-100 hover:bg-gray-50 font-medium border border-gray-200 shrink-0" %>
+    <%= link_to "Back to set", @image_set, class: "btn-secondary shrink-0" %>
   </div>
 
   <%# Add image panel — tabbed: Upload file / Enter URL %>
@@ -61,7 +60,7 @@
           </div>
         </div>
         <div class="sm:col-span-2">
-          <%= submit_tag "Add image", class: "rounded-md px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium cursor-pointer" %>
+          <%= submit_tag "Add image", class: "btn-primary" %>
         </div>
       <% end %>
     </div>
@@ -93,7 +92,7 @@
           </div>
         </div>
         <div class="sm:col-span-2">
-          <%= submit_tag "Add image", class: "rounded-md px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium cursor-pointer" %>
+          <%= submit_tag "Add image", class: "btn-primary" %>
         </div>
       <% end %>
     </div>
@@ -155,8 +154,7 @@
         <% end %>
       </div>
 
-      <%= submit_tag "Save all locations",
-            class: "rounded-md px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium cursor-pointer" %>
+      <%= submit_tag "Save all locations", class: "btn-primary" %>
     <% end %>
   <% else %>
     <p class="text-gray-500 text-sm">Add images above to start editing locations.</p>

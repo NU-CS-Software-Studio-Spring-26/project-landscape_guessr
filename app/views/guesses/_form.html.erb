@@ -3,25 +3,25 @@
 
   <div class="my-5">
     <%= form.label :game_id %>
-    <%= form.text_field :game_id, class: ["block shadow-sm rounded-md border px-3 py-2 mt-2 w-full", {"border-gray-400 focus:outline-blue-600": guess.errors[:game_id].none?, "border-red-400 focus:outline-red-600": guess.errors[:game_id].any?}] %>
+    <%= form.text_field :game_id, class: field_class(guess, :game_id) %>
   </div>
 
   <div class="my-5">
     <%= form.label :image_id %>
-    <%= form.text_field :image_id, class: ["block shadow-sm rounded-md border px-3 py-2 mt-2 w-full", {"border-gray-400 focus:outline-blue-600": guess.errors[:image_id].none?, "border-red-400 focus:outline-red-600": guess.errors[:image_id].any?}] %>
+    <%= form.text_field :image_id, class: field_class(guess, :image_id) %>
   </div>
 
   <div class="my-5">
     <%= form.label :latitude %>
-    <%= form.text_field :latitude, class: ["block shadow-sm rounded-md border px-3 py-2 mt-2 w-full", {"border-gray-400 focus:outline-blue-600": guess.errors[:latitude].none?, "border-red-400 focus:outline-red-600": guess.errors[:latitude].any?}] %>
+    <%= form.text_field :latitude, class: field_class(guess, :latitude) %>
   </div>
 
   <div class="my-5">
     <%= form.label :longitude %>
-    <%= form.text_field :longitude, class: ["block shadow-sm rounded-md border px-3 py-2 mt-2 w-full", {"border-gray-400 focus:outline-blue-600": guess.errors[:longitude].none?, "border-red-400 focus:outline-red-600": guess.errors[:longitude].any?}] %>
+    <%= form.text_field :longitude, class: field_class(guess, :longitude) %>
   </div>
 
   <div class="inline">
-    <%= form.submit class: "w-full sm:w-auto rounded-md px-3.5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white inline-block font-medium cursor-pointer" %>
+    <%= form.submit class: "btn-primary w-full sm:w-auto" %>
   </div>
 <% end %>
