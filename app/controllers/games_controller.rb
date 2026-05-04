@@ -5,8 +5,19 @@ class GamesController < ApplicationController
   before_action :set_game, only: %i[ show edit update destroy results ]
 
   # GET /games or /games.json
+  GAMES_INDEX_SORTS = %w[created_at score].freeze
+  GAMES_INDEX_STATUSES = %w[all in_progress completed].freeze
+
   def index
-    @games = Current.user.games.includes(:guesses).order(created_at: :desc)
+    @sort      = GAMES_INDEX_SORTS.include?(params[:sort]) ? params[:sort] : "created_at"
+    @direction = params[:direction] == "asc" ? "asc" : "desc"
+    @status    = GAMES_INDEX_STATUSES.include?(params[:status]) ? params[:status] : "all"
+
+    games = Current.user.games.includes(:guesses, :image_set)
+    games = games.where(status: "in_progress") if @status == "in_progress"
+    games = games.where.not(completed_at: nil) if @status == "completed"
+
+    @games = games.order(@sort => @direction)
     @total_rounds = TOTAL_ROUNDS
   end
 

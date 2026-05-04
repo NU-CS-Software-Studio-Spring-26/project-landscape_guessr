@@ -10,6 +10,33 @@
     </div>
   </div>
 
+  <%= form_with url: games_path, method: :get, local: true,
+        class: "flex flex-wrap items-end gap-3 mt-6 mb-4" do |f| %>
+    <div>
+      <%= f.label :status, "Status", class: "block text-xs font-medium text-gray-500 uppercase tracking-wide" %>
+      <%= f.select :status,
+            [["All", "all"], ["In progress", "in_progress"], ["Completed", "completed"]],
+            { selected: @status },
+            class: "mt-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm" %>
+    </div>
+    <div>
+      <%= f.label :sort, "Sort by", class: "block text-xs font-medium text-gray-500 uppercase tracking-wide" %>
+      <%= f.select :sort,
+            [["Date", "created_at"], ["Score", "score"]],
+            { selected: @sort },
+            class: "mt-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm" %>
+    </div>
+    <div>
+      <%= f.label :direction, "Order", class: "block text-xs font-medium text-gray-500 uppercase tracking-wide" %>
+      <%= f.select :direction,
+            [["Newest / highest first", "desc"], ["Oldest / lowest first", "asc"]],
+            { selected: @direction },
+            class: "mt-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm" %>
+    </div>
+    <%= f.submit "Apply",
+          class: "rounded-md px-3.5 py-1.5 bg-gray-100 hover:bg-gray-50 text-sm font-medium border border-gray-200 cursor-pointer" %>
+  <% end %>
+
   <div id="games" class="min-w-full divide-y divide-gray-200 space-y-5">
     <% if @games.any? %>
       <% @games.each do |game| %>
@@ -25,7 +52,16 @@
         </div>
       <% end %>
     <% else %>
-      <p class="text-center my-10">No games found.</p>
+      <p class="text-center my-10 text-gray-500">
+        <% case @status %>
+        <% when "completed" %>
+          No completed games yet — click "New game" to play your first.
+        <% when "in_progress" %>
+          No games in progress.
+        <% else %>
+          You haven't started any games yet — click "New game" to play your first.
+        <% end %>
+      </p>
     <% end %>
   </div>
 </div>
