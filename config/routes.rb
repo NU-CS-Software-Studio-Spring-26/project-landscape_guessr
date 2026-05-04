@@ -23,7 +23,8 @@ Rails.application.routes.draw do
     end
     delete "items/:item_id", to: "image_sets#remove_item", as: :remove_item
   end
-  get "practice", to: "practice#show"
+  get  "practice",       to: "practice#show"
+  get  "practice/check", to: "practice#check", as: :practice_check
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.

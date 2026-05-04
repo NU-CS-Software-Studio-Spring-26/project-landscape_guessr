@@ -2,7 +2,7 @@ import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
   static targets = ["guessBtn", "nextBtn", "result", "imageLink"]
-  static values = { lat: Number, lng: Number }
+  static values = { imageId: Number, checkUrl: String }
   #boundKeydown
 
   connect() {
@@ -22,16 +22,25 @@ export default class extends Controller {
     this.guessBtnTarget.disabled = false
   }
 
-  submitGuess() {
+  async submitGuess() {
     if (this.guessLat === null) return
+    this.guessBtnTarget.disabled = true
 
-    const km = this.#haversine(this.guessLat, this.guessLng, this.latValue, this.lngValue)
+    const url = `${this.checkUrlValue}?image_id=${this.imageIdValue}&lat=${this.guessLat}&lng=${this.guessLng}`
+    const res = await fetch(url, { headers: { "Accept": "application/json" } })
+    if (!res.ok) {
+      this.resultTarget.textContent = "Couldn't check guess. Try again."
+      this.resultTarget.className = "text-lg font-medium text-red-600"
+      this.guessBtnTarget.disabled = false
+      return
+    }
+    const { answer_lat, answer_lng, distance_km: km } = await res.json()
 
     const mapCtrl = this.application.getControllerForElementAndIdentifier(
       this.element.querySelector("[data-controller='guess-map']"),
       "guess-map"
     )
-    mapCtrl.showAnswer(this.latValue, this.lngValue)
+    mapCtrl.showAnswer(answer_lat, answer_lng)
 
     this.guessBtnTarget.classList.add("hidden")
     this.nextBtnTarget.classList.remove("hidden")
@@ -69,16 +78,5 @@ export default class extends Controller {
     } else if (!this.nextBtnTarget.classList.contains("hidden")) {
       this.next()
     }
-  }
-
-  #haversine(lat1, lng1, lat2, lng2) {
-    const R = 6371
-    const toRad = (deg) => (deg * Math.PI) / 180
-    const dLat = toRad(lat2 - lat1)
-    const dLng = toRad(lng2 - lng1)
-    const a =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
   }
 }

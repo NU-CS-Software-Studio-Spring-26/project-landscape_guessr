@@ -6,8 +6,8 @@
 
 <div data-controller="practice"
      data-action="guess-map:pinned->practice#pinChanged"
-     data-practice-lat-value="<%= @image.latitude %>"
-     data-practice-lng-value="<%= @image.longitude %>"
+     data-practice-image-id-value="<%= @image.id %>"
+     data-practice-check-url-value="<%= practice_check_path %>"
      class="w-full space-y-6">
 
   <h1 class="font-bold text-3xl">Where is this?</h1>
