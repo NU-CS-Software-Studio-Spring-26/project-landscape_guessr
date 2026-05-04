@@ -87,6 +87,9 @@ class ImageSetsController < ApplicationController
 
     if file.present?
       title ||= File.basename(file.original_filename, ".*").gsub(/[_-]+/, " ").titleize
+      if lat.nil? && lng.nil? && (gps = Image.gps_from_upload(file))
+        lat, lng = gps
+      end
       image = Image.create!(title: title, latitude: lat, longitude: lng)
       image.photo.attach(file)
     elsif url.present?
@@ -124,10 +127,14 @@ class ImageSetsController < ApplicationController
 
     files.each do |file|
       title = File.basename(file.original_filename, ".*").gsub(/[_-]+/, " ").titleize
-      image = Image.create!(title: title)
+      gps = Image.gps_from_upload(file)
+      lat, lng = gps if gps
+      image = Image.create!(title: title, latitude: lat, longitude: lng)
       image.photo.attach(file)
       item = @image_set.image_set_items.find_or_initialize_by(image: image)
       if item.new_record?
+        item.latitude  = lat
+        item.longitude = lng
         item.save!
         added += 1
       end
