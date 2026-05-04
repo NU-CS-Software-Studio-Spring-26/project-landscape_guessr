@@ -122,7 +122,7 @@ class GamesController < ApplicationController
       dist_km = haversine_km(guess.latitude.to_f, guess.longitude.to_f, ans_lat, ans_lng)
       {
         guess: guess,
-        distance_km: dist_km.round,
+        distance_km: dist_km,
         answer_lat: ans_lat,
         answer_lng: ans_lng,
         round_number: idx + 1,
@@ -142,7 +142,7 @@ class GamesController < ApplicationController
         guess_lng: r[:guess].longitude.to_f,
         answer_lat: r[:answer_lat],
         answer_lng: r[:answer_lng],
-        distance_km: r[:distance_km]
+        distance_label: helpers.format_distance_compact(r[:distance_km])
       }
     end
 

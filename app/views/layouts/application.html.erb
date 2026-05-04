@@ -34,7 +34,7 @@
       </div>
       <div class="flex items-center gap-3">
         <% if authenticated? %>
-          <span class="text-gray-600 hidden sm:inline"><%= Current.user.email_address %></span>
+          <%= link_to Current.user.username, profile_path, class: "text-gray-700 hover:text-blue-600 font-medium hidden sm:inline" %>
           <%= button_to "Sign out", session_path, method: :delete,
                 class: "rounded-md px-3 py-1.5 bg-gray-100 hover:bg-gray-50 font-medium border border-gray-200 cursor-pointer" %>
         <% else %>

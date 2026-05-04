@@ -18,7 +18,7 @@
     <p class="text-5xl font-bold text-blue-600 mt-1"><%= number_with_delimiter(@score) %></p>
     <p class="text-xs text-gray-500 mt-1">
       out of <%= number_with_delimiter(@total_rounds * Game::GEOGUESSR_MAX_ROUND_SCORE) %>
-      &middot; total distance <%= number_with_delimiter(@total_distance_km) %> km
+      &middot; total distance <%= format_distance_compact(@total_distance_km) %>
     </p>
   </div>
 
@@ -59,7 +59,7 @@
           </div>
           <div>
             <p class="text-xs text-gray-400">Distance</p>
-            <p class="font-medium text-gray-600"><%= number_with_delimiter(row[:distance_km]) %> km</p>
+            <p class="font-medium text-gray-600"><%= format_distance_compact(row[:distance_km]) %></p>
           </div>
         </div>
       </div>
@@ -70,9 +70,10 @@
   <div class="flex gap-3 pt-2">
     <%= button_to "Play Again", games_path,
           method: :post,
+          params: { image_set_id: @game.image_set_id },
           data: { turbo: false },
           class: "flex-1 rounded-md px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-center cursor-pointer" %>
-    <%= link_to "Leaderboard", leaderboard_games_path,
+    <%= link_to "Leaderboard", leaderboard_games_path(image_set_id: @game.image_set_id),
           class: "flex-1 rounded-md px-4 py-2.5 bg-gray-100 hover:bg-gray-50 font-medium text-center" %>
     <%= link_to "Back to Games", games_path,
           class: "flex-1 rounded-md px-4 py-2.5 bg-gray-100 hover:bg-gray-50 font-medium text-center" %>

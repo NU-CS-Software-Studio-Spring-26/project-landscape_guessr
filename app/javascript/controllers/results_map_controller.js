@@ -57,7 +57,7 @@ export default class extends Controller {
         .setPopup(new maplibregl.Popup({ offset: 8 }).setHTML(
           `<div class="text-xs font-medium">${label} — your guess</div>` +
           `<div class="text-xs text-gray-500">${r.guess_lat.toFixed(4)}, ${r.guess_lng.toFixed(4)}</div>` +
-          `<div class="text-xs text-gray-500">${r.distance_km.toLocaleString()} km off</div>`
+          `<div class="text-xs text-gray-500">${r.distance_label} off</div>`
         ))
         .addTo(this.map)
 
