@@ -8,9 +8,8 @@ class GameGeoguessrScoreTest < Minitest::Test
     assert_equal 5000, Game.geoguessr_round_score(0)
   end
 
-  def test_one_decay_length_in_metres_gives_exp_neg_one_times_max_rounded
-    km = Game::GEOGUESSR_DECAY_METERS / 1000.0
-    assert_equal 1839, Game.geoguessr_round_score(km)
+  def test_one_decay_length_gives_exp_neg_one_times_max_rounded
+    assert_equal 1839, Game.geoguessr_round_score(Game::GEOGUESSR_DECAY_KM)
   end
 
   def test_score_decreases_with_distance_and_stays_bounded

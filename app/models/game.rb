@@ -1,7 +1,8 @@
 class Game < ApplicationRecord
-  # Classic GeoGuessr per-round: round(5000 * exp(-distance_m / 1492.7))
+  # Classic GeoGuessr per-round: round(5000 * exp(-distance_km / 1492.7))
+  # 1492.7 is the world-map characteristic length in *kilometers*, not meters.
   GEOGUESSR_MAX_ROUND_SCORE = 5000
-  GEOGUESSR_DECAY_METERS = 1492.7
+  GEOGUESSR_DECAY_KM = 1492.7
 
   belongs_to :user
   belongs_to :image_set, optional: true
@@ -23,7 +24,6 @@ class Game < ApplicationRecord
   }
 
   def self.geoguessr_round_score(distance_km)
-    metres = distance_km * 1000.0
-    (GEOGUESSR_MAX_ROUND_SCORE * Math.exp(-metres / GEOGUESSR_DECAY_METERS)).round.clamp(0, GEOGUESSR_MAX_ROUND_SCORE)
+    (GEOGUESSR_MAX_ROUND_SCORE * Math.exp(-distance_km / GEOGUESSR_DECAY_KM)).round.clamp(0, GEOGUESSR_MAX_ROUND_SCORE)
   end
 end

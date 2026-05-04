@@ -12,11 +12,14 @@
     <p class="text-gray-500">Here's how you did across <%= @total_rounds %> rounds.</p>
   </div>
 
-  <%# Total distance card %>
+  <%# Total score card %>
   <div class="rounded-xl border border-gray-200 bg-gray-50 px-6 py-5 text-center">
-    <p class="text-sm font-medium text-gray-500 uppercase tracking-wide">Total Distance</p>
-    <p class="text-5xl font-bold text-blue-600 mt-1"><%= number_with_delimiter(@total_distance_km) %> km</p>
-    <p class="text-xs text-gray-400 mt-1">Lower is better</p>
+    <p class="text-sm font-medium text-gray-500 uppercase tracking-wide">Total Score</p>
+    <p class="text-5xl font-bold text-blue-600 mt-1"><%= number_with_delimiter(@score) %></p>
+    <p class="text-xs text-gray-500 mt-1">
+      out of <%= number_with_delimiter(@total_rounds * Game::GEOGUESSR_MAX_ROUND_SCORE) %>
+      &middot; total distance <%= number_with_delimiter(@total_distance_km) %> km
+    </p>
   </div>
 
   <%# Summary map %>
@@ -51,8 +54,12 @@
         </div>
         <div class="flex gap-4 sm:text-right shrink-0">
           <div>
+            <p class="text-xs text-gray-400">Score</p>
+            <p class="font-semibold text-blue-600"><%= number_with_delimiter(row[:round_score]) %></p>
+          </div>
+          <div>
             <p class="text-xs text-gray-400">Distance</p>
-            <p class="font-semibold text-gray-700"><%= number_with_delimiter(row[:distance_km]) %> km</p>
+            <p class="font-medium text-gray-600"><%= number_with_delimiter(row[:distance_km]) %> km</p>
           </div>
         </div>
       </div>
