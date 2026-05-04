@@ -28,7 +28,7 @@
             <td class="py-2 pr-4 font-semibold text-gray-700"><%= i + 1 %></td>
             <td class="py-2 pr-4"><%= game.user.email_address %></td>
             <td class="py-2 pr-4 font-medium"><%= number_with_delimiter(game.score) %></td>
-            <td class="py-2 pr-4 text-gray-500 text-sm"><%= game.completed_at.to_fs(:short) %></td>
+            <td class="py-2 pr-4 text-gray-500 text-sm"><%= local_date_tag(game.completed_at) %></td>
           </tr>
         <% end %>
       </tbody>
