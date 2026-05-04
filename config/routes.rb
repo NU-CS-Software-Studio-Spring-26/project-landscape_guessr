@@ -4,6 +4,7 @@ Rails.application.routes.draw do
   resource :session, only: %i[ new create destroy ]
   resources :passwords, param: :token, only: %i[ new create edit update ]
   resource :registration, only: %i[ new create ]
+  resource :profile, only: :show
 
   resources :guesses
   resources :games do
