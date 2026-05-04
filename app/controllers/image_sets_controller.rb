@@ -92,11 +92,12 @@ class ImageSetsController < ApplicationController
 
     if file.present?
       title ||= File.basename(file.original_filename, ".*").gsub(/[_-]+/, " ").titleize
+      # Read EXIF GPS *before* the JPEG re-encode strips metadata.
       if lat.nil? && lng.nil? && (gps = Image.gps_from_upload(file))
         lat, lng = gps
       end
       image = Image.create!(title: title, latitude: lat, longitude: lng)
-      image.photo.attach(file)
+      image.photo.attach(Image.process_upload(file))
     elsif url.present?
       title ||= "Untitled"
       image = Image.find_or_create_by!(url: url) do |img|
@@ -146,7 +147,7 @@ class ImageSetsController < ApplicationController
       gps = Image.gps_from_upload(file)
       lat, lng = gps if gps
       image = Image.create!(title: title, latitude: lat, longitude: lng)
-      image.photo.attach(file)
+      image.photo.attach(Image.process_upload(file))
       item = @image_set.image_set_items.find_or_initialize_by(image: image)
       if item.new_record?
         item.latitude  = lat

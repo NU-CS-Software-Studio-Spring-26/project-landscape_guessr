@@ -36,6 +36,7 @@
     <div data-add-image-tabs-target="uploadPanel">
       <%= form_with url: add_image_image_set_path(@image_set), method: :post,
                     multipart: true, local: true,
+                    data: { controller: "upload-progress" },
                     class: "grid grid-cols-1 sm:grid-cols-2 gap-3" do %>
         <div class="sm:col-span-2 space-y-1">
           <%= label_tag :file, "Image file", class: "block text-sm font-medium text-gray-700" %>
@@ -107,6 +108,7 @@
     </div>
     <%= form_with url: bulk_upload_image_set_path(@image_set), method: :post,
                   multipart: true, local: true,
+                  data: { controller: "upload-progress" },
                   class: "flex flex-col sm:flex-row items-start sm:items-end gap-3" do %>
       <div class="flex-1 space-y-1 w-full">
         <%= label_tag "files[]", "Image files", class: "block text-sm font-medium text-gray-700" %>
