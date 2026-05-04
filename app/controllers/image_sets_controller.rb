@@ -1,6 +1,6 @@
 class ImageSetsController < ApplicationController
-  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image bulk_upload]
-  before_action :require_owner, only: %i[edit update destroy locations update_locations add_image bulk_upload]
+  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image bulk_upload remove_item]
+  before_action :require_owner, only: %i[edit update destroy locations update_locations add_image bulk_upload remove_item]
 
   # GET /image_sets
   def index
@@ -87,6 +87,9 @@ class ImageSetsController < ApplicationController
 
     if file.present?
       title ||= File.basename(file.original_filename, ".*").gsub(/[_-]+/, " ").titleize
+      if lat.nil? && lng.nil? && (gps = Image.gps_from_upload(file))
+        lat, lng = gps
+      end
       image = Image.create!(title: title, latitude: lat, longitude: lng)
       image.photo.attach(file)
     elsif url.present?
@@ -111,6 +114,17 @@ class ImageSetsController < ApplicationController
     end
   end
 
+  # DELETE /image_sets/1/items/123
+  def remove_item
+    item = @image_set.image_set_items.find_by(id: params[:item_id])
+    if item
+      item.destroy
+      redirect_back fallback_location: @image_set, notice: "Image removed from set."
+    else
+      redirect_back fallback_location: @image_set, alert: "Image not found in this set."
+    end
+  end
+
   # POST /image_sets/1/bulk_upload
   def bulk_upload
     files = Array(params[:files]).select(&:present?)
@@ -124,10 +138,14 @@ class ImageSetsController < ApplicationController
 
     files.each do |file|
       title = File.basename(file.original_filename, ".*").gsub(/[_-]+/, " ").titleize
-      image = Image.create!(title: title)
+      gps = Image.gps_from_upload(file)
+      lat, lng = gps if gps
+      image = Image.create!(title: title, latitude: lat, longitude: lng)
       image.photo.attach(file)
       item = @image_set.image_set_items.find_or_initialize_by(image: image)
       if item.new_record?
+        item.latitude  = lat
+        item.longitude = lng
         item.save!
         added += 1
       end

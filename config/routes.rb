@@ -20,6 +20,7 @@ Rails.application.routes.draw do
       post :add_image
       post :bulk_upload
     end
+    delete "items/:item_id", to: "image_sets#remove_item", as: :remove_item
   end
   get "practice", to: "practice#show"
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html

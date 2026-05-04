@@ -10,7 +10,7 @@ class ImageSet < ApplicationRecord
   validate :only_one_system_default, if: :is_system_default?
 
   scope :system_default, -> { find_by!(is_system_default: true) }
-  scope :public_catalog, -> { where(visibility: "public", is_system_default: false) }
+  scope :public_catalog, -> { where(visibility: "public") }
   scope :owned_by, ->(user) { where(user: user) }
   scope :visible_to, ->(user) {
     where(user: user).or(where(visibility: "public", is_system_default: false))

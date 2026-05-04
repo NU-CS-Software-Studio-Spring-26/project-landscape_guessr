@@ -15,6 +15,8 @@
             params: { image_set_id: @image_set.id },
             data: { turbo: false },
             class: "rounded-md px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium cursor-pointer" %>
+      <%= link_to "Leaderboard", leaderboard_games_path(image_set_id: @image_set.id),
+            class: "rounded-md px-4 py-2 bg-gray-100 hover:bg-gray-50 font-medium border border-gray-200" %>
       <% if @image_set.owned_by?(Current.user) %>
         <%= link_to "Edit locations", locations_image_set_path(@image_set),
               class: "rounded-md px-4 py-2 bg-gray-100 hover:bg-gray-50 font-medium border border-gray-200" %>
@@ -42,6 +44,12 @@
               <% end %>
             </p>
           </div>
+          <% if @image_set.owned_by?(Current.user) %>
+            <%= button_to "Remove", image_set_remove_item_path(@image_set, item),
+                  method: :delete,
+                  form: { data: { turbo_confirm: "Remove “#{item.title}” from this set?" } },
+                  class: "absolute top-1 right-1 rounded bg-white/90 hover:bg-red-50 hover:text-red-600 text-xs px-2 py-0.5 border border-gray-200 opacity-0 group-hover:opacity-100 transition cursor-pointer" %>
+          <% end %>
         </div>
       <% end %>
     </div>
