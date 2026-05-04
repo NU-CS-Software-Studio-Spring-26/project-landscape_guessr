@@ -12,7 +12,7 @@ class GamesController < ApplicationController
 
   # GET /games/leaderboard
   def leaderboard
-    @games = Game.leaderboard
+    @games = Game.leaderboard(sort: params[:sort], direction: params[:direction])
     @total_rounds = TOTAL_ROUNDS
   end
 
