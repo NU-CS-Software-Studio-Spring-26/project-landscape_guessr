@@ -43,12 +43,5 @@
         <% end %>
       </div>
     </div>
-  <% else %>
-    <p class="text-lg text-gray-700">You've guessed all <%= @total_rounds %> rounds. Results view coming soon.</p>
-    <ul class="text-sm text-gray-600 list-disc pl-5">
-      <% @game.guesses.includes(:image).each do |g| %>
-        <li><%= g.image.title %> — guessed (<%= g.latitude %>, <%= g.longitude %>)</li>
-      <% end %>
-    </ul>
   <% end %>
 </div>

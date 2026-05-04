@@ -4,8 +4,13 @@ class ImageSetsController < ApplicationController
 
   # GET /image_sets
   def index
-    @my_sets     = ImageSet.owned_by(Current.user).order(:name)
-    @public_sets = ImageSet.public_catalog.order(:name)
+    with_counts = ->(scope) {
+      scope.left_joins(:image_set_items)
+           .group("image_sets.id")
+           .select("image_sets.*, COUNT(image_set_items.id) AS items_count")
+    }
+    @my_sets     = with_counts.call(ImageSet.owned_by(Current.user)).order(:name)
+    @public_sets = with_counts.call(ImageSet.public_catalog).order(:name)
   end
 
   # GET /image_sets/1

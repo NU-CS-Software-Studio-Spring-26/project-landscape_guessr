@@ -20,8 +20,14 @@ class GamesControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
-  test "should get new when signed in" do
+  test "non-admin redirected from /games/new" do
     sign_in_as @alice
+    get new_game_url
+    assert_redirected_to root_path
+  end
+
+  test "admin can get /games/new" do
+    sign_in_as @admin
     get new_game_url
     assert_response :success
   end
