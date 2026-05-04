@@ -2,28 +2,40 @@ alice_round1:
   game: one
   image: one
   position: 1
+  answer_latitude: 9.99
+  answer_longitude: 9.99
 
 alice_round2:
   game: one
   image: two
   position: 2
+  answer_latitude: 9.99
+  answer_longitude: 9.99
 
 alice_round3:
   game: one
   image: three
   position: 3
+  answer_latitude: 9.99
+  answer_longitude: 9.99
 
 alice_round4:
   game: one
   image: four
   position: 4
+  answer_latitude: 9.99
+  answer_longitude: 9.99
 
 alice_round5:
   game: one
   image: five
   position: 5
+  answer_latitude: 9.99
+  answer_longitude: 9.99
 
 bob_round1:
   game: two
   image: one
   position: 1
+  answer_latitude: 9.99
+  answer_longitude: 9.99

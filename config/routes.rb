@@ -13,6 +13,14 @@ Rails.application.routes.draw do
   resources :images do
     collection { get :map }
   end
+  resources :image_sets do
+    member do
+      get  :locations
+      put  :locations, action: :update_locations
+      post :add_image
+      post :bulk_upload
+    end
+  end
   get "practice", to: "practice#show"
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 

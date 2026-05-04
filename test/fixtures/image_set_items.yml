@@ -1,0 +1,65 @@
+default_one:
+  image_set: default
+  image: one
+  latitude: 9.99
+  longitude: 9.99
+
+default_two:
+  image_set: default
+  image: two
+  latitude: 9.99
+  longitude: 9.99
+
+default_three:
+  image_set: default
+  image: three
+  latitude: 9.99
+  longitude: 9.99
+
+default_four:
+  image_set: default
+  image: four
+  latitude: 9.99
+  longitude: 9.99
+
+default_five:
+  image_set: default
+  image: five
+  latitude: 9.99
+  longitude: 9.99
+
+alice_private_one:
+  image_set: alice_private
+  image: one
+  latitude: 1.0
+  longitude: 2.0
+
+alice_public_one:
+  image_set: alice_public
+  image: one
+  latitude: 9.99
+  longitude: 9.99
+
+alice_public_two:
+  image_set: alice_public
+  image: two
+  latitude: 9.99
+  longitude: 9.99
+
+alice_public_three:
+  image_set: alice_public
+  image: three
+  latitude: 9.99
+  longitude: 9.99
+
+alice_public_four:
+  image_set: alice_public
+  image: four
+  latitude: 9.99
+  longitude: 9.99
+
+alice_public_five:
+  image_set: alice_public
+  image: five
+  latitude: 9.99
+  longitude: 9.99

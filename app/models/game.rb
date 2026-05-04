@@ -4,6 +4,7 @@ class Game < ApplicationRecord
   GEOGUESSR_DECAY_METERS = 1492.7
 
   belongs_to :user
+  belongs_to :image_set, optional: true
   has_many :guesses, dependent: :destroy
   has_many :game_images, -> { order(:position) }, dependent: :destroy
   has_many :images, through: :game_images
@@ -13,7 +14,12 @@ class Game < ApplicationRecord
   scope :leaderboard, ->(sort: "score", direction: "desc") {
     sort = "score" unless LEADERBOARD_SORTS.include?(sort)
     direction = direction == "asc" ? :asc : :desc
-    where.not(completed_at: nil).includes(:user).order(sort => direction).limit(20)
+    joins(:image_set)
+      .where(image_sets: { is_system_default: true })
+      .where.not(completed_at: nil)
+      .includes(:user)
+      .order(sort => direction)
+      .limit(20)
   }
 
   def self.geoguessr_round_score(distance_km)

@@ -1,0 +1,13 @@
+<% content_for :title, "Edit #{@image_set.name}" %>
+
+<div class="w-full max-w-lg mx-auto space-y-6 py-6">
+  <h1 class="text-3xl font-bold">Edit Image Set</h1>
+  <%= render "form", image_set: @image_set %>
+
+  <div class="flex items-center justify-between pt-2">
+    <%= link_to "Cancel", @image_set, class: "text-sm text-gray-500 hover:text-gray-700" %>
+    <%= button_to "Delete set", @image_set, method: :delete,
+          data: { confirm: "Delete '#{@image_set.name}' and all its items? This cannot be undone." },
+          class: "text-sm text-red-500 hover:text-red-700 cursor-pointer" %>
+  </div>
+</div>

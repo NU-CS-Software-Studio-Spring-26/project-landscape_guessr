@@ -22,7 +22,7 @@
          data-game-game-path-value="<%= game_path(@game) %>"
          class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <div>
-        <img src="<%= @image.url %>?width=800" alt="Guess this location"
+        <img src="<%= image_src(@image, width: 800) %>" alt="Guess this location"
              class="w-full h-[60vh] object-cover rounded-md border border-gray-200">
       </div>
       <div class="space-y-3">
