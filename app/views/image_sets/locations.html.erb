@@ -40,23 +40,23 @@
         <div class="sm:col-span-2 space-y-1">
           <%= label_tag :file, "Image file", class: "block text-sm font-medium text-gray-700" %>
           <%= file_field_tag :file, accept: "image/*",
-                class: "block w-full text-sm text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-blue-600 file:px-3 file:py-1.5 file:text-white file:font-medium hover:file:bg-blue-700 cursor-pointer" %>
+                class: "block w-full text-sm text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-blue-600 file:px-3 file:py-1.5 file:text-white file:font-medium hover:file:bg-blue-500 cursor-pointer" %>
         </div>
         <div class="space-y-1">
           <%= label_tag :title, "Title (optional — defaults to filename)", class: "block text-sm font-medium text-gray-700" %>
           <%= text_field_tag :title, nil, placeholder: "My Location",
-                class: "block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" %>
+                class: "form-input mt-0 text-sm" %>
         </div>
         <div class="grid grid-cols-2 gap-2">
           <div class="space-y-1">
             <%= label_tag :latitude, "Latitude", class: "block text-sm font-medium text-gray-700" %>
             <%= number_field_tag :latitude, nil, step: "any", placeholder: "0.000",
-                  class: "block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" %>
+                  class: "form-input mt-0 text-sm" %>
           </div>
           <div class="space-y-1">
             <%= label_tag :longitude, "Longitude", class: "block text-sm font-medium text-gray-700" %>
             <%= number_field_tag :longitude, nil, step: "any", placeholder: "0.000",
-                  class: "block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" %>
+                  class: "form-input mt-0 text-sm" %>
           </div>
         </div>
         <div class="sm:col-span-2">
@@ -72,23 +72,23 @@
         <div class="sm:col-span-2 space-y-1">
           <%= label_tag :url, "Image URL", class: "block text-sm font-medium text-gray-700" %>
           <%= text_field_tag :url, nil, placeholder: "https://…",
-                class: "block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" %>
+                class: "form-input mt-0 text-sm" %>
         </div>
         <div class="space-y-1">
           <%= label_tag :title, "Title (optional)", class: "block text-sm font-medium text-gray-700" %>
           <%= text_field_tag :title, nil, placeholder: "My Location",
-                class: "block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" %>
+                class: "form-input mt-0 text-sm" %>
         </div>
         <div class="grid grid-cols-2 gap-2">
           <div class="space-y-1">
             <%= label_tag :latitude, "Latitude", class: "block text-sm font-medium text-gray-700" %>
             <%= number_field_tag :latitude, nil, step: "any", placeholder: "0.000",
-                  class: "block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" %>
+                  class: "form-input mt-0 text-sm" %>
           </div>
           <div class="space-y-1">
             <%= label_tag :longitude, "Longitude", class: "block text-sm font-medium text-gray-700" %>
             <%= number_field_tag :longitude, nil, step: "any", placeholder: "0.000",
-                  class: "block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" %>
+                  class: "form-input mt-0 text-sm" %>
           </div>
         </div>
         <div class="sm:col-span-2">
@@ -111,10 +111,10 @@
       <div class="flex-1 space-y-1 w-full">
         <%= label_tag "files[]", "Image files", class: "block text-sm font-medium text-gray-700" %>
         <%= file_field_tag "files[]", multiple: true, accept: "image/*",
-              class: "block w-full text-sm text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-gray-700 file:px-3 file:py-1.5 file:text-white file:font-medium hover:file:bg-gray-800 cursor-pointer" %>
+              class: "block w-full text-sm text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-blue-600 file:px-3 file:py-1.5 file:text-white file:font-medium hover:file:bg-blue-500 cursor-pointer" %>
       </div>
       <%= submit_tag "Upload all",
-            class: "rounded-md px-4 py-2 bg-gray-700 hover:bg-gray-800 text-white font-medium cursor-pointer shrink-0" %>
+            class: "btn-primary shrink-0" %>
     <% end %>
   </div>
 

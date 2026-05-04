@@ -16,7 +16,7 @@
     <% end %>
 
     <div class="ml-auto flex items-center gap-2">
-      <label for="sort_dir" class="text-xs text-gray-500">Sort by</label>
+      <label for="sort_dir" class="muted">Sort by</label>
       <%= select_tag :sort_dir,
             options_for_select(
               [
@@ -28,7 +28,7 @@
               games_path(status: @status, sort: @sort, direction: @direction)
             ),
             onchange: "window.location = this.value",
-            class: "rounded-md border border-gray-300 px-2 py-1 text-xs cursor-pointer" %>
+            class: "rounded-md border border-gray-300 px-3 py-1.5 text-sm cursor-pointer" %>
     </div>
   </div>
 
