@@ -132,6 +132,8 @@ class ImageSetsController < ApplicationController
   end
 
   # POST /image_sets/1/bulk_upload
+  BULK_UPLOAD_CONCURRENCY = 4
+
   def bulk_upload
     files = Array(params[:files]).select(&:present?)
 
@@ -139,25 +141,36 @@ class ImageSetsController < ApplicationController
       redirect_to locations_image_set_path(@image_set), alert: "No files selected." and return
     end
 
-    added = 0
-    errors = []
+    image_set_id = @image_set.id
+    added_counter = Concurrent::AtomicFixnum.new(0)
+    errors = Concurrent::Array.new
+    pool = Concurrent::FixedThreadPool.new(BULK_UPLOAD_CONCURRENCY)
 
     files.each do |file|
-      title = File.basename(file.original_filename, ".*").gsub(/[_-]+/, " ").titleize
-      gps = Image.gps_from_upload(file)
-      lat, lng = gps if gps
-      image = Image.create!(title: title, latitude: lat, longitude: lng)
-      image.photo.attach(Image.process_upload(file))
-      item = @image_set.image_set_items.find_or_initialize_by(image: image)
-      if item.new_record?
-        item.latitude  = lat
-        item.longitude = lng
-        item.save!
-        added += 1
+      pool.post do
+        ActiveRecord::Base.connection_pool.with_connection do
+          title = File.basename(file.original_filename, ".*").gsub(/[_-]+/, " ").titleize
+          gps = Image.gps_from_upload(file)
+          lat, lng = gps if gps
+          image = Image.create!(title: title, latitude: lat, longitude: lng)
+          image.photo.attach(Image.process_upload(file))
+          set = ImageSet.find(image_set_id)
+          item = set.image_set_items.find_or_initialize_by(image: image)
+          if item.new_record?
+            item.latitude  = lat
+            item.longitude = lng
+            item.save!
+            added_counter.increment
+          end
+        rescue => e
+          errors << "#{file.original_filename}: #{e.message}"
+        end
       end
-    rescue => e
-      errors << "#{file.original_filename}: #{e.message}"
     end
+
+    pool.shutdown
+    pool.wait_for_termination
+    added = added_counter.value
 
     if errors.any?
       redirect_to locations_image_set_path(@image_set),
