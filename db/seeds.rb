@@ -74,3 +74,21 @@ bindings.each do |b|
 end
 
 puts "Created #{Image.count - before} new images (#{Image.count} total); skipped #{skipped_non_photo} non-photos"
+
+# Ensure every Image is linked into the default set
+default_set = ImageSet.find_or_create_by!(is_system_default: true) do |s|
+  s.name = "Default Landscapes"
+  s.visibility = "public"
+end
+
+linked = 0
+Image.find_each do |img|
+  item = default_set.image_set_items.find_or_initialize_by(image: img)
+  if item.new_record?
+    item.latitude  = img.latitude
+    item.longitude = img.longitude
+    item.save!
+    linked += 1
+  end
+end
+puts "Linked #{linked} new images into default set (#{default_set.image_set_items.count} total)"

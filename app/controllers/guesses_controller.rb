@@ -22,11 +22,12 @@ class GuessesController < ApplicationController
 
   # POST /guesses or /guesses.json
   def create
-    game = Current.user.games.find(params.dig(:guess, :game_id))
+    game = Current.user.games.includes(:game_images).find(params.dig(:guess, :game_id))
     @guess = game.guesses.new(guess_params.except(:game_id))
 
     respond_to do |format|
       if @guess.save
+        @guess = @guess.game.guesses.includes(:image, game: :game_images).find(@guess.id)
         format.html { redirect_to game_path(@guess.game_id), notice: "Guess recorded." }
         format.json { render :show, status: :created, location: @guess }
       else

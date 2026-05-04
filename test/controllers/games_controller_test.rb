@@ -85,4 +85,40 @@ class GamesControllerTest < ActionDispatch::IntegrationTest
     get edit_game_url(admin_game)
     assert_response :success
   end
+
+  test "create game uses default image set when no image_set_id given" do
+    sign_in_as @alice
+    post games_url
+    game = Game.order(:created_at).last
+    assert game.image_set.is_system_default?
+  end
+
+  test "create game uses specified public set" do
+    sign_in_as @alice
+    set = image_sets(:alice_public)
+    assert_difference -> { Game.count } => 1 do
+      post games_url, params: { image_set_id: set.id }
+    end
+    assert_redirected_to game_url(Game.last)
+    assert_equal set, Game.last.image_set
+  end
+
+  test "create game rejects private set owned by another user" do
+    sign_in_as @bob
+    set = image_sets(:alice_private)
+    assert_no_difference("Game.count") do
+      post games_url, params: { image_set_id: set.id }
+    end
+    assert_redirected_to root_path
+  end
+
+  test "game_images store answer snapshot coords" do
+    sign_in_as @alice
+    post games_url
+    game = Game.order(:created_at).last
+    game.game_images.each do |gi|
+      assert_not_nil gi.answer_latitude
+      assert_not_nil gi.answer_longitude
+    end
+  end
 end

@@ -1,0 +1,35 @@
+<% content_for :title, "Image Sets" %>
+
+<div class="w-full max-w-3xl mx-auto space-y-8 py-6">
+
+  <div class="flex items-center justify-between">
+    <h1 class="text-3xl font-bold">Image Sets</h1>
+    <%= link_to "New set", new_image_set_path,
+          class: "rounded-md px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium" %>
+  </div>
+
+  <%# My sets %>
+  <section class="space-y-3">
+    <h2 class="text-lg font-semibold text-gray-700">My Sets</h2>
+    <% if @my_sets.empty? %>
+      <p class="text-gray-500 text-sm">You haven't created any sets yet.</p>
+    <% else %>
+      <% @my_sets.each do |set| %>
+        <%= render "image_sets/set_card", set: set, show_owner_actions: true %>
+      <% end %>
+    <% end %>
+  </section>
+
+  <%# Public sets %>
+  <section class="space-y-3">
+    <h2 class="text-lg font-semibold text-gray-700">Public Sets</h2>
+    <% if @public_sets.empty? %>
+      <p class="text-gray-500 text-sm">No public sets yet.</p>
+    <% else %>
+      <% @public_sets.each do |set| %>
+        <%= render "image_sets/set_card", set: set, show_owner_actions: false %>
+      <% end %>
+    <% end %>
+  </section>
+
+</div>

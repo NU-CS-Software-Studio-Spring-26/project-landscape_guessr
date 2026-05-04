@@ -10,8 +10,14 @@ class ImagesController < ApplicationController
 
   # GET /images/map
   def map
-    @image_data = Image.pluck(:id, :latitude, :longitude, :title, :url).map do |id, lat, lng, title, url|
-      { id: id, lat: lat.to_f, lng: lng.to_f, title: title, url: url }
+    images = Image.with_attached_photo.all
+    @image_data = images.map do |img|
+      display_url = if img.photo.attached?
+        url_for(img.photo)
+      elsif img.url.present?
+        img.url
+      end
+      { id: img.id, lat: img.latitude.to_f, lng: img.longitude.to_f, title: img.title, url: display_url }
     end
   end
 
@@ -34,6 +40,13 @@ class ImagesController < ApplicationController
 
     respond_to do |format|
       if @image.save
+        default_set = ImageSet.default
+        if default_set
+          default_set.image_set_items.find_or_create_by!(image: @image) do |item|
+            item.latitude  = @image.latitude
+            item.longitude = @image.longitude
+          end
+        end
         format.html { redirect_to @image, notice: "Image was successfully created." }
         format.json { render :show, status: :created, location: @image }
       else

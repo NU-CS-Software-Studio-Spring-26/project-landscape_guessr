@@ -2,12 +2,14 @@
 
 one:
   user: alice
-  status: MyString
-  score: 1
+  image_set: default
+  status: completed
+  score: 100
   completed_at: 2026-04-17 14:24:20
 
 two:
   user: bob
-  status: MyString
-  score: 1
+  image_set: default
+  status: completed
+  score: 200
   completed_at: 2026-04-17 14:24:20

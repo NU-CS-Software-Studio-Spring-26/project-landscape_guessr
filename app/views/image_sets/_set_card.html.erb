@@ -1,0 +1,21 @@
+<div class="rounded-lg border border-gray-200 px-4 py-3 flex items-center justify-between gap-3">
+  <div class="min-w-0">
+    <%= link_to set.name, set, class: "font-medium text-gray-900 hover:text-blue-600 truncate block" %>
+    <p class="text-xs text-gray-500 mt-0.5">
+      <%= set.image_set_items.count %> images &middot;
+      <span class="<%= set.visibility == 'public' ? 'text-green-600' : 'text-gray-400' %>"><%= set.visibility %></span>
+    </p>
+  </div>
+  <div class="flex items-center gap-2 shrink-0">
+    <%= button_to "Play", games_path, method: :post,
+          params: { image_set_id: set.id },
+          data: { turbo: false },
+          class: "rounded-md px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium cursor-pointer" %>
+    <% if local_assigns[:show_owner_actions] %>
+      <%= link_to "Edit locations", locations_image_set_path(set),
+            class: "rounded-md px-3 py-1.5 bg-gray-100 hover:bg-gray-50 text-sm font-medium border border-gray-200" %>
+      <%= link_to "Settings", edit_image_set_path(set),
+            class: "rounded-md px-3 py-1.5 bg-gray-100 hover:bg-gray-50 text-sm font-medium border border-gray-200" %>
+    <% end %>
+  </div>
+</div>
