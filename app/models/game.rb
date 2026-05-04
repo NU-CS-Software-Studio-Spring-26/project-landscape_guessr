@@ -8,7 +8,13 @@ class Game < ApplicationRecord
   has_many :game_images, -> { order(:position) }, dependent: :destroy
   has_many :images, through: :game_images
 
-  scope :leaderboard, -> { where.not(completed_at: nil).includes(:user).order(score: :desc, completed_at: :asc).limit(20) }
+  LEADERBOARD_SORTS = %w[score completed_at].freeze
+
+  scope :leaderboard, ->(sort: "score", direction: "desc") {
+    sort = "score" unless LEADERBOARD_SORTS.include?(sort)
+    direction = direction == "asc" ? :asc : :desc
+    where.not(completed_at: nil).includes(:user).order(sort => direction).limit(20)
+  }
 
   def self.geoguessr_round_score(distance_km)
     metres = distance_km * 1000.0
