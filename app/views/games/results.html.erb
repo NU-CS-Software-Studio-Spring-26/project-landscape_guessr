@@ -1,14 +1,13 @@
 <% content_for :title, "Results — Game ##{@game.id}" %>
 <% content_for :head do %>
-  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.css" />
-  <script src="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.js"></script>
+  <%= render "shared/maplibre_assets" %>
 <% end %>
 
 <div class="w-full max-w-2xl mx-auto space-y-6 py-6">
 
   <%# Header %>
   <div class="text-center space-y-1">
-    <h1 class="text-3xl font-bold">Game Over!</h1>
+    <h1 class="heading-page">Game Over!</h1>
     <p class="text-gray-500">Here's how you did across <%= @total_rounds %> rounds.</p>
   </div>
 
@@ -39,7 +38,7 @@
 
   <%# Per-round breakdown %>
   <div class="space-y-3">
-    <h2 class="font-semibold text-lg">Round Breakdown</h2>
+    <h2 class="heading-section">Round Breakdown</h2>
     <% @rounds.each_with_index do |row, idx| %>
       <div class="rounded-lg border border-gray-200 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div>
@@ -68,15 +67,12 @@
 
   <%# Action buttons %>
   <div class="flex gap-3 pt-2">
-    <%= button_to "Play Again", games_path,
-          method: :post,
-          params: { image_set_id: @game.image_set_id },
-          data: { turbo: false },
-          class: "flex-1 rounded-md px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-center cursor-pointer" %>
+    <%= button_to "Play Again", games_path, method: :post,
+          params: { image_set_id: @game.image_set_id }, data: { turbo: false },
+          class: "btn-primary flex-1" %>
     <%= link_to "Leaderboard", leaderboard_games_path(image_set_id: @game.image_set_id),
-          class: "flex-1 rounded-md px-4 py-2.5 bg-gray-100 hover:bg-gray-50 font-medium text-center" %>
-    <%= link_to "Back to Games", games_path,
-          class: "flex-1 rounded-md px-4 py-2.5 bg-gray-100 hover:bg-gray-50 font-medium text-center" %>
+          class: "btn-secondary flex-1" %>
+    <%= link_to "Back to Games", games_path, class: "btn-secondary flex-1" %>
   </div>
 
 </div>

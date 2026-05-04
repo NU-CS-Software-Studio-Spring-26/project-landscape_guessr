@@ -3,14 +3,13 @@
 <div class="w-full max-w-3xl mx-auto space-y-8 py-6">
 
   <div class="flex items-center justify-between">
-    <h1 class="text-3xl font-bold">Image Sets</h1>
-    <%= link_to "New set", new_image_set_path,
-          class: "rounded-md px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium" %>
+    <h1 class="heading-page">Image Sets</h1>
+    <%= link_to "New set", new_image_set_path, class: "btn-primary" %>
   </div>
 
   <%# My sets %>
   <section class="space-y-3">
-    <h2 class="text-lg font-semibold text-gray-700">My Sets</h2>
+    <h2 class="heading-section">My Sets</h2>
     <% if @my_sets.empty? %>
       <p class="text-gray-500 text-sm">You haven't created any sets yet.</p>
     <% else %>
@@ -22,7 +21,7 @@
 
   <%# Public sets %>
   <section class="space-y-3">
-    <h2 class="text-lg font-semibold text-gray-700">Public Sets</h2>
+    <h2 class="heading-section">Public Sets</h2>
     <% if @public_sets.empty? %>
       <p class="text-gray-500 text-sm">No public sets yet.</p>
     <% else %>

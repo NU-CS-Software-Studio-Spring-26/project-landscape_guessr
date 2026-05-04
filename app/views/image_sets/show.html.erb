@@ -4,24 +4,21 @@
 
   <div class="flex items-start justify-between gap-4">
     <div>
-      <h1 class="text-3xl font-bold"><%= @image_set.name %></h1>
-      <p class="text-sm text-gray-500 mt-1">
+      <h1 class="heading-page"><%= @image_set.name %></h1>
+      <p class="muted mt-1">
         <%= @items.size %> images &middot;
         <span class="<%= @image_set.visibility == 'public' ? 'text-green-600' : 'text-gray-400' %>"><%= @image_set.visibility %></span>
       </p>
     </div>
     <div class="flex gap-2 shrink-0">
       <%= button_to "Play this set", games_path, method: :post,
-            params: { image_set_id: @image_set.id },
-            data: { turbo: false },
-            class: "rounded-md px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium cursor-pointer" %>
+            params: { image_set_id: @image_set.id }, data: { turbo: false },
+            class: "btn-primary" %>
       <%= link_to "Leaderboard", leaderboard_games_path(image_set_id: @image_set.id),
-            class: "rounded-md px-4 py-2 bg-gray-100 hover:bg-gray-50 font-medium border border-gray-200" %>
+            class: "btn-secondary" %>
       <% if @image_set.owned_by?(Current.user) %>
-        <%= link_to "Edit locations", locations_image_set_path(@image_set),
-              class: "rounded-md px-4 py-2 bg-gray-100 hover:bg-gray-50 font-medium border border-gray-200" %>
-        <%= link_to "Settings", edit_image_set_path(@image_set),
-              class: "rounded-md px-4 py-2 bg-gray-100 hover:bg-gray-50 font-medium border border-gray-200" %>
+        <%= link_to "Edit locations", locations_image_set_path(@image_set), class: "btn-secondary" %>
+        <%= link_to "Settings",       edit_image_set_path(@image_set),      class: "btn-secondary" %>
       <% end %>
     </div>
   </div>
@@ -55,5 +52,5 @@
     </div>
   <% end %>
 
-  <%= link_to "Back to sets", image_sets_path, class: "text-sm text-gray-500 hover:text-gray-700" %>
+  <%= link_to "Back to sets", image_sets_path, class: "btn-ghost" %>
 </div>

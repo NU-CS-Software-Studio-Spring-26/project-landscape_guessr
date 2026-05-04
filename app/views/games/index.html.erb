@@ -2,40 +2,35 @@
 
 <div class="w-full">
   <div class="flex justify-between items-center">
-    <h1 class="font-bold text-4xl">Games</h1>
+    <h1 class="heading-page">Games</h1>
     <div class="flex space-x-2">
-      <%= link_to "Leaderboard", leaderboard_games_path, class: "rounded-md px-3.5 py-2.5 bg-gray-100 hover:bg-gray-50 font-medium" %>
-      <%= button_to "New game", games_path, method: :post, data: { turbo: false },
-            class: "rounded-md px-3.5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white block font-medium cursor-pointer" %>
+      <%= link_to "Leaderboard", leaderboard_games_path, class: "btn-secondary" %>
+      <%= button_to "New game", games_path, method: :post, data: { turbo: false }, class: "btn-primary" %>
     </div>
   </div>
 
-  <%= form_with url: games_path, method: :get, local: true,
-        class: "flex flex-wrap items-end gap-3 mt-6 mb-4" do |f| %>
-    <div>
-      <%= f.label :status, "Status", class: "block text-xs font-medium text-gray-500 uppercase tracking-wide" %>
-      <%= f.select :status,
-            [["All", "all"], ["In progress", "in_progress"], ["Completed", "completed"]],
-            { selected: @status },
-            class: "mt-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm" %>
+  <div class="flex flex-wrap items-center gap-2 mt-6 mb-4 text-sm">
+    <% [["All", "all"], ["In progress", "in_progress"], ["Completed", "completed"]].each do |label, value| %>
+      <%= link_to label, games_path(status: value, sort: @sort, direction: @direction),
+            class: "rounded-full px-3 py-1 text-xs font-medium #{@status == value ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}" %>
+    <% end %>
+
+    <div class="ml-auto flex items-center gap-2">
+      <label for="sort_dir" class="text-xs text-gray-500">Sort by</label>
+      <%= select_tag :sort_dir,
+            options_for_select(
+              [
+                ["Newest first",  games_path(status: @status, sort: "created_at", direction: "desc")],
+                ["Oldest first",  games_path(status: @status, sort: "created_at", direction: "asc")],
+                ["Highest score", games_path(status: @status, sort: "score",      direction: "desc")],
+                ["Lowest score",  games_path(status: @status, sort: "score",      direction: "asc")]
+              ],
+              games_path(status: @status, sort: @sort, direction: @direction)
+            ),
+            onchange: "window.location = this.value",
+            class: "rounded-md border border-gray-300 px-2 py-1 text-xs cursor-pointer" %>
     </div>
-    <div>
-      <%= f.label :sort, "Sort by", class: "block text-xs font-medium text-gray-500 uppercase tracking-wide" %>
-      <%= f.select :sort,
-            [["Date", "created_at"], ["Score", "score"]],
-            { selected: @sort },
-            class: "mt-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm" %>
-    </div>
-    <div>
-      <%= f.label :direction, "Order", class: "block text-xs font-medium text-gray-500 uppercase tracking-wide" %>
-      <%= f.select :direction,
-            [["Newest / highest first", "desc"], ["Oldest / lowest first", "asc"]],
-            { selected: @direction },
-            class: "mt-1 rounded-md border border-gray-300 px-2 py-1.5 text-sm" %>
-    </div>
-    <%= f.submit "Apply",
-          class: "rounded-md px-3.5 py-1.5 bg-gray-100 hover:bg-gray-50 text-sm font-medium border border-gray-200 cursor-pointer" %>
-  <% end %>
+  </div>
 
   <div id="games" class="min-w-full divide-y divide-gray-200 space-y-5">
     <% if @games.any? %>
@@ -43,11 +38,13 @@
         <div class="flex flex-col sm:flex-row justify-between items-center pb-5 sm:pb-0">
           <%= render game %>
           <div class="w-full sm:w-auto flex flex-col sm:flex-row space-x-2 space-y-2">
-            <%= link_to "Show", game, class: "w-full sm:w-auto text-center rounded-md px-3.5 py-2.5 bg-gray-100 hover:bg-gray-50 inline-block font-medium" %>
+            <%= link_to "Show", game, class: "btn-secondary w-full sm:w-auto" %>
             <% if admin? %>
-              <%= link_to "Edit", edit_game_path(game), class: "w-full sm:w-auto text-center rounded-md px-3.5 py-2.5 bg-gray-100 hover:bg-gray-50 inline-block font-medium" %>
+              <%= link_to "Edit", edit_game_path(game), class: "btn-secondary w-full sm:w-auto" %>
             <% end %>
-            <%= button_to "Destroy", game, method: :delete, class: "w-full sm:w-auto rounded-md px-3.5 py-2.5 text-white bg-red-600 hover:bg-red-500 font-medium cursor-pointer", data: { turbo_confirm: "Are you sure?" } %>
+            <%= button_to "Destroy", game, method: :delete,
+                  data: { turbo_confirm: "Are you sure?" },
+                  class: "btn-danger w-full sm:w-auto" %>
           </div>
         </div>
       <% end %>

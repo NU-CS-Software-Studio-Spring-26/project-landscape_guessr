@@ -2,17 +2,15 @@
 
 <div class="w-full max-w-lg mx-auto space-y-8 text-center">
   <div class="space-y-2">
-    <h1 class="font-bold text-4xl">Landscape Guessr</h1>
+    <h1 class="heading-hero">Landscape Guessr</h1>
     <p class="text-gray-600">Guess the location of natural landmarks around the world.</p>
   </div>
 
   <% if authenticated? %>
     <div class="flex flex-col gap-3 items-center">
       <div class="flex flex-col items-center gap-1">
-        <%= button_to "Start new game", games_path,
-            method: :post,
-            data: { turbo: false },
-            class: "w-56 rounded-md px-3.5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium text-center cursor-pointer" %>
+        <%= button_to "Start new game", games_path, method: :post, data: { turbo: false },
+              class: "btn-primary w-56" %>
         <% if @default_set %>
           <p class="text-xs text-gray-500">
             on <%= @default_set.name %> &middot;
@@ -20,19 +18,14 @@
           </p>
         <% end %>
       </div>
-      <%= link_to "Previous games", games_path,
-          class: "w-56 rounded-md px-3.5 py-2.5 bg-gray-100 hover:bg-gray-50 font-medium text-center border border-gray-200" %>
-      <%= link_to "Practice", practice_path,
-          class: "w-56 rounded-md px-3.5 py-2.5 bg-gray-100 hover:bg-gray-50 font-medium text-center border border-gray-200" %>
-      <%= link_to "Image Sets", image_sets_path,
-          class: "w-56 rounded-md px-3.5 py-2.5 bg-gray-100 hover:bg-gray-50 font-medium text-center border border-gray-200" %>
+      <%= link_to "Previous games", games_path, class: "btn-secondary w-56" %>
+      <%= link_to "Practice",       practice_path,  class: "btn-secondary w-56" %>
+      <%= link_to "Image Sets",     image_sets_path, class: "btn-secondary w-56" %>
     </div>
   <% else %>
     <div class="flex flex-col gap-3 items-center">
-      <%= link_to "Sign up to play", new_registration_path,
-          class: "w-56 rounded-md px-3.5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium text-center" %>
-      <%= link_to "Sign in", new_session_path,
-          class: "w-56 rounded-md px-3.5 py-2.5 bg-gray-100 hover:bg-gray-50 font-medium text-center border border-gray-200" %>
+      <%= link_to "Sign up to play", new_registration_path, class: "btn-primary w-56" %>
+      <%= link_to "Sign in",         new_session_path,      class: "btn-secondary w-56" %>
       <p class="text-xs text-gray-500 pt-2">
         or <%= link_to "try practice mode", practice_path, class: "underline hover:text-blue-600" %> without an account
       </p>

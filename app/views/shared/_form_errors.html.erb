@@ -1,0 +1,12 @@
+<%# Renders the validation-errors block for any model that responds to .errors.
+    Usage: <%%= render "shared/form_errors", record: @user %> %>
+<% if record.errors.any? %>
+  <div class="bg-red-50 text-red-500 px-3 py-2 font-medium rounded-md mt-3">
+    <h2><%= pluralize(record.errors.count, "error") %> prohibited this <%= record.class.model_name.human.downcase %> from being saved:</h2>
+    <ul class="list-disc ml-6">
+      <% record.errors.each do |error| %>
+        <li><%= error.full_message %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
