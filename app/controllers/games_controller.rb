@@ -102,7 +102,7 @@ class GamesController < ApplicationController
       {
         guess: guess,
         distance_km: dist_km.round,
-        round_score: geoguessr_round_score(dist_km)
+        round_score: Game.geoguessr_round_score(dist_km)
       }
     end
 
@@ -116,13 +116,6 @@ class GamesController < ApplicationController
   end
 
   private
-    # GeoGuessr classic: max 5000 points per round; distance in metres with decay constant ~1492.7 m.
-    # score_round = round(5000 * exp(-distance_m / 1492.7))
-    def geoguessr_round_score(distance_km)
-      metres = distance_km * 1000.0
-      (5000 * Math.exp(-metres / 1492.7)).round.clamp(0, 5000)
-    end
-
     # Use callbacks to share common setup or constraints between actions.
     def set_game
       @game = Current.user.games.find(params.expect(:id))
