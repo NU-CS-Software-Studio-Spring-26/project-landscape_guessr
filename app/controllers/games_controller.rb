@@ -99,18 +99,30 @@ class GamesController < ApplicationController
         guess.latitude.to_f,  guess.longitude.to_f,
         guess.image.latitude.to_f, guess.image.longitude.to_f
       )
-      { guess: guess, distance_km: dist_km.round }
+      {
+        guess: guess,
+        distance_km: dist_km.round,
+        round_score: geoguessr_round_score(dist_km)
+      }
     end
 
     @total_distance_km = @rounds.sum { |r| r[:distance_km] }
+    @score = @rounds.sum { |r| r[:round_score] }
     @total_rounds = TOTAL_ROUNDS
 
     if @game.status != "completed"
-      @game.update!(status: "completed", score: @total_distance_km, completed_at: Time.current)
+      @game.update!(status: "completed", score: @score, completed_at: Time.current)
     end
   end
 
   private
+    # GeoGuessr classic: max 5000 points per round; distance in metres with decay constant ~1492.7 m.
+    # score_round = round(5000 * exp(-distance_m / 1492.7))
+    def geoguessr_round_score(distance_km)
+      metres = distance_km * 1000.0
+      (5000 * Math.exp(-metres / 1492.7)).round.clamp(0, 5000)
+    end
+
     # Use callbacks to share common setup or constraints between actions.
     def set_game
       @game = Current.user.games.find(params.expect(:id))
