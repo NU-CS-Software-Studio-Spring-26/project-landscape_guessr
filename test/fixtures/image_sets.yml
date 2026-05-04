@@ -1,0 +1,17 @@
+default:
+  name: Default Landscapes
+  user_id:
+  visibility: public
+  is_system_default: true
+
+alice_private:
+  name: Alice's Private Set
+  user: alice
+  visibility: private
+  is_system_default: false
+
+alice_public:
+  name: Alice's Public Set
+  user: alice
+  visibility: public
+  is_system_default: false

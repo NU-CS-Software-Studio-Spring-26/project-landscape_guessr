@@ -1,4 +1,8 @@
 <% content_for :title, "Results — Game ##{@game.id}" %>
+<% content_for :head do %>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.css" />
+  <script src="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.js"></script>
+<% end %>
 
 <div class="w-full max-w-2xl mx-auto space-y-6 py-6">
 
@@ -8,11 +12,29 @@
     <p class="text-gray-500">Here's how you did across <%= @total_rounds %> rounds.</p>
   </div>
 
-  <%# Total distance card %>
+  <%# Total score card %>
   <div class="rounded-xl border border-gray-200 bg-gray-50 px-6 py-5 text-center">
-    <p class="text-sm font-medium text-gray-500 uppercase tracking-wide">Total Distance</p>
-    <p class="text-5xl font-bold text-blue-600 mt-1"><%= number_with_delimiter(@total_distance_km) %> km</p>
-    <p class="text-xs text-gray-400 mt-1">Lower is better</p>
+    <p class="text-sm font-medium text-gray-500 uppercase tracking-wide">Total Score</p>
+    <p class="text-5xl font-bold text-blue-600 mt-1"><%= number_with_delimiter(@score) %></p>
+    <p class="text-xs text-gray-500 mt-1">
+      out of <%= number_with_delimiter(@total_rounds * Game::GEOGUESSR_MAX_ROUND_SCORE) %>
+      &middot; total distance <%= number_with_delimiter(@total_distance_km) %> km
+    </p>
+  </div>
+
+  <%# Summary map %>
+  <div data-controller="results-map"
+       data-results-map-rounds-value="<%= @map_rounds.to_json %>"
+       class="rounded-xl border border-gray-200 overflow-hidden">
+    <div class="px-4 py-2.5 border-b border-gray-200 bg-gray-50 flex items-center gap-2">
+      <span class="text-xs font-medium text-gray-600 uppercase tracking-wide">Map</span>
+      <span class="text-xs text-gray-400">&mdash;</span>
+      <span class="flex items-center gap-1 text-xs text-gray-500">
+        <span class="inline-block w-2.5 h-2.5 rounded-full bg-red-400"></span> your guess
+        <span class="ml-2 inline-block w-2.5 h-2.5 rounded-full bg-green-500"></span> actual location
+      </span>
+    </div>
+    <div data-results-map-target="container" class="w-full h-72"></div>
   </div>
 
   <%# Per-round breakdown %>
@@ -26,11 +48,18 @@
           <p class="text-xs text-gray-500">
             Your guess: <%= row[:guess].latitude.to_f.round(3) %>, <%= row[:guess].longitude.to_f.round(3) %>
           </p>
+          <p class="text-xs text-gray-400">
+            Actual: <%= row[:answer_lat].to_f.round(3) %>, <%= row[:answer_lng].to_f.round(3) %>
+          </p>
         </div>
         <div class="flex gap-4 sm:text-right shrink-0">
           <div>
+            <p class="text-xs text-gray-400">Score</p>
+            <p class="font-semibold text-blue-600"><%= number_with_delimiter(row[:round_score]) %></p>
+          </div>
+          <div>
             <p class="text-xs text-gray-400">Distance</p>
-            <p class="font-semibold text-gray-700"><%= number_with_delimiter(row[:distance_km]) %> km</p>
+            <p class="font-medium text-gray-600"><%= number_with_delimiter(row[:distance_km]) %> km</p>
           </div>
         </div>
       </div>
