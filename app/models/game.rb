@@ -12,11 +12,10 @@ class Game < ApplicationRecord
 
   LEADERBOARD_SORTS = %w[score completed_at].freeze
 
-  scope :leaderboard, ->(sort: "score", direction: "desc") {
+  scope :leaderboard, ->(image_set:, sort: "score", direction: "desc") {
     sort = "score" unless LEADERBOARD_SORTS.include?(sort)
     direction = direction == "asc" ? :asc : :desc
-    joins(:image_set)
-      .where(image_sets: { is_system_default: true })
+    where(image_set: image_set)
       .where.not(completed_at: nil)
       .includes(:user)
       .order(sort => direction)

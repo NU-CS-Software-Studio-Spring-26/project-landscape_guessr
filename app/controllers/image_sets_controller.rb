@@ -1,6 +1,6 @@
 class ImageSetsController < ApplicationController
-  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image bulk_upload]
-  before_action :require_owner, only: %i[edit update destroy locations update_locations add_image bulk_upload]
+  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image bulk_upload remove_item]
+  before_action :require_owner, only: %i[edit update destroy locations update_locations add_image bulk_upload remove_item]
 
   # GET /image_sets
   def index
@@ -11,6 +11,8 @@ class ImageSetsController < ApplicationController
   # GET /image_sets/1
   def show
     @items = @image_set.image_set_items.includes(:image).order("images.title")
+    @leaderboard = Game.leaderboard(image_set: @image_set)
+    @total_rounds = GamesController::TOTAL_ROUNDS
   end
 
   # GET /image_sets/new
@@ -111,6 +113,17 @@ class ImageSetsController < ApplicationController
       redirect_to locations_image_set_path(@image_set), notice: "Image added to set."
     else
       redirect_to locations_image_set_path(@image_set), alert: "That image is already in this set."
+    end
+  end
+
+  # DELETE /image_sets/1/items/123
+  def remove_item
+    item = @image_set.image_set_items.find_by(id: params[:item_id])
+    if item
+      item.destroy
+      redirect_back fallback_location: @image_set, notice: "Image removed from set."
+    else
+      redirect_back fallback_location: @image_set, alert: "Image not found in this set."
     end
   end
 

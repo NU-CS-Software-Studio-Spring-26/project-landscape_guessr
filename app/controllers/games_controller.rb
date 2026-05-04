@@ -12,7 +12,8 @@ class GamesController < ApplicationController
 
   # GET /games/leaderboard
   def leaderboard
-    @games = Game.leaderboard(sort: params[:sort], direction: params[:direction])
+    @image_set = ImageSet.default
+    @games = Game.leaderboard(image_set: @image_set, sort: params[:sort], direction: params[:direction])
     @total_rounds = TOTAL_ROUNDS
   end
 

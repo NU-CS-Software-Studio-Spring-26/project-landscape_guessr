@@ -11,6 +11,8 @@
           params: { image_set_id: set.id },
           data: { turbo: false },
           class: "rounded-md px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium cursor-pointer" %>
+    <%= link_to "Leaderboard", image_set_path(set, anchor: "leaderboard"),
+          class: "rounded-md px-3 py-1.5 bg-gray-100 hover:bg-gray-50 text-sm font-medium border border-gray-200" %>
     <% if local_assigns[:show_owner_actions] %>
       <%= link_to "Edit locations", locations_image_set_path(set),
             class: "rounded-md px-3 py-1.5 bg-gray-100 hover:bg-gray-50 text-sm font-medium border border-gray-200" %>
