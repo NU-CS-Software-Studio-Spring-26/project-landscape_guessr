@@ -39,8 +39,14 @@ export default class extends Controller {
     xhr.responseType = "text"
 
     xhr.upload.addEventListener("progress", (e) => {
-      if (e.lengthComputable) {
-        const pct = Math.round((e.loaded / e.total) * 100)
+      if (!e.lengthComputable) return
+      const pct = Math.round((e.loaded / e.total) * 100)
+      // Transition to processing as soon as bytes are done. We can't rely
+      // on xhr.upload.load alone — for large bodies it can fire much later
+      // than the last progress event, leaving the UI stuck at "100%".
+      if (pct >= 100) {
+        this.#setStage("processing", 100)
+      } else {
         this.#setStage("uploading", pct)
       }
     })
@@ -87,6 +93,8 @@ export default class extends Controller {
 
   #setStage(stage, pct) {
     if (!this.overlay) return
+    if (this.stage === stage && stage === "processing") return  // idempotent
+    this.stage = stage
     if (stage === "uploading") {
       this.spinnerEl.classList.add("hidden")
       this.barEl.classList.remove("animate-pulse")

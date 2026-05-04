@@ -66,7 +66,7 @@ class Image < ApplicationRecord
     processed = ImageProcessing::Vips
       .source(file.path)
       .resize_to_limit(PROCESSED_MAX_DIMENSION, PROCESSED_MAX_DIMENSION)
-      .colourspace("srgb")
+      .icc_transform("srgb", embedded: true)
       .convert("jpg")
       .saver(quality: PROCESSED_QUALITY, strip: true)
       .call
