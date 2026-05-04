@@ -3,7 +3,7 @@ module GamesHelper
     active = (params[:sort].presence || "score") == column
     desc   = (params[:direction].presence || "desc") == "desc"
     arrow  = active ? (desc ? " ▼" : " ▲") : ""
-    link_to "#{label}#{arrow}", leaderboard_games_path(sort: column, direction: active && desc ? "asc" : "desc"),
+    link_to "#{label}#{arrow}", leaderboard_games_path(sort: column, direction: active && desc ? "asc" : "desc", image_set_id: params[:image_set_id]),
             class: "hover:underline"
   end
 end

@@ -12,7 +12,16 @@ class GamesController < ApplicationController
 
   # GET /games/leaderboard
   def leaderboard
-    @image_set = ImageSet.default
+    @image_set =
+      if params[:image_set_id].present?
+        set = ImageSet.find_by(id: params[:image_set_id])
+        unless set && (set.is_system_default? || set.visibility == "public" || set.owned_by?(Current.user))
+          redirect_to image_sets_path, alert: "That set is private." and return
+        end
+        set
+      else
+        ImageSet.default
+      end
     @games = Game.leaderboard(image_set: @image_set, sort: params[:sort], direction: params[:direction])
     @total_rounds = TOTAL_ROUNDS
   end

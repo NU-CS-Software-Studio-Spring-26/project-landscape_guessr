@@ -11,8 +11,6 @@ class ImageSetsController < ApplicationController
   # GET /image_sets/1
   def show
     @items = @image_set.image_set_items.includes(:image).order("images.title")
-    @leaderboard = Game.leaderboard(image_set: @image_set)
-    @total_rounds = GamesController::TOTAL_ROUNDS
   end
 
   # GET /image_sets/new
