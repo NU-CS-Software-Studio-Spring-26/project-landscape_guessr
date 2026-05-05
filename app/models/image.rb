@@ -52,8 +52,13 @@ class Image < ApplicationRecord
 
   # Read GPS coords from an upload's EXIF, or nil if absent/unreadable.
   # Accepts ActionDispatch::Http::UploadedFile or anything with #path.
-  # HEIC/HEIF: exifr can't parse them, so we transcode to a throwaway JPEG
-  # with metadata preserved (saver strip: false) and read GPS from that.
+  #
+  # HEIC/HEIF: tries a fast path first — vips's heif loader exposes the
+  # embedded EXIF as raw bytes via image.get("exif-data"), so we can hand
+  # those to exifr without decoding any pixels (huge memory + speed win
+  # on the bulk-upload path). If the fast path can't extract GPS for
+  # some reason, falls back to transcoding HEIC -> tempJPEG and reading
+  # via exifr/jpeg.
   def self.gps_from_upload(file)
     path = file.respond_to?(:path) ? file.path : file.to_s
     return nil unless path && File.exist?(path)
@@ -66,7 +71,8 @@ class Image < ApplicationRecord
       case ext
       when ".jpg", ".jpeg" then EXIFR::JPEG.new(path)
       when ".tif", ".tiff" then EXIFR::TIFF.new(path)
-      when ".heic", ".heif" then EXIFR::JPEG.new(heic_to_jpeg_with_exif(path))
+      when ".heic", ".heif"
+        heic_exif_parser_fast(path) || EXIFR::JPEG.new(heic_to_jpeg_with_exif(path))
       end
     gps = parser&.gps
     return nil unless gps&.latitude && gps&.longitude
@@ -75,9 +81,29 @@ class Image < ApplicationRecord
     nil
   end
 
+  # Fast path: read EXIF bytes directly out of a HEIC via libvips (no
+  # pixel decode, no transcode, no temp file) and parse them with
+  # EXIFR::TIFF. Returns nil — the caller will fall back to the slow
+  # path — on any error or if the heif loader didn't surface an EXIF
+  # block.
+  def self.heic_exif_parser_fast(path)
+    require "vips"
+    require "exifr/tiff"
+    img = Vips::Image.new_from_file(path)
+    return nil unless img.get_fields.include?("exif-data")
+    bytes = img.get("exif-data").b
+    # vips prefixes the EXIF payload with the standard "Exif\0\0" magic
+    # for JPEG-style EXIF; EXIFR::TIFF wants raw TIFF bytes after it.
+    bytes = bytes[6..] if bytes.start_with?("Exif\x00\x00".b)
+    return nil if bytes.nil? || bytes.bytesize < 8
+    EXIFR::TIFF.new(StringIO.new(bytes))
+  rescue StandardError
+    nil
+  end
+
   # Transcode a HEIC/HEIF to a temp JPEG with EXIF preserved, so exifr can
-  # read GPS out of it. Returns the temp file path. The OS reaps Tempfiles
-  # eventually; for an upload-time call we don't bother explicitly cleaning up.
+  # read GPS out of it. Returns the temp file path. Fallback for the rare
+  # HEIC where the fast path above can't surface EXIF.
   def self.heic_to_jpeg_with_exif(path)
     require "image_processing/vips"
     ImageProcessing::Vips
