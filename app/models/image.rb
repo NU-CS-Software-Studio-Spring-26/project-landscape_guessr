@@ -5,6 +5,22 @@ class Image < ApplicationRecord
   has_many :image_set_items, dependent: :destroy
   has_many :image_sets, through: :image_set_items
 
+  # Images visible to a given user: only those that live in at least one
+  # set the user is allowed to see (system_default, public, or owned).
+  # Pass nil for the unauthenticated case — they see only system_default
+  # and public sets.
+  scope :visible_to, ->(user) {
+    joins(:image_sets).merge(
+      ImageSet.where(is_system_default: true)
+              .or(ImageSet.where(visibility: "public"))
+              .or(ImageSet.where(user_id: user&.id))
+    ).distinct
+  }
+
+  def visible_to?(user)
+    image_sets.any? { |s| s.is_system_default? || s.visibility == "public" || s.user_id == user&.id }
+  end
+
   # Destroy this image (and its S3 blob via has_one_attached purge_later)
   # if no record still references it. Called from ImageSetItem and
   # GameImage after_destroy hooks so removing an image's last set
