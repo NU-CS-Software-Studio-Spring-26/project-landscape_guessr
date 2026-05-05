@@ -17,7 +17,7 @@
       <%= link_to "Leaderboard", leaderboard_games_path(image_set_id: @image_set.id),
             class: "btn-secondary" %>
       <%= link_to "Map", map_image_set_path(@image_set),
-            class: "btn-secondary", data: { turbo: false } %>
+            class: "btn-secondary" %>
       <% if @image_set.owned_by?(Current.user) %>
         <%= link_to "Manage images", locations_image_set_path(@image_set), class: "btn-secondary" %>
         <%= link_to "Settings",       edit_image_set_path(@image_set),      class: "btn-secondary" %>

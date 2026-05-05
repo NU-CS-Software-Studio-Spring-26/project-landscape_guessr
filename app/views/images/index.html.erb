@@ -4,7 +4,7 @@
   <div class="flex justify-between items-center">
     <h1 class="heading-page">Images</h1>
     <div class="flex space-x-2">
-      <%= link_to "Map view", map_images_path, class: "btn-secondary", data: { turbo: false } %>
+      <%= link_to "Map view", map_images_path, class: "btn-secondary" %>
       <% if admin? %>
         <%= link_to "New image", new_image_path, class: "btn-primary" %>
       <% end %>

@@ -37,7 +37,7 @@ A GeoGuessr-style web game: players see a landscape photograph (mountain, lake, 
 - **Rails** 8.1.3
 - **PostgreSQL** (dev and production — Heroku-compatible)
 - **TailwindCSS** via `tailwindcss-rails`
-- **MapLibre GL** + **Leaflet** for interactive maps
+- **MapLibre GL** + **MapTiler** topo-v2 vector tiles for all maps (smooth zoom, terrain shading)
 - **Active Storage** + **AWS S3** for user uploads
 - **libvips** (via `image_processing`) for HEIC -> JPEG conversion, resize, color-space normalization
 
@@ -199,9 +199,9 @@ User-uploaded images go through Active Storage's direct-upload flow:
 
 This avoids R14 OOMs on Heroku Basic (which would happen if the dyno tried to receive + decode large HEICs synchronously) and lets bulk uploads of hundreds of files survive a tab close mid-upload.
 
-### Turbo + inline `<script>` tags
+### Maps
 
-Turbo Drive swaps the body in place on link clicks, which means inline scripts that initialize JS libraries (e.g., MapLibre on `/images/map` and `/image_sets/:id/map`) don't re-run. Links pointing to such pages need `data: { turbo: false }` to force a full page load.
+All maps use **MapLibre GL JS** with **MapTiler topo-v2** vector tiles (terrain + contours, smooth zoom). Three Stimulus controllers — `image_map`, `guess_map`, `results_map` — share a single MapTiler key and a small lazy-loader for the MapLibre script. Adding a new map page = include `shared/_maplibre_assets` in `content_for(:head)` plus one of the controllers. No inline `<script>` tags, so Turbo navigation works without `data-turbo="false"` workarounds.
 
 ### Wikidata seeder
 
