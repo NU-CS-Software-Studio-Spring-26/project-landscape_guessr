@@ -26,7 +26,7 @@ class GamesController < ApplicationController
     @image_set =
       if params[:image_set_id].present?
         set = ImageSet.find_by(id: params[:image_set_id])
-        unless set && (set.is_system_default? || set.visibility == "public" || set.owned_by?(Current.user))
+        unless set&.playable_by?(Current.user)
           redirect_to image_sets_path, alert: "That set is private." and return
         end
         set
@@ -130,7 +130,7 @@ class GamesController < ApplicationController
       gi = game_images_by_image_id[guess.image_id]
       ans_lat = gi&.answer_lat || guess.image.latitude.to_f
       ans_lng = gi&.answer_lng || guess.image.longitude.to_f
-      dist_km = haversine_km(guess.latitude.to_f, guess.longitude.to_f, ans_lat, ans_lng)
+      dist_km = Game.haversine_km(guess.latitude.to_f, guess.longitude.to_f, ans_lat, ans_lng)
       {
         guess: guess,
         distance_km: dist_km,
@@ -181,15 +181,5 @@ class GamesController < ApplicationController
       else
         ImageSet.default
       end
-    end
-
-    # Great-circle distance in kilometres using the Haversine formula.
-    def haversine_km(lat1, lon1, lat2, lon2)
-      rad = Math::PI / 180
-      dlat = (lat2 - lat1) * rad
-      dlon = (lon2 - lon1) * rad
-      a = Math.sin(dlat / 2)**2 +
-          Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dlon / 2)**2
-      6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
     end
 end

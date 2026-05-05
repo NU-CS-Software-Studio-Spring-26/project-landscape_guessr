@@ -114,29 +114,14 @@ class Image < ApplicationRecord
       .path
   end
 
-  # Convert an uploaded file (HEIC/JPEG/PNG/WebP/etc) to a JPEG variant
+  # Convert a file at `path` (HEIC/JPEG/PNG/WebP/etc) to a JPEG variant
   # downscaled to PROCESSED_MAX_DIMENSION on the longest side and
-  # re-encoded at PROCESSED_QUALITY. Returns the kwargs you can pass
-  # straight to ActiveStorage::Attached#attach.
+  # re-encoded at PROCESSED_QUALITY. Returns kwargs you can pass straight
+  # to ActiveStorage::Attached#attach.
   #
   # Requires libvips on the host (brew install vips, or libvips42t64 from
-  # the apt buildpack on Heroku). Falls back to the original file if
-  # processing fails so uploads don't 500 even on a misconfigured machine.
-  def self.process_upload(file)
-    process_path(file.path, file.original_filename)
-  rescue StandardError => e
-    Rails.logger.warn "[Image.process_upload] falling back to raw upload: #{e.class}: #{e.message}"
-    file.rewind if file.respond_to?(:rewind)
-    {
-      io: file,
-      filename: file.original_filename,
-      content_type: file.content_type
-    }
-  end
-
-  # Path-based version of process_upload, for code paths that have a path
-  # without an UploadedFile wrapper (e.g. ProcessImageJob downloading an
-  # original HEIC blob from S3). Same vips pipeline as above.
+  # the apt buildpack on Heroku). Used by ProcessImageJob to convert the
+  # original blob the browser uploaded directly to S3.
   def self.process_path(path, original_filename)
     require "image_processing/vips"
     base = File.basename(original_filename, ".*")

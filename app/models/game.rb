@@ -25,4 +25,17 @@ class Game < ApplicationRecord
   def self.geoguessr_round_score(distance_km)
     (GEOGUESSR_MAX_ROUND_SCORE * Math.exp(-distance_km / GEOGUESSR_DECAY_KM)).round.clamp(0, GEOGUESSR_MAX_ROUND_SCORE)
   end
+
+  # Great-circle distance in kilometers via the Haversine formula. Used
+  # by GamesController#results and PracticeController#check; the
+  # client-side JS in game_controller.js implements the same formula
+  # for the in-round "X km away" readout.
+  def self.haversine_km(lat1, lon1, lat2, lon2)
+    rad = Math::PI / 180
+    dlat = (lat2 - lat1) * rad
+    dlon = (lon2 - lon1) * rad
+    a = Math.sin(dlat / 2)**2 +
+        Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dlon / 2)**2
+    6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  end
 end
