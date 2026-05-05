@@ -42,8 +42,11 @@ export default class extends Controller {
     this.completedCount = 0
     this.failedCount    = 0
     this.failedNames    = []
-    this.finishedBytes  = 0          // exact bytes from completed files
-    this.inflight       = new Map()  // upload.id -> bytes loaded right now
+    // upload.id -> bytes loaded. Entries are added when an upload
+    // starts, grow on progress, and are PINNED at file.size when the
+    // upload completes. We never decrement or delete entries — that's
+    // what makes the rendered total strictly non-decreasing.
+    this.inflight       = new Map()
 
     this.#showOverlay()
 
@@ -60,7 +63,6 @@ export default class extends Controller {
         if (i >= files.length) return
         const file = files[i]
         const ok = await this.#uploadOneWithRetry(file)
-        this.finishedBytes += file.size
         if (ok) this.completedCount += 1
         else {
           this.failedCount += 1
@@ -94,6 +96,12 @@ export default class extends Controller {
   // delegate so we can track each in-flight file's loaded bytes
   // independently — needed for an accurate progress bar when
   // concurrency > 1.
+  //
+  // Inflight bookkeeping: we set the entry to 0 on start, grow it on
+  // progress events, and pin it to file.size on completion. We never
+  // delete or decrement — so even while we await attach_blob, the bar
+  // doesn't dip from another worker's render seeing a "missing"
+  // upload.
   #uploadOne(file) {
     return new Promise((resolve, reject) => {
       const delegate = {
@@ -110,8 +118,12 @@ export default class extends Controller {
       }
       const upload = new DirectUpload(file, this.directUploadUrlValue, delegate)
       upload.create(async (error, blob) => {
-        this.inflight.delete(upload.id)
         if (error) return reject(new Error(error))
+        // Pin at full size for monotonic progress, then await the
+        // (much smaller) attach_blob round-trip without holding up
+        // the bar from advancing.
+        this.inflight.set(upload.id, file.size)
+        this.#renderProgress()
         try {
           await this.#attachBlob(blob.signed_id)
           resolve(true)
@@ -158,14 +170,12 @@ export default class extends Controller {
 
   #renderProgress() {
     if (!this.overlay) return
-    // Bar = exact bytes of completed files + sum of bytes loaded for
-    // every in-flight file. finishedBytes only grows between files;
-    // each inflight entry only grows for its own upload then is
-    // deleted on completion (the moment finishedBytes catches up). So
-    // the running total is monotonically non-decreasing.
-    let inflightBytes = 0
-    for (const v of this.inflight.values()) inflightBytes += v
-    const loaded = this.finishedBytes + inflightBytes
+    // Bar = sum of loaded bytes across every upload we've ever started.
+    // Each entry only grows or stays the same (pinned at file.size on
+    // completion, never deleted), so the total is monotonically
+    // non-decreasing across the whole batch.
+    let loaded = 0
+    for (const v of this.inflight.values()) loaded += v
     const pct = this.totalBytes > 0 ? Math.min(100, Math.round((loaded / this.totalBytes) * 100)) : 0
     this.barEl.style.width = `${pct}%`
     const done = this.completedCount + this.failedCount
