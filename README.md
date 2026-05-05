@@ -37,7 +37,7 @@ A GeoGuessr-style web game: players see a landscape photograph (mountain, lake, 
 - **Rails** 8.1.3
 - **PostgreSQL** (dev and production — Heroku-compatible)
 - **TailwindCSS** via `tailwindcss-rails`
-- **MapLibre GL** + **MapTiler** topo-v2 vector tiles for all maps (smooth zoom, terrain shading)
+- **MapLibre GL** + **MapTiler** vector tiles for all maps (smooth zoom). `streets-v2` for the in-game guess map (city/country POIs matter for guessing); `outdoor-v2` for the image-set / all-images maps (terrain shading helps make sense of where landscape photos were taken).
 - **Active Storage** + **AWS S3** for user uploads
 - **libvips** (via `image_processing`) for HEIC -> JPEG conversion, resize, color-space normalization
 
@@ -201,7 +201,7 @@ This avoids R14 OOMs on Heroku Basic (which would happen if the dyno tried to re
 
 ### Maps
 
-All maps use **MapLibre GL JS** with **MapTiler topo-v2** vector tiles (terrain + contours, smooth zoom). Three Stimulus controllers — `image_map`, `guess_map`, `results_map` — share a single MapTiler key and a small lazy-loader for the MapLibre script. Adding a new map page = include `shared/_maplibre_assets` in `content_for(:head)` plus one of the controllers. No inline `<script>` tags, so Turbo navigation works without `data-turbo="false"` workarounds.
+All maps use **MapLibre GL JS** with **MapTiler** vector tiles (smooth zoom). Style choice differs by purpose: `streets-v2` for the in-game guess + results maps where city/country labels are essential for guessing, `outdoor-v2` for the image-set + all-images maps where terrain shading adds context. Three Stimulus controllers — `image_map`, `guess_map`, `results_map` — share a single MapTiler key and a small lazy-loader for the MapLibre script. Adding a new map page = include `shared/_maplibre_assets` in `content_for(:head)` plus one of the controllers. No inline `<script>` tags, so Turbo navigation works without `data-turbo="false"` workarounds.
 
 ### Wikidata seeder
 

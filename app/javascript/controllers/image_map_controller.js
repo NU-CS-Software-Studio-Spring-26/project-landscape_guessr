@@ -35,7 +35,7 @@ export default class extends Controller {
 
     this.map = new maplibregl.Map({
       container: this.element,
-      style: `https://api.maptiler.com/maps/topo-v2/style.json?key=${MAPTILER_KEY}`,
+      style: `https://api.maptiler.com/maps/outdoor-v2/style.json?key=${MAPTILER_KEY}`,
       center: [0, 20],
       zoom: 1
     })

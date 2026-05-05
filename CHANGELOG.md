@@ -31,7 +31,7 @@ All notable changes to this project will be documented in this file.
 - New image sets land on the manage-images page (was: gallery view) so the user can immediately upload.
 - The bulk-upload UX is the primary path for adding images. The "Add by URL" form is collapsed by default. The single-file form was removed (titles and coords are now editable inline on the manage page after upload).
 - `Image.visible_to(user)` now derives from set membership instead of being a flat scope; admins bypass visibility entirely.
-- All maps consolidated onto **MapLibre + MapTiler topo-v2** (terrain shading, smooth vector zoom). Replaces Leaflet on `/images/map` and `/image_sets/:id/map`, and replaces `streets-v2` on the in-game and results maps.
+- All maps consolidated onto **MapLibre + MapTiler** vector tiles (smooth zoom). Replaces Leaflet on `/images/map` and `/image_sets/:id/map`. Style choice differentiates: `streets-v2` on the in-game and results maps (city/country POIs matter for guessing), `outdoor-v2` on the image-set / all-images maps (terrain shading shows where landscape photos were taken).
 
 ### Fixed
 
