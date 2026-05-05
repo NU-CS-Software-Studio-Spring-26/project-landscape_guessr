@@ -8,6 +8,14 @@ const COLORS = [
   "#14b8a6", "#f97316", "#ec4899", "#6366f1", "#84cc16"
 ]
 
+function hideOutdoorTrails(map) {
+  for (const layer of map.getStyle()?.layers || []) {
+    if (layer.source === "outdoor" && layer["source-layer"] === "trail") {
+      map.setLayoutProperty(layer.id, "visibility", "none")
+    }
+  }
+}
+
 function ensureMaplibre() {
   if (window.maplibregl) return Promise.resolve()
 
@@ -33,12 +41,15 @@ export default class extends Controller {
 
     this.map = new maplibregl.Map({
       container: this.containerTarget,
-      style: "https://api.maptiler.com/maps/streets-v2/style.json?key=RWz2xTwJMGVfRP9y6hhf",
+      style: "https://api.maptiler.com/maps/outdoor-v2/style.json?key=RWz2xTwJMGVfRP9y6hhf",
       center: [0, 20],
       zoom: 1.5
     })
 
-    this.map.on("load", () => this.#renderRounds())
+    this.map.on("load", () => {
+      hideOutdoorTrails(this.map)
+      this.#renderRounds()
+    })
   }
 
   #renderRounds() {

@@ -37,7 +37,7 @@ A GeoGuessr-style web game: players see a landscape photograph (mountain, lake, 
 - **Rails** 8.1.3
 - **PostgreSQL** (dev and production — Heroku-compatible)
 - **TailwindCSS** via `tailwindcss-rails`
-- **MapLibre GL** + **MapTiler** vector tiles for all maps (smooth zoom). `streets-v2` for the in-game guess map (city/country POIs matter for guessing); `outdoor-v2` for the image-set / all-images maps (terrain shading helps make sense of where landscape photos were taken).
+- **MapLibre GL** + **MapTiler outdoor-v2** vector tiles for all maps (smooth zoom, terrain shading, mountain peak labels with elevations, country/region/city POIs). The bright hiking/cycling/via-ferrata trail layers that ship with `outdoor-v2` are programmatically hidden so the map reads as terrain + POIs, not as a trail map.
 - **Active Storage** + **AWS S3** for user uploads
 - **libvips** (via `image_processing`) for HEIC -> JPEG conversion, resize, color-space normalization
 
@@ -201,7 +201,7 @@ This avoids R14 OOMs on Heroku Basic (which would happen if the dyno tried to re
 
 ### Maps
 
-All maps use **MapLibre GL JS** with **MapTiler** vector tiles (smooth zoom). Style choice differs by purpose: `streets-v2` for the in-game guess + results maps where city/country labels are essential for guessing, `outdoor-v2` for the image-set + all-images maps where terrain shading adds context. Three Stimulus controllers — `image_map`, `guess_map`, `results_map` — share a single MapTiler key and a small lazy-loader for the MapLibre script. Adding a new map page = include `shared/_maplibre_assets` in `content_for(:head)` plus one of the controllers. No inline `<script>` tags, so Turbo navigation works without `data-turbo="false"` workarounds.
+All maps use **MapLibre GL JS** with **MapTiler outdoor-v2** vector tiles. Three Stimulus controllers — `image_map`, `guess_map`, `results_map` — share a single MapTiler key, a small lazy-loader for the MapLibre script, and a `hideOutdoorTrails(map)` helper that runs on `style.load` to suppress the layers in `source: "outdoor", source-layer: "trail"` (the bright hiking/cycling/via-ferrata overlays ship with the style and would otherwise clutter the guessing UX). Mountain peaks, contours, terrain shading, and POI labels (country / region / city / village) all stay. Adding a new map page = include `shared/_maplibre_assets` in `content_for(:head)` plus one of the controllers. No inline `<script>` tags, so Turbo navigation works without `data-turbo="false"` workarounds.
 
 ### Wikidata seeder
 

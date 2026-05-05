@@ -4,6 +4,14 @@ const MAPLIBRE_CSS = "https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.css"
 const MAPLIBRE_JS  = "https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.js"
 const MAPTILER_KEY = "RWz2xTwJMGVfRP9y6hhf"
 
+function hideOutdoorTrails(map) {
+  for (const layer of map.getStyle()?.layers || []) {
+    if (layer.source === "outdoor" && layer["source-layer"] === "trail") {
+      map.setLayoutProperty(layer.id, "visibility", "none")
+    }
+  }
+}
+
 function ensureMaplibre() {
   if (window.maplibregl) return Promise.resolve()
   if (!document.querySelector(`link[href="${MAPLIBRE_CSS}"]`)) {
@@ -40,7 +48,10 @@ export default class extends Controller {
       zoom: 1
     })
 
-    this.map.on("load", () => this.#render())
+    this.map.on("load", () => {
+      hideOutdoorTrails(this.map)
+      this.#render()
+    })
   }
 
   disconnect() {
