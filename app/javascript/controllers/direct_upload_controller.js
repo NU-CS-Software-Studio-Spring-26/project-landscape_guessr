@@ -34,14 +34,19 @@ export default class extends Controller {
   }
 
   #onInit(event) {
+    // initialize fires upfront for *every* file (AS creates a
+    // DirectUploadController for each before the sequential start
+    // loop), so this is the right place to sum totalBytes — not
+    // onStart, which fires one-by-one and would make the bar jump.
     this.totalCount += 1
     this.loadedBytes[event.detail.id] = 0
+    if (event.detail.file && event.detail.file.size) {
+      this.totalBytes += event.detail.file.size
+    }
     this.#render()
   }
 
-  #onStart(event) {
-    const file = event.detail.file
-    if (file && file.size) this.totalBytes += file.size
+  #onStart() {
     this.#render()
   }
 
