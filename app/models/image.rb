@@ -65,7 +65,10 @@ class Image < ApplicationRecord
     # P3 values get rendered as sRGB and look desaturated.
     processed = ImageProcessing::Vips
       .source(file.path)
-      .resize_to_limit(PROCESSED_MAX_DIMENSION, PROCESSED_MAX_DIMENSION)
+      # sharpen: false disables image_processing's default 3x3 sharpen mask.
+      # Apple's HEIC->JPEG transcode doesn't sharpen, and the extra
+      # high-frequency noise both shifts colors slightly and bloats the JPEG.
+      .resize_to_limit(PROCESSED_MAX_DIMENSION, PROCESSED_MAX_DIMENSION, sharpen: false)
       .icc_transform("srgb", embedded: true)
       .convert("jpg")
       .saver(quality: PROCESSED_QUALITY, strip: true)
