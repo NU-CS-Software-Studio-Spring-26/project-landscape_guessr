@@ -3,10 +3,15 @@ class PracticeController < ApplicationController
 
   def show
     default_set = ImageSet.default
-    @image = default_set&.images&.order("RANDOM()")&.first || Image.order("RANDOM()").first
+    # Practice mode shows a random image and asks for a guess, so the image
+    # must have lat/lng — otherwise the "answer" is (0, 0) and every guess
+    # scores arbitrarily. Filter at the DB level.
+    located = ->(scope) { scope.where.not(latitude: nil).where.not(longitude: nil) }
+    @image = located.call(default_set&.images || Image.all).order(Arel.sql("RANDOM()")).first ||
+             located.call(Image.all).order(Arel.sql("RANDOM()")).first
 
     if @image.nil?
-      redirect_to images_path, alert: "No images available. Seed some first."
+      redirect_to images_path, alert: "No images with coordinates are available yet."
     end
   end
 

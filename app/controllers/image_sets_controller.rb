@@ -56,7 +56,10 @@ class ImageSetsController < ApplicationController
 
   # GET /image_sets/1/locations
   def locations
-    @items = @image_set.image_set_items.includes(image: { photo_attachment: :blob }).order("images.title")
+    # Stable order by item id — title-ordering would re-shuffle rows after
+    # the user edits a title or saves, making them think their edits got
+    # lost. Newest items always appear at the end.
+    @items = @image_set.image_set_items.includes(image: { photo_attachment: :blob }).order(:id)
     @processing_count = @items.count { |i| !i.image.processed? }
   end
 
@@ -90,7 +93,7 @@ class ImageSetsController < ApplicationController
     end
 
     if errors.any?
-      @items = @image_set.image_set_items.includes(:image).order("images.title")
+      @items = @image_set.image_set_items.includes(:image).order(:id)
       flash.now[:alert] = errors.join("; ")
       render :locations, status: :unprocessable_entity
     else
@@ -214,7 +217,11 @@ class ImageSetsController < ApplicationController
   private
 
   def set_image_set
-    @image_set = ImageSet.find(params[:id])
+    # The remove_item route is a non-member nested DELETE, so its parent id
+    # comes through as :image_set_id, not :id like the member routes do.
+    # Without this fallback, ImageSet.find(nil) raised RecordNotFound and
+    # the remove flow appeared to fail to the user.
+    @image_set = ImageSet.find(params[:id] || params[:image_set_id])
     # Allow reading public/system sets; editing is guarded by require_owner.
     unless @image_set.playable_by?(Current.user)
       redirect_to image_sets_path, alert: "That set is private." and return
