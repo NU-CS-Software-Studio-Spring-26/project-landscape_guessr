@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [milestone-1](https://github.com/NU-CS-Software-Studio-Spring-26/project-landscape_guessr/releases/tag/milestone-1) — 2026-05-05
+## [milestone-1](https://github.com/NU-CS-Software-Studio-Spring-26/project-landscape_guessr/releases/tag/milestone-1) — 2026-05-04
 
 First public release. Replaces the milestone-0 anonymous prototype with a multi-user MVP.
 
