@@ -37,12 +37,15 @@ A GeoGuessr-style web game: players see a landscape photograph (mountain, lake, 
 - **Rails** 8.1.3
 - **PostgreSQL** (dev and production — Heroku-compatible)
 - **TailwindCSS** via `tailwindcss-rails`
-- **MapLibre GL** for interactive maps
+- **MapLibre GL** + **Leaflet** for interactive maps
+- **Active Storage** + **AWS S3** for user uploads
+- **libvips** (via `image_processing`) for HEIC -> JPEG conversion, resize, color-space normalization
 
 ## Prerequisites
 
 - Ruby 4.0.2 — install via your version manager (rbenv, asdf, mise, rvm). `.ruby-version` is honored by all of them.
 - PostgreSQL 14+ running locally. On macOS: `brew install postgresql@16 && brew services start postgresql@16`.
+- libvips for image processing. On macOS: `brew install vips`. On Linux: `apt-get install libvips42`. (Heroku gets it via `Aptfile`.)
 
 ## Setup
 
@@ -50,7 +53,7 @@ A GeoGuessr-style web game: players see a landscape photograph (mountain, lake, 
 git clone <this-repo>
 cd project-landscape_guessr
 bundle install
-bin/rails db:create db:migrate db:seed   # creates DB, runs migrations, fetches ~1400 images from Wikidata
+bin/rails db:create db:migrate db:seed   # creates DB, migrates, fetches ~1400 images from Wikidata, adds demo users (dev only)
 bin/dev                                  # starts Puma (port 3000) + Tailwind watcher
 ```
 
@@ -58,30 +61,106 @@ bin/dev                                  # starts Puma (port 3000) + Tailwind wa
 
 To play, sign up at `/registration/new`. Practice mode (`/practice`) and image browsing are available without an account; starting/playing games requires sign-in.
 
+In development, seeds also create three demo accounts so the leaderboard isn't empty: **alice**, **bob**, **charlie** (all with password `password123`). They're never seeded in production — that would mean public, world-readable creds for the deployed app.
+
 To manage the image library or edit past guesses through the UI, you need an admin account. Sign up normally, then promote yourself via `bin/rails c`: `User.find_by(email_address: "you@x").update(admin: true)`. On Heroku: `heroku run rails console`.
+
+### S3 / Active Storage setup (for user uploads)
+
+User-uploaded images go through Active Storage's direct-upload flow to S3 (the browser PUTs the original file straight to S3, then a background job converts it). To enable in development, set:
+
+```bash
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
+export S3_BUCKET=landscape-guessr-dev
+export AWS_REGION=us-east-2
+```
+
+If you don't want to use S3 locally, edit `config/environments/development.rb` and change `config.active_storage.service` to `:local`. Bulk uploads will then write to `storage/`. (Production always uses S3 — see `config/storage.yml`.)
 
 ## Data model
 
 | Model | Belongs to | Has many | Key columns |
 |---|---|---|---|
-| `User` | — | `sessions`, `games` | `email_address`, `password_digest`, `admin` |
+| `User` | — | `sessions`, `games`, `image_sets` | `email_address`, `username`, `password_digest`, `admin` |
 | `Session` | `User` | — | `ip_address`, `user_agent` |
-| `Game` | `User` | `game_images`, `guesses`, `images` (through `game_images`) | `status`, `score`, `completed_at` |
-| `GameImage` | `Game`, `Image` | — | `position` (1–5) |
-| `Image` | — | `guesses`, `game_images` | `url`, `latitude`, `longitude`, `title` |
+| `Game` | `User`, `ImageSet?` | `game_images`, `guesses`, `images` (through `game_images`) | `status`, `score`, `completed_at` |
+| `GameImage` | `Game`, `Image` | — | `position` (1–5), `answer_latitude`, `answer_longitude` (snapshot at game-creation time) |
+| `Image` | — | `guesses`, `game_images`, `image_set_items`, `image_sets` (through items) | `url`, `latitude`, `longitude`, `title`; optional `photo` Active Storage attachment |
+| `ImageSet` | `User?` | `image_set_items`, `images` (through items), `games` | `name`, `visibility` (`private`\|`public`), `is_system_default` |
+| `ImageSetItem` | `ImageSet`, `Image` | — | `latitude`, `longitude` (per-set override of the image's coords) |
 | `Guess` | `Game`, `Image` | — | `latitude`, `longitude` (player's pick) |
 
-Each game materializes a fixed 5-image set on creation (`game_images` rows with positions 1–5), so the same game can later be replayed by a challenger against the identical image sequence. The `Image` row holds the correct answer; the `Guess` row holds the player's pick.
+`GameImage.answer_latitude/longitude` snapshots the answer at game-creation time, so retroactively editing an image's coordinates doesn't change scores for already-played games.
+
+`ImageSet` partitions the world's images into curated buckets:
+- exactly one set has `is_system_default: true` (`Default Landscapes`, seeded from Wikidata) — public, ungated, the default for new games.
+- user-created sets are either `private` (only the owner can see/play) or `public` (anyone can play, leaderboard is shared).
+
+The `Image.visible_to(user)` scope (in `app/models/image.rb`) is the canonical way to gate image lists: it returns images that live in *at least one* set the user can see — the system default, any public set, or any set they own. `ImageSet#playable_by?(user)` is the corresponding gate for set-level access.
+
+## Routes (high-level)
+
+| Route | Purpose |
+|---|---|
+| `/` | Landing page; primary CTA = "Start new game" on the system-default set |
+| `/registration/new`, `/session/new`, `/passwords/new` | Sign up, sign in, password reset |
+| `/profile` | Current user's profile |
+| `/games` | List of your games (filter by status, sort by date or score) |
+| `/games/:id` | Play the next round of an in-progress game |
+| `/games/:id/results` | Per-round breakdown + summary map after game finishes |
+| `/games/leaderboard?image_set_id=N` | Top-20 leaderboard scoped to an image set |
+| `/image_sets` | Your sets + the public catalog |
+| `/image_sets/:id` | Read-only gallery view of a set |
+| `/image_sets/:id/locations` | Owner-only: upload, edit titles/coords, remove items |
+| `/image_sets/:id/map` | Map of all located images in a set |
+| `/images`, `/images/map` | Images list / world map (admins see all; everyone else sees `Image.visible_to`) |
+| `/practice` | Single-image guessing without saving a game (no auth required) |
+
+## Scoring
+
+Per-round score follows the classic GeoGuessr formula:
+
+`round_score = round(5000 * exp(-distance_km / 1492.7))`, clamped to `[0, 5000]`.
+
+A game has 5 rounds, so the maximum total score is 25,000. Distances in the UI use `format_distance_compact` (helper at `app/helpers/games_helper.rb`): sub-kilometre guesses render as "847 m", 1-10 km as "1.5 km", farther as "47 km". The same formatting runs client-side in `app/javascript/controllers/game_controller.js`.
 
 ## Seed data
 
 `db/seeds.rb` fetches ~1400 landmarks from Wikidata's SPARQL endpoint across 14 landform types (mountains, lakes, waterfalls, volcanoes, canyons, islands, glaciers, valleys, rivers, fjords, cliffs, beaches, capes, lagoons). Each re-seed pulls a fresh random sample. Idempotent — re-running won't duplicate.
+
+In development only, three demo users (alice / bob / charlie) are also seeded with 1-2 completed games each so the leaderboard demos out of the box.
 
 | Command                    | Effect                                                              |
 | -------------------------- | ------------------------------------------------------------------- |
 | `bin/rails db:seed`        | Adds new records, skips existing                                    |
 | `bin/rails db:reset`       | Destroys DB -> recreates -> migrates -> seeds (wipes Games/Guesses too) |
 | `bin/rails db:seed:replant`| Truncates tables, then seeds (keeps schema)                         |
+
+## Deploying to Heroku
+
+The live deployment uses Heroku's Basic dyno + Heroku Postgres + a separate AWS S3 bucket for image storage. To replicate:
+
+```bash
+heroku create your-app-name
+heroku addons:create heroku-postgresql:essential-0
+heroku buildpacks:add --index 1 heroku-community/apt   # pulls libvips42 via Aptfile
+heroku buildpacks:add heroku/ruby
+heroku config:set AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... S3_BUCKET=... AWS_REGION=...
+heroku config:set MALLOC_ARENA_MAX=2 ACTIVE_JOB_ASYNC_MAX_THREADS=1   # caps glibc heap fragmentation + concurrent libvips decodes; needed on 512MB dynos
+git push heroku main:main
+heroku run rails db:migrate db:seed
+heroku run rails console   # then: User.find_by(email_address: "...").update!(admin: true)
+```
+
+### Background-processing caveats (`:async` queue)
+
+Image conversion (HEIC -> JPEG, resize, ICC) runs in `ProcessImageJob` via Active Job's in-memory `:async` adapter. **Jobs queued in memory are dropped on dyno restart** (deploys, daily cycles, OOMs). To recover:
+
+- `bin/rails images:reprocess_pending` — re-enqueue any Image whose attached blob isn't yet processed (idempotent — finished images skip themselves).
+- `bin/rails images:purge_unattached[hours]` — delete S3 blobs that were direct-uploaded but never attached (e.g. user closed the tab mid-upload). Default is 24h.
+
+If milestone-2 needs jobs to survive restarts, swap `:async` for `solid_queue` (Rails 8 built-in, DB-backed; ~30 min including Puma plugin so no separate worker dyno is needed).
 
 ## Conventions
 
@@ -92,7 +171,8 @@ A few patterns that aren't obvious from the code but are easy to break.
 Any controller action touching a user-owned record must scope through `Current.user`, never `Model.find` directly. So:
 
 ```ruby
-# Right — wrong-owner request returns 404 because the scope filters it out
+# Right — wrong-owner request raises RecordNotFound, which
+# ApplicationController#rescue_from rewrites into a friendly redirect
 @game = Current.user.games.find(params[:id])
 
 # Wrong — silently exposes other users' games
@@ -101,11 +181,27 @@ Any controller action touching a user-owned record must scope through `Current.u
 
 Same for nested writes: `Current.user.games.find(...).guesses.create!(...)`. Tests cover the cross-user 404 case in `test/controllers/games_controller_test.rb` and `guesses_controller_test.rb`.
 
-Mutating the image library, editing past guesses, and editing game metadata are admin-only. Game `score`, `status`, and `completed_at` are written by the backend during gameplay (results action) — the `/games/:id/edit` form exists only as an admin debug tool. Users can still destroy their own games. Use the `require_admin` before_action in `ApplicationController` for any future controller action that should be restricted to admins.
+For image-set access, the canonical gates are `ImageSet#playable_by?(user)` (read access — owner / public / system default) and the `require_owner` before-action in `ImageSetsController` (write access). For the image library, use `Image.visible_to(user)`; admins bypass the visibility scope entirely (see `ImagesController#index`).
+
+Mutating the image library, editing past guesses, and editing game metadata are admin-only. Game `score`, `status`, and `completed_at` are written by the backend during gameplay (results action) — the `/games/:id/edit` form exists only as an admin debug tool. Users can still destroy their own games. Use the `require_admin` before-action in `ApplicationController` for any future controller action that should be restricted to admins.
+
+### Friendly 404s
+
+`ApplicationController` catches `ActiveRecord::RecordNotFound` globally and redirects to either `redirect_back` or `root_path` with a flash, instead of letting the bare 404 page or a dev stack trace leak out. JSON requests still get a `:not_found` status.
+
+### Direct upload + background processing
+
+User-uploaded images go through Active Storage's direct-upload flow:
+1. Browser PUTs the original (HEIC/JPEG/...) straight to S3 via `DirectUpload`. The web dyno never sees the original bytes.
+2. JS calls `POST /image_sets/:id/attach_blob` per file, attaching the blob to a freshly-created `Image` and adding it to the set.
+3. `ProcessImageJob` runs in the `:async` queue: downloads the blob, extracts EXIF GPS, resizes + re-encodes to JPEG, replaces the attachment.
+4. Locations page polls `GET /image_sets/:id/processing_status` every 2s and swaps placeholders for thumbnails as items finish.
+
+This avoids R14 OOMs on Heroku Basic (which would happen if the dyno tried to receive + decode large HEICs synchronously) and lets bulk uploads of hundreds of files survive a tab close mid-upload.
 
 ### Turbo + inline `<script>` tags
 
-Turbo Drive swaps the body in place on link clicks, which means inline scripts that initialize JS libraries (e.g., MapLibre on `/images/map`) don't re-run. Links pointing to such pages need `data: { turbo: false }` to force a full page load.
+Turbo Drive swaps the body in place on link clicks, which means inline scripts that initialize JS libraries (e.g., MapLibre on `/images/map` and `/image_sets/:id/map`) don't re-run. Links pointing to such pages need `data: { turbo: false }` to force a full page load.
 
 ### Wikidata seeder
 
@@ -118,6 +214,8 @@ Turbo Drive swaps the body in place on link clicks, which means inline scripts t
 - After seed changes, run `bin/rails db:reset` locally to verify a clean setup works
 - Open a PR against `main`
 
+See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
+
 ## Entity Relationship Diagram
 
 [ERD on Miro](https://miro.com/app/board/uXjVGjb-zPA=/?share_link_id=966004402068)
@@ -129,4 +227,3 @@ Turbo Drive swaps the body in place on link clicks, which means inline scripts t
 - [GeoHub](https://www.geohub.gg/)
 - [Guess Where You Are](https://guesswhereyouare.com/)
 - [Geotastic](https://geotastic.net)
-
