@@ -1,6 +1,6 @@
 class ImageSetsController < ApplicationController
-  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image attach_blob remove_item]
-  before_action :require_owner, only: %i[edit update destroy locations update_locations add_image attach_blob remove_item]
+  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image attach_blob processing_status remove_item]
+  before_action :require_owner, only: %i[edit update destroy locations update_locations add_image attach_blob processing_status remove_item]
 
   # GET /image_sets
   def index
@@ -130,6 +130,25 @@ class ImageSetsController < ApplicationController
     else
       redirect_back fallback_location: @image_set, alert: "Image not found in this set."
     end
+  end
+
+  # GET /image_sets/1/processing_status
+  #
+  # Lightweight JSON endpoint the locations page polls every couple
+  # seconds while ProcessImageJob is finishing background work, so we
+  # can swap "Processing..." placeholders for real thumbnails without
+  # full page reloads.
+  def processing_status
+    items = @image_set.image_set_items.includes(image: { photo_attachment: :blob })
+    payload = items.map do |item|
+      processed = item.image.processed?
+      {
+        id:        item.id,
+        processed: processed,
+        photo_url: processed ? view_context.image_src(item.image, width: 200) : nil,
+      }
+    end
+    render json: { items: payload, processing_count: payload.count { |i| !i[:processed] } }
   end
 
   # POST /image_sets/1/attach_blob

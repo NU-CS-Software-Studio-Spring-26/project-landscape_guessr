@@ -128,24 +128,33 @@
     <% end %>
   </div>
 
-  <%# Background-processing banner. The page meta-refreshes every 10s
-      while there are still pending jobs, so thumbnails and EXIF coords
-      pop in as ProcessImageJob finishes each one. %>
+  <%# Background-processing banner. While any item still has
+      data-processing="true", the processing-poll Stimulus controller
+      hits processing_status_image_set_path every couple seconds and
+      swaps placeholders for real thumbnails as each finishes. No full
+      page reload needed. %>
   <% if @processing_count.to_i > 0 %>
-    <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-center gap-3">
+    <div id="processing-banner" class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-center gap-3">
       <div class="w-4 h-4 rounded-full border-2 border-amber-600 border-t-transparent animate-spin shrink-0"></div>
-      <p>Processing <%= @processing_count %> image<%= "s" if @processing_count > 1 %> in the background. This page will auto-refresh every 10 s until done.</p>
+      <p>Processing <span data-processing-count><%= @processing_count %></span> image(s) in the background — thumbnails will appear here as each finishes.</p>
     </div>
-    <meta http-equiv="refresh" content="10">
   <% end %>
 
   <%# Batch location editor %>
   <% if @items.any? %>
-    <%= form_with url: locations_image_set_path(@image_set), method: :put, local: true, class: "space-y-4" do %>
+    <%= form_with url: locations_image_set_path(@image_set), method: :put, local: true,
+                  class: "space-y-4",
+                  data: {
+                    controller:                          "processing-poll",
+                    processing_poll_url_value:           processing_status_image_set_path(@image_set),
+                    processing_poll_banner_id_value:     "processing-banner",
+                  } do %>
 
       <div class="space-y-3">
         <% @items.each do |item| %>
-          <div class="rounded-lg border border-gray-200 bg-white p-3 flex flex-col sm:flex-row sm:items-center gap-3">
+          <div class="rounded-lg border border-gray-200 bg-white p-3 flex flex-col sm:flex-row sm:items-center gap-3"
+               data-item-id="<%= item.id %>"
+               data-processing="<%= !item.image.processed? %>">
 
             <%# Thumbnail (or a "processing" placeholder while ProcessImageJob
                 converts the freshly-uploaded HEIC) %>
@@ -153,7 +162,8 @@
               <img src="<%= image_src(item.image, width: 200) %>" alt="<%= item.title %>"
                    class="w-full sm:w-24 h-20 sm:h-16 object-cover rounded-md border border-gray-100 shrink-0">
             <% else %>
-              <div class="w-full sm:w-24 h-20 sm:h-16 rounded-md border border-gray-100 bg-gray-50 flex items-center justify-center text-[10px] text-gray-500 shrink-0 animate-pulse">
+              <div class="processing-placeholder w-full sm:w-24 h-20 sm:h-16 rounded-md border border-gray-100 bg-gray-50 flex items-center justify-center text-[10px] text-gray-500 shrink-0 animate-pulse"
+                   data-title="<%= item.title %>">
                 Processing…
               </div>
             <% end %>

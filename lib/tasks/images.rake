@@ -1,4 +1,15 @@
 namespace :images do
+  desc "Re-enqueue ProcessImageJob for any image whose attached blob isn't marked processed yet. Run this after a dyno restart (deploy, daily cycle, OOM) — the :async adapter is in-memory, so anything queued at restart time is lost. Idempotent."
+  task reprocess_pending: :environment do
+    enqueued = 0
+    Image.joins(:photo_attachment).find_each do |image|
+      next if image.processed?
+      ProcessImageJob.perform_later(image)
+      enqueued += 1
+    end
+    puts "[images:reprocess_pending] enqueued #{enqueued} ProcessImageJob(s)"
+  end
+
   desc "Destroy Image rows that aren't referenced by any image_set_items, game_images, or guesses. The has_one_attached cascade purges the S3 blob too (no-ops gracefully if the blob is already gone)."
   task destroy_orphans: :environment do
     scope = Image.where.not(id: ImageSetItem.select(:image_id))
