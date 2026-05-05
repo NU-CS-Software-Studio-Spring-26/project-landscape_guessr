@@ -109,14 +109,18 @@
       <h2 class="font-semibold text-gray-700">Bulk Upload</h2>
       <p class="text-xs text-gray-500 mt-0.5">Select multiple image files at once. Coordinates auto-fill from EXIF when present.</p>
     </div>
-    <%= form_with url: bulk_upload_image_set_path(@image_set), method: :post,
+    <%= form_with url: attach_blob_image_set_path(@image_set), method: :post,
                   multipart: true, local: true,
-                  data: { controller: "direct-upload" },
+                  data: {
+                    controller: "direct-upload",
+                    direct_upload_attach_url_value:        attach_blob_image_set_path(@image_set),
+                    direct_upload_direct_upload_url_value: rails_direct_uploads_path,
+                    direct_upload_redirect_url_value:      locations_image_set_path(@image_set)
+                  },
                   class: "flex flex-col sm:flex-row items-start sm:items-end gap-3" do %>
       <div class="flex-1 space-y-1 w-full">
         <%= label_tag "files[]", "Image files", class: "block text-sm font-medium text-gray-700" %>
         <%= file_field_tag "files[]", multiple: true, accept: "image/*",
-              direct_upload: true,
               class: "block w-full text-sm text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-blue-600 file:px-3 file:py-1.5 file:text-white file:font-medium hover:file:bg-blue-500 cursor-pointer" %>
       </div>
       <%= submit_tag "Upload all",

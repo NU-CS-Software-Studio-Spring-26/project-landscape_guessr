@@ -19,7 +19,7 @@ Rails.application.routes.draw do
       get  :locations
       put  :locations, action: :update_locations
       post :add_image
-      post :bulk_upload
+      post :attach_blob
     end
     delete "items/:item_id", to: "image_sets#remove_item", as: :remove_item
   end

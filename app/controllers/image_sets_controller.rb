@@ -1,6 +1,6 @@
 class ImageSetsController < ApplicationController
-  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image bulk_upload remove_item]
-  before_action :require_owner, only: %i[edit update destroy locations update_locations add_image bulk_upload remove_item]
+  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image attach_blob remove_item]
+  before_action :require_owner, only: %i[edit update destroy locations update_locations add_image attach_blob remove_item]
 
   # GET /image_sets
   def index
@@ -132,49 +132,38 @@ class ImageSetsController < ApplicationController
     end
   end
 
-  # POST /image_sets/1/bulk_upload
+  # POST /image_sets/1/attach_blob
   #
-  # Direct-upload flow: the browser PUTs each original (HEIC/JPEG/...)
-  # straight to S3 via Active Storage's direct_upload, then submits this
-  # form with an array of blob signed_ids in params[:files]. This action
-  # is now I/O-trivial: it just attaches each blob to a new Image and
-  # enqueues a ProcessImageJob to do the libvips work in the background.
-  # Heroku web dyno never sees the original bytes -> no R14, no H12.
-  def bulk_upload
-    signed_ids = Array(params[:files]).map(&:to_s).reject(&:empty?)
+  # Direct-upload flow: the JS direct-upload controller (see
+  # app/javascript/controllers/direct_upload_controller.js) PUTs each
+  # original (HEIC/JPEG/...) straight to S3 via DirectUpload, then calls
+  # here once per file with the blob's signed_id. We attach the blob to
+  # a new Image, add it to the set, and enqueue ProcessImageJob to do
+  # the libvips work in the background. The web dyno never sees the
+  # original bytes -> no R14, no H12.
+  #
+  # Per-file rather than per-batch: anything already attached survives a
+  # tab close mid-upload, and a single bad file in a 91-image batch
+  # doesn't strand all the prior uploads.
+  def attach_blob
+    signed_id = params[:signed_id].to_s.strip
+    return render json: { error: "missing signed_id" }, status: :bad_request if signed_id.empty?
 
-    if signed_ids.empty?
-      redirect_to locations_image_set_path(@image_set), alert: "No files selected." and return
-    end
+    blob = ActiveStorage::Blob.find_signed(signed_id)
+    return render json: { error: "invalid signed_id" }, status: :not_found unless blob
 
-    added = 0
-    errors = []
+    title = File.basename(blob.filename.to_s, ".*").gsub(/[_-]+/, " ").titleize
+    image = Image.create!(title: title)
+    image.photo.attach(blob)
 
-    signed_ids.each do |signed_id|
-      blob = ActiveStorage::Blob.find_signed(signed_id)
-      next unless blob
+    item = @image_set.image_set_items.find_or_initialize_by(image: image)
+    item.save! if item.new_record?
 
-      title = File.basename(blob.filename.to_s, ".*").gsub(/[_-]+/, " ").titleize
-      image = Image.create!(title: title)
-      image.photo.attach(blob)
-
-      item = @image_set.image_set_items.find_or_initialize_by(image: image)
-      if item.new_record?
-        item.save!
-        added += 1
-      end
-
-      ProcessImageJob.perform_later(image)
-    rescue => e
-      errors << "#{blob&.filename || signed_id}: #{e.message}"
-    end
-
-    msg = "#{added} image(s) queued. Thumbnails and EXIF coordinates will appear as background processing finishes — refresh in a minute."
-    if errors.any?
-      redirect_to locations_image_set_path(@image_set), alert: "#{msg} Errors: #{errors.join('; ')}"
-    else
-      redirect_to locations_image_set_path(@image_set), notice: msg
-    end
+    ProcessImageJob.perform_later(image)
+    render json: { image_id: image.id, status: "ok" }
+  rescue => e
+    Rails.logger.error "[image_sets#attach_blob] #{e.class}: #{e.message}"
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   private
