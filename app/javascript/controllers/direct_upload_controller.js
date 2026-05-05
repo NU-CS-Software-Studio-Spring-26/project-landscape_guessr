@@ -42,29 +42,36 @@ export default class extends Controller {
     this.completedCount = 0
     this.failedCount    = 0
     this.failedNames    = []
-    this.currentLoaded  = 0
-    this.currentSize    = 0
+    this.finishedBytes  = 0          // exact bytes from completed files
+    this.inflight       = new Map()  // upload.id -> bytes loaded right now
 
     this.#showOverlay()
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i]
-      this.currentSize   = file.size
-      this.currentLoaded = 0
-      this.#renderProgress(file.name, i + 1)
-
-      const ok = await this.#uploadOneWithRetry(file)
-      if (ok) this.completedCount += 1
-      else {
-        this.failedCount += 1
-        this.failedNames.push(file.name)
+    // Run a small worker pool over the file list. Concurrency=2 strikes
+    // a balance: uploads benefit from a second connection (saves ~250ms
+    // per-file attach_blob round-trip overlap), but we don't pile up so
+    // many ProcessImageJobs that the dyno's :async pool OOMs decoding
+    // multiple HEICs at once.
+    const concurrency = 2
+    let nextIndex = 0
+    const worker = async () => {
+      while (true) {
+        const i = nextIndex++
+        if (i >= files.length) return
+        const file = files[i]
+        const ok = await this.#uploadOneWithRetry(file)
+        this.finishedBytes += file.size
+        if (ok) this.completedCount += 1
+        else {
+          this.failedCount += 1
+          this.failedNames.push(file.name)
+        }
+        this.#renderProgress()
       }
     }
+    await Promise.all(Array.from({ length: concurrency }, worker))
 
     this.#renderDone()
-    // Give the user a moment to see the result, then reload the
-    // locations page so newly-attached items + processing placeholders
-    // appear.
     setTimeout(() => { window.location.href = this.redirectUrlValue },
       this.failedCount > 0 ? 4000 : 800)
   }
@@ -83,11 +90,27 @@ export default class extends Controller {
     }
   }
 
-  // Returns true on success, throws on failure.
+  // Returns true on success, throws on failure. Uses a per-upload
+  // delegate so we can track each in-flight file's loaded bytes
+  // independently — needed for an accurate progress bar when
+  // concurrency > 1.
   #uploadOne(file) {
     return new Promise((resolve, reject) => {
-      const upload = new DirectUpload(file, this.directUploadUrlValue, this)
+      const delegate = {
+        directUploadWillStoreFileWithXHR: (xhr) => {
+          const id = upload.id
+          this.inflight.set(id, 0)
+          xhr.upload.addEventListener("progress", (e) => {
+            if (e.lengthComputable) {
+              this.inflight.set(id, e.loaded)
+              this.#renderProgress()
+            }
+          })
+        },
+      }
+      const upload = new DirectUpload(file, this.directUploadUrlValue, delegate)
       upload.create(async (error, blob) => {
+        this.inflight.delete(upload.id)
         if (error) return reject(new Error(error))
         try {
           await this.#attachBlob(blob.signed_id)
@@ -114,18 +137,6 @@ export default class extends Controller {
     return res.json()
   }
 
-  // DirectUpload delegate: gets called with the XHR mid-upload so we
-  // can hook into per-file byte progress and feed it into the overall
-  // progress bar.
-  directUploadWillStoreFileWithXHR(request) {
-    request.upload.addEventListener("progress", (e) => {
-      if (e.lengthComputable) {
-        this.currentLoaded = e.loaded
-        this.#renderProgress(this.currentFilename, this.completedCount + this.failedCount + 1)
-      }
-    })
-  }
-
   #showOverlay() {
     const overlay = document.createElement("div")
     overlay.className = "fixed inset-0 z-50 flex items-center justify-center bg-black/40"
@@ -145,24 +156,21 @@ export default class extends Controller {
     this.hintEl   = overlay.querySelector('[data-target="hint"]')
   }
 
-  #renderProgress(filename, currentIndex) {
+  #renderProgress() {
     if (!this.overlay) return
-    this.currentFilename = filename
-    const finishedBytes = this.#finishedBytes()
-    const loadedBytes   = finishedBytes + this.currentLoaded
-    const pct = this.totalBytes > 0 ? Math.min(100, Math.round((loadedBytes / this.totalBytes) * 100)) : 0
+    // Bar = exact bytes of completed files + sum of bytes loaded for
+    // every in-flight file. finishedBytes only grows between files;
+    // each inflight entry only grows for its own upload then is
+    // deleted on completion (the moment finishedBytes catches up). So
+    // the running total is monotonically non-decreasing.
+    let inflightBytes = 0
+    for (const v of this.inflight.values()) inflightBytes += v
+    const loaded = this.finishedBytes + inflightBytes
+    const pct = this.totalBytes > 0 ? Math.min(100, Math.round((loaded / this.totalBytes) * 100)) : 0
     this.barEl.style.width = `${pct}%`
+    const done = this.completedCount + this.failedCount
     const failNote = this.failedCount > 0 ? `, ${this.failedCount} failed` : ""
-    this.statusEl.textContent = `Uploading ${currentIndex} / ${this.totalCount}${failNote} — ${pct}%`
-  }
-
-  #finishedBytes() {
-    // Approximate: each finished file contributes its full size; we
-    // don't track per-file size after completion, but for a uniform
-    // batch this is close enough.
-    if (this.totalCount === 0) return 0
-    const avgSize = this.totalBytes / this.totalCount
-    return (this.completedCount + this.failedCount) * avgSize
+    this.statusEl.textContent = `Uploading ${Math.min(done + 1, this.totalCount)} / ${this.totalCount}${failNote} — ${pct}%`
   }
 
   #renderDone() {
