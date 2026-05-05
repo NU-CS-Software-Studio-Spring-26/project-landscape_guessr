@@ -42,6 +42,3 @@
 .DS_Store
 .claude
 .playwright-mcp
-
-# Course materials kept locally (rubric / brief PDFs).
-/Milestone*.pdf
