@@ -39,7 +39,9 @@ class GuessesControllerTest < ActionDispatch::IntegrationTest
     assert_no_difference("Guess.count") do
       post guesses_url, params: { guess: { game_id: @bob_guess.game_id, image_id: @bob_guess.image_id, latitude: 1.0, longitude: 2.0 } }
     end
-    assert_response :not_found
+    # Current.user.games.find(other_user.game) raises RecordNotFound, which is
+    # rescued globally in ApplicationController and turned into a redirect.
+    assert_redirected_to root_path
   end
 
   test "non-admin redirected from another user's guess show" do

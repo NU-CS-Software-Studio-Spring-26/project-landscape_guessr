@@ -52,7 +52,11 @@ class GamesControllerTest < ActionDispatch::IntegrationTest
   test "should not show another user's game" do
     sign_in_as @alice
     get game_url(@bob_game)
-    assert_response :not_found
+    # ApplicationController#rescue_from ActiveRecord::RecordNotFound rewrites
+    # `Current.user.games.find(other_users_game)` into a friendly redirect with
+    # a flash, instead of letting the bare 404 leak out.
+    assert_redirected_to root_path
+    assert_match(/couldn't find/i, flash[:alert])
   end
 
   test "non-admin cannot edit own game" do
@@ -82,7 +86,8 @@ class GamesControllerTest < ActionDispatch::IntegrationTest
     assert_no_difference("Game.count") do
       delete game_url(@bob_game)
     end
-    assert_response :not_found
+    # See above — RecordNotFound is rescued globally and rendered as a redirect.
+    assert_redirected_to root_path
   end
 
   test "admin can edit own game" do
