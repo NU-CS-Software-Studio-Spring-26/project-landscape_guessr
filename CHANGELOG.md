@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [milestone-1] — 2026-05-XX
+## [milestone-1](https://github.com/NU-CS-Software-Studio-Spring-26/project-landscape_guessr/releases/tag/milestone-1) — 2026-05-05
 
 ### Added
 
@@ -49,6 +49,6 @@ All notable changes to this project will be documented in this file.
 - Duplicate `haversine_km` definitions in two controllers (now `Game.haversine_km`)
 - **Leaflet** dependency (CSS + JS bundle) — superseded by MapLibre across all maps
 
-## [milestone-0] — 2026-04-XX
+## [milestone-0](https://github.com/NU-CS-Software-Studio-Spring-26/project-landscape_guessr/releases/tag/milestone-0)
 
 Initial MVP: anonymous play (no accounts), single global pool of Wikidata-seeded images, binary win/lose outcome, no leaderboard, no uploads.
