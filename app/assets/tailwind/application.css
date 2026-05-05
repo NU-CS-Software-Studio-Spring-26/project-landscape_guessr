@@ -25,6 +25,23 @@
   }
 
   /* ------------------------------------------------------------------
+     Select with always-visible custom arrow.
+     Native <select> arrows can vanish under some browser/Turbo combos
+     (we saw this on the games index dropdown) so we strip the native
+     chevron with appearance:none and render our own SVG via background-
+     image. Pair with `pr-8` so option text clears the arrow.
+  ------------------------------------------------------------------ */
+  .select-with-arrow {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%236b7280'><path d='M5.5 7.5l4.5 4.5 4.5-4.5z'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 0.5rem center;
+    background-size: 1rem 1rem;
+  }
+
+  /* ------------------------------------------------------------------
      Form inputs
      Apply to <input>/<select>/<textarea>. Use form-input-error when a
      field has validation errors so the border + focus ring turn red.

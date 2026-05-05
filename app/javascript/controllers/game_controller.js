@@ -70,18 +70,19 @@ export default class extends Controller {
     this.submitTarget.classList.add("hidden")
     this.nextTarget.classList.remove("hidden")
 
+    const dist = this.#formatDistance(km)
     let text, color
     if (km < 50) {
-      text = `${Math.round(km)} km away — Excellent!`
+      text = `${dist} away — Excellent!`
       color = "text-green-600"
     } else if (km < 300) {
-      text = `${Math.round(km)} km away — Great!`
+      text = `${dist} away — Great!`
       color = "text-green-600"
     } else if (km < 1000) {
-      text = `${Math.round(km)} km away — Not bad!`
+      text = `${dist} away — Not bad!`
       color = "text-yellow-600"
     } else {
-      text = `${Math.round(km).toLocaleString()} km away`
+      text = `${dist} away`
       color = "text-red-600"
     }
 
@@ -105,6 +106,17 @@ export default class extends Controller {
     } else if (!this.nextTarget.classList.contains("hidden")) {
       this.nextRound()
     }
+  }
+
+  // Mirrors GamesHelper#format_distance_compact so sub-km guesses
+  // don't render as "0 km" and 1.x km don't get rounded up to "2 km".
+  #formatDistance(km) {
+    if (km < 1) return `${Math.round(km * 1000)} m`
+    if (km < 10) {
+      const r = Math.round(km * 10) / 10
+      return `${Number.isInteger(r) ? r.toFixed(0) : r.toFixed(1)} km`
+    }
+    return `${Math.round(km).toLocaleString()} km`
   }
 
   #haversine(lat1, lng1, lat2, lng2) {

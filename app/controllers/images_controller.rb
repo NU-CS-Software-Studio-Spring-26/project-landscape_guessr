@@ -5,12 +5,12 @@ class ImagesController < ApplicationController
 
   # GET /images or /images.json
   def index
-    @images = Image.visible_to(Current.user)
+    @images = admin? ? Image.all : Image.visible_to(Current.user)
   end
 
   # GET /images/map
   def map
-    images = Image.visible_to(Current.user).with_attached_photo
+    images = (admin? ? Image.all : Image.visible_to(Current.user)).with_attached_photo
     @image_data = images.map do |img|
       display_url = if img.photo.attached?
         url_for(img.photo)
@@ -23,7 +23,7 @@ class ImagesController < ApplicationController
 
   # GET /images/1 or /images/1.json
   def show
-    unless @image.visible_to?(Current.user)
+    unless admin? || @image.visible_to?(Current.user)
       redirect_to images_path, alert: "That image is private." and return
     end
   end

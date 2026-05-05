@@ -21,6 +21,7 @@ Rails.application.routes.draw do
       post :add_image
       post :attach_blob
       get  :processing_status
+      get  :map
     end
     delete "items/:item_id", to: "image_sets#remove_item", as: :remove_item
   end

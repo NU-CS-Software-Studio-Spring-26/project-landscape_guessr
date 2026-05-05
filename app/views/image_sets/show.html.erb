@@ -16,15 +16,22 @@
             class: "btn-primary" %>
       <%= link_to "Leaderboard", leaderboard_games_path(image_set_id: @image_set.id),
             class: "btn-secondary" %>
+      <%= link_to "Map", map_image_set_path(@image_set),
+            class: "btn-secondary", data: { turbo: false } %>
       <% if @image_set.owned_by?(Current.user) %>
-        <%= link_to "Edit locations", locations_image_set_path(@image_set), class: "btn-secondary" %>
+        <%= link_to "Manage images", locations_image_set_path(@image_set), class: "btn-secondary" %>
         <%= link_to "Settings",       edit_image_set_path(@image_set),      class: "btn-secondary" %>
       <% end %>
     </div>
   </div>
 
   <% if @items.empty? %>
-    <p class="text-gray-500">No images in this set yet.</p>
+    <div class="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-6 py-10 text-center space-y-3">
+      <p class="text-gray-600">No images in this set yet.</p>
+      <% if @image_set.owned_by?(Current.user) %>
+        <%= link_to "Add images", locations_image_set_path(@image_set), class: "btn-primary inline-block" %>
+      <% end %>
+    </div>
   <% else %>
     <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
       <% @items.each do |item| %>

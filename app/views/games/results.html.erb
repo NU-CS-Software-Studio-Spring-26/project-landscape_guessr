@@ -40,8 +40,16 @@
   <div class="space-y-3">
     <h2 class="heading-section">Round Breakdown</h2>
     <% @rounds.each_with_index do |row, idx| %>
-      <div class="rounded-lg border border-gray-200 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <div>
+      <div class="rounded-lg border border-gray-200 px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
+        <% thumb = image_src(row[:guess].image, width: 200) %>
+        <% if thumb %>
+          <a href="<%= thumb %>" target="_blank" rel="noopener" class="shrink-0">
+            <img src="<%= thumb %>" alt="<%= row[:guess].image.title %>"
+                 loading="lazy"
+                 class="w-full sm:w-24 h-20 sm:h-16 object-cover rounded-md border border-gray-100">
+          </a>
+        <% end %>
+        <div class="flex-1 min-w-0">
           <span class="eyebrow text-gray-400">Round <%= idx + 1 %></span>
           <p class="font-medium text-gray-800 truncate"><%= row[:guess].image.title %></p>
           <p class="text-xs text-gray-500">

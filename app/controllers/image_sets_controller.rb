@@ -1,5 +1,5 @@
 class ImageSetsController < ApplicationController
-  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image attach_blob processing_status remove_item]
+  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image attach_blob processing_status remove_item map]
   before_action :require_owner, only: %i[edit update destroy locations update_locations add_image attach_blob processing_status remove_item]
 
   # GET /image_sets
@@ -27,7 +27,9 @@ class ImageSetsController < ApplicationController
   def create
     @image_set = Current.user.image_sets.new(image_set_params)
     if @image_set.save
-      redirect_to @image_set, notice: "Image set created."
+      # Drop straight into the manage page — a freshly created set has no
+      # images, so the natural next step is to upload some.
+      redirect_to locations_image_set_path(@image_set), notice: "Set created — add some images to start."
     else
       render :new, status: :unprocessable_entity
     end
@@ -59,6 +61,12 @@ class ImageSetsController < ApplicationController
   end
 
   # PUT /image_sets/1/locations
+  #
+  # Bulk-edit form: per-item lat/lng (on ImageSetItem) and title (on the
+  # underlying Image). We update Image#title because ImageSetItem doesn't
+  # carry its own title — ImageSetItem#title delegates to its Image. In
+  # the rare case that an Image lives in another user's set too, that
+  # set's display title will follow this edit.
   def update_locations
     items_params = params[:image_set_items] || {}
     errors = []
@@ -67,8 +75,15 @@ class ImageSetsController < ApplicationController
       items_params.each do |item_id, attrs|
         item = @image_set.image_set_items.find_by(id: item_id)
         next unless item
+
         unless item.update(latitude: attrs[:latitude], longitude: attrs[:longitude])
           errors << "#{item.title}: #{item.errors.full_messages.join(', ')}"
+        end
+
+        if attrs.key?(:title) && (new_title = attrs[:title].to_s.strip).present? && new_title != item.image.title
+          unless item.image.update(title: new_title)
+            errors << "#{item.title}: #{item.image.errors.full_messages.join(', ')}"
+          end
         end
       end
       raise ActiveRecord::Rollback if errors.any?
@@ -79,35 +94,29 @@ class ImageSetsController < ApplicationController
       flash.now[:alert] = errors.join("; ")
       render :locations, status: :unprocessable_entity
     else
-      redirect_to locations_image_set_path(@image_set), notice: "Locations saved."
+      redirect_to locations_image_set_path(@image_set), notice: "Changes saved."
     end
   end
 
   # POST /image_sets/1/add_image
+  #
+  # Add a single image *by URL* — for external images we don't need to
+  # store on S3 (Wikimedia, etc.). File uploads go through attach_blob
+  # (direct-upload + ProcessImageJob), not here.
   def add_image
-    file  = params[:file]
-    url   = params[:url].to_s.strip
-    title = params[:title].to_s.strip.presence
+    url = params[:url].to_s.strip
+    if url.empty?
+      redirect_to locations_image_set_path(@image_set), alert: "Please enter an image URL." and return
+    end
+
+    title = params[:title].to_s.strip.presence || "Untitled"
     lat   = params[:latitude].presence&.to_f
     lng   = params[:longitude].presence&.to_f
 
-    if file.present?
-      title ||= File.basename(file.original_filename, ".*").gsub(/[_-]+/, " ").titleize
-      # Read EXIF GPS *before* the JPEG re-encode strips metadata.
-      if lat.nil? && lng.nil? && (gps = Image.gps_from_upload(file))
-        lat, lng = gps
-      end
-      image = Image.create!(title: title, latitude: lat, longitude: lng)
-      image.photo.attach(Image.process_upload(file))
-    elsif url.present?
-      title ||= "Untitled"
-      image = Image.find_or_create_by!(url: url) do |img|
-        img.title     = title
-        img.latitude  = lat
-        img.longitude = lng
-      end
-    else
-      redirect_to locations_image_set_path(@image_set), alert: "Please upload a file or enter a URL." and return
+    image = Image.find_or_create_by!(url: url) do |img|
+      img.title     = title
+      img.latitude  = lat
+      img.longitude = lng
     end
 
     item = @image_set.image_set_items.find_or_initialize_by(image: image)
@@ -132,6 +141,23 @@ class ImageSetsController < ApplicationController
     end
   end
 
+  # GET /image_sets/1/map
+  def map
+    items = @image_set.image_set_items.includes(image: { photo_attachment: :blob })
+    @image_data = items.filter_map do |item|
+      lat = item.latitude || item.image.latitude
+      lng = item.longitude || item.image.longitude
+      next unless lat && lng
+      img = item.image
+      display_url = if img.photo.attached?
+        url_for(img.photo)
+      elsif img.url.present?
+        img.url
+      end
+      { id: img.id, lat: lat.to_f, lng: lng.to_f, title: item.title, url: display_url }
+    end
+  end
+
   # GET /image_sets/1/processing_status
   #
   # Lightweight JSON endpoint the locations page polls every couple
@@ -145,7 +171,7 @@ class ImageSetsController < ApplicationController
       {
         id:        item.id,
         processed: processed,
-        photo_url: processed ? view_context.image_src(item.image, width: 200) : nil,
+        photo_url: processed ? view_context.image_src(item.image, width: 200) : nil
       }
     end
     render json: { items: payload, processing_count: payload.count { |i| !i[:processed] } }
@@ -189,8 +215,8 @@ class ImageSetsController < ApplicationController
 
   def set_image_set
     @image_set = ImageSet.find(params[:id])
-    # Allow reading public/system sets; editing is guarded by require_owner
-    unless @image_set.is_system_default? || @image_set.owned_by?(Current.user) || @image_set.visibility == "public"
+    # Allow reading public/system sets; editing is guarded by require_owner.
+    unless @image_set.playable_by?(Current.user)
       redirect_to image_sets_path, alert: "That set is private." and return
     end
   end

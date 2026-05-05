@@ -18,7 +18,9 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
     end
     set = ImageSet.last
     assert_equal @alice, set.user
-    assert_redirected_to image_set_path(set)
+    # New sets land on the manage-images page so the user can immediately
+    # upload — see ImageSetsController#create.
+    assert_redirected_to locations_image_set_path(set)
   end
 
   test "show is accessible for public set by any logged-in user" do

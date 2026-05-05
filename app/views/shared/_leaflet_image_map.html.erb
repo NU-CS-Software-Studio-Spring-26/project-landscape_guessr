@@ -1,0 +1,56 @@
+<%#
+  Shared leaflet world map with one circle marker per point.
+  Used by /images/map and /image_sets/:id/map.
+
+  Locals:
+    points       — array of { id:, lat:, lng:, title:, url: } hashes
+    element_id   — DOM id for the map container (default "leaflet-image-map")
+    height_class — Tailwind height class (default "h-[80vh]")
+%>
+<% element_id   ||= "leaflet-image-map" %>
+<% height_class ||= "h-[80vh]" %>
+<% data_id       = "#{element_id}-data" %>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+<div id="<%= element_id %>" class="w-full <%= height_class %> rounded-md border border-gray-200"></div>
+
+<script type="application/json" id="<%= data_id %>"><%== points.to_json %></script>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  (function () {
+    const data = JSON.parse(document.getElementById("<%= data_id %>").textContent);
+    const map = L.map("<%= element_id %>", { preferCanvas: true }).setView([20, 0], 2);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(map);
+
+    const markers = [];
+    data.forEach(function (img) {
+      const marker = L.circleMarker([img.lat, img.lng], {
+        radius: 4,
+        color: "#2563eb",
+        weight: 1,
+        fillColor: "#3b82f6",
+        fillOpacity: 0.7
+      }).addTo(map);
+      const safeTitle = (img.title || "").replace(/</g, "&lt;");
+      const popup = `
+        <div style="min-width:200px">
+          ${img.url ? `<img src="${img.url}${img.url.includes("?") ? "&" : "?"}width=300" loading="lazy" style="width:100%;height:120px;object-fit:cover;border-radius:4px" alt="">` : ""}
+          <div style="margin-top:6px;font-weight:600">${safeTitle}</div>
+          <div style="font-size:12px;color:#666">${img.lat.toFixed(4)}, ${img.lng.toFixed(4)}</div>
+          <a href="/images/${img.id}" style="color:#2563eb;font-size:12px">Details →</a>
+        </div>`;
+      marker.bindPopup(popup);
+      markers.push(marker);
+    });
+
+    if (markers.length > 0) {
+      const group = L.featureGroup(markers);
+      map.fitBounds(group.getBounds().pad(0.2), { maxZoom: 10 });
+    }
+  })();
+</script>
