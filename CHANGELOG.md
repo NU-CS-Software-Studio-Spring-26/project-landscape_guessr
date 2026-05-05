@@ -16,7 +16,7 @@ All notable changes to this project will be documented in this file.
 - **Per-game leaderboard** (`/games/leaderboard?image_set_id=N`): top-20, sortable by score or completion date.
 - **Results page redesign**: per-round breakdown with thumbnails, summary map (MapLibre) showing all guesses + answers, total distance + total score, "Play Again" / "Leaderboard" / "Back to Games" CTAs.
 - **In-round distance feedback**: as soon as you submit a guess, the page shows the great-circle distance with the same `format_distance_compact` formatting used on the results page (no more "0 km" for sub-kilometre guesses).
-- **Image set map view**: leaflet map at `/image_sets/:id/map` showing every located image in the set, with auto-fit bounds and per-marker popup.
+- **Image set map view**: map at `/image_sets/:id/map` showing every located image in the set, with auto-fit bounds and per-marker popup.
 - **Friendly 404s**: `ActiveRecord::RecordNotFound` is caught globally and turned into a redirect with a flash, instead of leaking a stack trace (dev) or showing the bare `public/404.html` (prod).
 - **Background-processing rake tasks**: `images:reprocess_pending`, `images:purge_unattached`, `images:destroy_orphans`, `images:mark_legacy_processed`. Recover stuck jobs after a dyno restart drops the `:async` queue.
 - **Live processing banner**: locations page polls `processing_status` every 2s and swaps placeholders for real thumbnails as `ProcessImageJob` finishes each image. No full-page reloads.
@@ -31,6 +31,7 @@ All notable changes to this project will be documented in this file.
 - New image sets land on the manage-images page (was: gallery view) so the user can immediately upload.
 - The bulk-upload UX is the primary path for adding images. The "Add by URL" form is collapsed by default. The single-file form was removed (titles and coords are now editable inline on the manage page after upload).
 - `Image.visible_to(user)` now derives from set membership instead of being a flat scope; admins bypass visibility entirely.
+- All maps consolidated onto **MapLibre + MapTiler topo-v2** (terrain shading, smooth vector zoom). Replaces Leaflet on `/images/map` and `/image_sets/:id/map`, and replaces `streets-v2` on the in-game and results maps.
 
 ### Fixed
 
@@ -46,6 +47,7 @@ All notable changes to this project will be documented in this file.
 - `app/javascript/controllers/hello_controller.js` (Stimulus scaffold leftover)
 - Unused `ImageSet.system_default` and `ImageSet.visible_to` scopes
 - Duplicate `haversine_km` definitions in two controllers (now `Game.haversine_km`)
+- **Leaflet** dependency (CSS + JS bundle) — superseded by MapLibre across all maps
 
 ## [milestone-0] — 2026-04-XX
 
