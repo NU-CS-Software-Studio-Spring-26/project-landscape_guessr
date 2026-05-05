@@ -1,12 +1,23 @@
 class GamesController < ApplicationController
   TOTAL_ROUNDS = 5
 
-  before_action :require_admin, only: %i[ edit update ]
+  before_action :require_admin, only: %i[ new edit update ]
   before_action :set_game, only: %i[ show edit update destroy results ]
 
   # GET /games or /games.json
+  GAMES_INDEX_SORTS = %w[created_at score].freeze
+  GAMES_INDEX_STATUSES = %w[all in_progress completed].freeze
+
   def index
-    @games = Current.user.games.includes(:guesses).order(created_at: :desc)
+    @sort      = GAMES_INDEX_SORTS.include?(params[:sort]) ? params[:sort] : "created_at"
+    @direction = params[:direction] == "asc" ? "asc" : "desc"
+    @status    = GAMES_INDEX_STATUSES.include?(params[:status]) ? params[:status] : "all"
+
+    games = Current.user.games.includes(:guesses, :image_set)
+    games = games.where(status: "in_progress") if @status == "in_progress"
+    games = games.where.not(completed_at: nil) if @status == "completed"
+
+    @games = games.order(@sort => @direction)
     @total_rounds = TOTAL_ROUNDS
   end
 
@@ -15,7 +26,7 @@ class GamesController < ApplicationController
     @image_set =
       if params[:image_set_id].present?
         set = ImageSet.find_by(id: params[:image_set_id])
-        unless set && (set.is_system_default? || set.visibility == "public" || set.owned_by?(Current.user))
+        unless set&.playable_by?(Current.user)
           redirect_to image_sets_path, alert: "That set is private." and return
         end
         set
@@ -58,10 +69,22 @@ class GamesController < ApplicationController
     end
 
     @game = Current.user.games.new(status: "in_progress", image_set: image_set)
-    items = image_set.image_set_items.includes(:image).order("RANDOM()").limit(TOTAL_ROUNDS)
+
+    # Skip image_set_items where no answer location is available — without
+    # this we'd silently include them and every guess for that round would
+    # be scored against (0, 0). The COALESCE checks the per-item override
+    # *or* the underlying image's coords (item.latitude falls back to
+    # item.image.latitude in our model).
+    items = image_set.image_set_items
+              .joins(:image)
+              .where("COALESCE(image_set_items.latitude,  images.latitude)  IS NOT NULL")
+              .where("COALESCE(image_set_items.longitude, images.longitude) IS NOT NULL")
+              .preload(:image)
+              .order(Arel.sql("RANDOM()"))
+              .limit(TOTAL_ROUNDS)
 
     if items.size < TOTAL_ROUNDS
-      redirect_to root_path, alert: "Not enough images to start a game (need #{TOTAL_ROUNDS}, set has #{items.size})." and return
+      redirect_to root_path, alert: "Not enough images with coordinates to start a game (need #{TOTAL_ROUNDS}, this set has #{items.size}). Set lat/lng on more images first." and return
     end
 
     Game.transaction do
@@ -119,7 +142,7 @@ class GamesController < ApplicationController
       gi = game_images_by_image_id[guess.image_id]
       ans_lat = gi&.answer_lat || guess.image.latitude.to_f
       ans_lng = gi&.answer_lng || guess.image.longitude.to_f
-      dist_km = haversine_km(guess.latitude.to_f, guess.longitude.to_f, ans_lat, ans_lng)
+      dist_km = Game.haversine_km(guess.latitude.to_f, guess.longitude.to_f, ans_lat, ans_lng)
       {
         guess: guess,
         distance_km: dist_km,
@@ -170,15 +193,5 @@ class GamesController < ApplicationController
       else
         ImageSet.default
       end
-    end
-
-    # Great-circle distance in kilometres using the Haversine formula.
-    def haversine_km(lat1, lon1, lat2, lon2)
-      rad = Math::PI / 180
-      dlat = (lat2 - lat1) * rad
-      dlon = (lon2 - lon1) * rad
-      a = Math.sin(dlat / 2)**2 +
-          Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dlon / 2)**2
-      6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
     end
 end

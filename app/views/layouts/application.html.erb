@@ -35,11 +35,10 @@
       <div class="flex items-center gap-3">
         <% if authenticated? %>
           <%= link_to Current.user.username, profile_path, class: "text-gray-700 hover:text-blue-600 font-medium hidden sm:inline" %>
-          <%= button_to "Sign out", session_path, method: :delete,
-                class: "rounded-md px-3 py-1.5 bg-gray-100 hover:bg-gray-50 font-medium border border-gray-200 cursor-pointer" %>
+          <%= button_to "Sign out", session_path, method: :delete, class: "btn-secondary text-sm py-1.5" %>
         <% else %>
-          <%= link_to "Sign in", new_session_path, class: "rounded-md px-3 py-1.5 bg-gray-100 hover:bg-gray-50 font-medium border border-gray-200" %>
-          <%= link_to "Sign up", new_registration_path, class: "rounded-md px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-medium" %>
+          <%= link_to "Sign in", new_session_path, class: "btn-secondary text-sm py-1.5" %>
+          <%= link_to "Sign up", new_registration_path, class: "btn-primary text-sm py-1.5" %>
         <% end %>
       </div>
     </nav>
@@ -53,5 +52,14 @@
       <% end %>
       <%= yield %>
     </main>
+
+    <footer class="container mx-auto px-5 py-8 mt-12 border-t border-gray-200 text-xs text-gray-500 flex flex-wrap items-center justify-between gap-2">
+      <span>Landscape Guessr &middot; <%= Date.current.year %></span>
+      <span>
+        <%= link_to "GitHub", "https://github.com/NU-CS-Software-Studio-Spring-26/project-landscape_guessr", class: "underline hover:text-blue-600" %>
+        &middot;
+        Built for CS-397 with Rails 8
+      </span>
+    </footer>
   </body>
 </html>

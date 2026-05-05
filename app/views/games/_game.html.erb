@@ -1,9 +1,14 @@
 <div id="<%= dom_id game %>" class="w-full sm:w-auto my-5">
   <% if game.status == "completed" %>
     <p class="font-medium">Score: <%= number_with_delimiter(game.score.to_i) %> pts</p>
-    <p class="text-sm text-gray-500">Completed <%= time_ago_in_words(game.completed_at) %> ago</p>
+    <p class="muted">Completed <%= time_ago_in_words(game.completed_at) %> ago</p>
   <% else %>
     <p class="font-medium">Round <%= [game.guesses.size + 1, @total_rounds].min %> / <%= @total_rounds %></p>
-    <p class="text-sm text-gray-500">In progress</p>
+    <p class="muted">In progress</p>
+  <% end %>
+  <% if game.image_set %>
+    <p class="text-xs text-gray-400 mt-0.5">
+      on <%= link_to game.image_set.name, game.image_set, class: "hover:text-blue-600 hover:underline" %>
+    </p>
   <% end %>
 </div>

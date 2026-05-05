@@ -26,4 +26,23 @@ class GameTest < ActiveSupport::TestCase
   test "belongs to a user" do
     assert_equal :belongs_to, Game.reflect_on_association(:user).macro
   end
+
+  test "leaderboard scope filters to a single image_set" do
+    set_a = ImageSet.create!(name: "Set A", visibility: "public")
+    set_b = ImageSet.create!(name: "Set B", visibility: "public")
+    game_a = users(:alice).games.create!(status: "completed", score: 1000, completed_at: Time.current, image_set: set_a)
+    users(:bob).games.create!(status: "completed", score: 9999, completed_at: Time.current, image_set: set_b)
+
+    results = Game.leaderboard(image_set: set_a).to_a
+    assert_includes results, game_a
+    assert_equal 1, results.size, "leaderboard for set A should only include games on set A"
+  end
+
+  test "leaderboard excludes incomplete games" do
+    set = ImageSet.create!(name: "Set", visibility: "public")
+    users(:alice).games.create!(status: "in_progress", image_set: set)
+    completed = users(:bob).games.create!(status: "completed", score: 100, completed_at: Time.current, image_set: set)
+
+    assert_equal [ completed ], Game.leaderboard(image_set: set).to_a
+  end
 end

@@ -18,7 +18,9 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
     end
     set = ImageSet.last
     assert_equal @alice, set.user
-    assert_redirected_to image_set_path(set)
+    # New sets land on the manage-images page so the user can immediately
+    # upload — see ImageSetsController#create.
+    assert_redirected_to locations_image_set_path(set)
   end
 
   test "show is accessible for public set by any logged-in user" do
@@ -64,5 +66,28 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
       delete image_set_path(set)
     end
     assert_redirected_to image_sets_path
+  end
+
+  test "remove_item destroys the item and redirects with a flash" do
+    # Regression: the remove_item route nests under :image_set_id, not :id,
+    # so set_image_set used to read params[:id] and raise RecordNotFound.
+    item = image_set_items(:alice_private_one)
+    assert_difference("ImageSetItem.count", -1) do
+      delete image_set_remove_item_path(image_sets(:alice_private), item),
+             headers: { "Referer" => locations_image_set_path(image_sets(:alice_private)) }
+    end
+    assert_redirected_to locations_image_set_path(image_sets(:alice_private))
+    assert_match(/removed/i, flash[:notice])
+  end
+
+  test "update_locations saves a new title (delegating to Image)" do
+    item = image_set_items(:alice_private_one)
+    original = item.image.title
+    put locations_image_set_path(image_sets(:alice_private)),
+        params: { image_set_items: { item.id.to_s => { title: "Renamed", latitude: item.latitude.to_s, longitude: item.longitude.to_s } } }
+    assert_redirected_to locations_image_set_path(image_sets(:alice_private))
+    assert_equal "Renamed", item.image.reload.title
+  ensure
+    item&.image&.update(title: original) if original
   end
 end

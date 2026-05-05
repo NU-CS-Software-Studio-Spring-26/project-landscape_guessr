@@ -1,19 +1,18 @@
 <% content_for :title, "Game ##{@game.id}" %>
 <% content_for :head do %>
-  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.css" />
-  <script src="https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.js"></script>
+  <%= render "shared/maplibre_assets" %>
 <% end %>
 
 <div class="w-full space-y-4">
   <div class="flex justify-between items-center">
-    <h1 class="font-bold text-3xl">
+    <h1 class="heading-page">
       <% if @image %>
         Round <%= @round %> / <%= @total_rounds %>
       <% else %>
         Game complete
       <% end %>
     </h1>
-    <%= link_to "Back to games", games_path, class: "rounded-md px-3 py-2 bg-gray-100 hover:bg-gray-50 font-medium" %>
+    <%= link_to "Back to games", games_path, class: "btn-secondary text-sm py-2" %>
   </div>
 
   <% if @image %>
@@ -35,20 +34,13 @@
           <span data-game-target="readout" class="text-sm text-gray-600">Click the map to drop a pin.</span>
           <p data-game-target="result" class="text-lg font-medium"></p>
           <%= submit_tag "Submit guess", data: { game_target: "submit", action: "game#submitGuess" }, disabled: true,
-              class: "ml-auto rounded-md px-3.5 py-2.5 bg-blue-600 text-white font-medium disabled:bg-gray-300 cursor-pointer" %>
+              class: "btn-primary ml-auto disabled:opacity-40" %>
           <button type="button" data-game-target="next" data-action="game#nextRound"
-                  class="hidden ml-auto rounded-md px-3.5 py-2.5 bg-blue-600 text-white font-medium hover:bg-blue-700 cursor-pointer">
+                  class="btn-primary hidden ml-auto">
             Next round
           </button>
         <% end %>
       </div>
     </div>
-  <% else %>
-    <p class="text-lg text-gray-700">You've guessed all <%= @total_rounds %> rounds. Results view coming soon.</p>
-    <ul class="text-sm text-gray-600 list-disc pl-5">
-      <% @game.guesses.includes(:image).each do |g| %>
-        <li><%= g.image.title %> — guessed (<%= g.latitude %>, <%= g.longitude %>)</li>
-      <% end %>
-    </ul>
   <% end %>
 </div>

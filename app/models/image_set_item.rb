@@ -6,6 +6,8 @@ class ImageSetItem < ApplicationRecord
   validates :longitude, numericality: { greater_than_or_equal_to: -180, less_than_or_equal_to: 180 }, allow_nil: true
   validates :image_id, uniqueness: { scope: :image_set_id, message: "already in this set" }
 
+  after_destroy :purge_image_if_orphan
+
   delegate :title, :url, to: :image
 
   def answer_lat
@@ -14,5 +16,16 @@ class ImageSetItem < ApplicationRecord
 
   def answer_lng
     longitude&.to_f || image.longitude&.to_f
+  end
+
+  private
+
+  # When the last set membership goes away, destroy the Image too so the
+  # S3 blob (purged via has_one_attached's :purge_later default) doesn't
+  # leak. Image#purge_if_orphan! is conservative — it skips destruction
+  # if any other association still points at the image, so this is safe
+  # even when the image lives in multiple sets or has played games.
+  def purge_image_if_orphan
+    image&.purge_if_orphan!
   end
 end

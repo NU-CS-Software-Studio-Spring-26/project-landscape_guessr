@@ -19,11 +19,14 @@ Rails.application.routes.draw do
       get  :locations
       put  :locations, action: :update_locations
       post :add_image
-      post :bulk_upload
+      post :attach_blob
+      get  :processing_status
+      get  :map
     end
     delete "items/:item_id", to: "image_sets#remove_item", as: :remove_item
   end
-  get "practice", to: "practice#show"
+  get  "practice",       to: "practice#show"
+  get  "practice/check", to: "practice#check", as: :practice_check
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.

@@ -2,11 +2,35 @@
 
 <div class="w-full">
   <div class="flex justify-between items-center">
-    <h1 class="font-bold text-4xl">Games</h1>
+    <h1 class="heading-page">Games</h1>
     <div class="flex space-x-2">
-      <%= link_to "Leaderboard", leaderboard_games_path, class: "rounded-md px-3.5 py-2.5 bg-gray-100 hover:bg-gray-50 font-medium" %>
-      <%= button_to "New game", games_path, method: :post, data: { turbo: false },
-            class: "rounded-md px-3.5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white block font-medium cursor-pointer" %>
+      <%= link_to "Leaderboard", leaderboard_games_path, class: "btn-secondary" %>
+      <%# Land on /image_sets so the user picks which set to play. The home
+          page's "Start new game" still kicks straight to the system default. %>
+      <%= link_to "New game", image_sets_path, class: "btn-primary" %>
+    </div>
+  </div>
+
+  <div class="flex flex-wrap items-center gap-2 mt-6 mb-4 text-sm">
+    <% [["All", "all"], ["In progress", "in_progress"], ["Completed", "completed"]].each do |label, value| %>
+      <%= link_to label, games_path(status: value, sort: @sort, direction: @direction),
+            class: "rounded-full px-3 py-1 text-xs font-medium #{@status == value ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}" %>
+    <% end %>
+
+    <div class="ml-auto flex items-center gap-2">
+      <label for="sort_dir" class="muted">Sort by</label>
+      <%= select_tag :sort_dir,
+            options_for_select(
+              [
+                ["Newest first",  games_path(status: @status, sort: "created_at", direction: "desc")],
+                ["Oldest first",  games_path(status: @status, sort: "created_at", direction: "asc")],
+                ["Highest score", games_path(status: @status, sort: "score",      direction: "desc")],
+                ["Lowest score",  games_path(status: @status, sort: "score",      direction: "asc")]
+              ],
+              games_path(status: @status, sort: @sort, direction: @direction)
+            ),
+            onchange: "window.location = this.value",
+            class: "select-with-arrow rounded-md border border-gray-300 pl-3 pr-8 py-1.5 text-sm cursor-pointer bg-white" %>
     </div>
   </div>
 
@@ -16,16 +40,31 @@
         <div class="flex flex-col sm:flex-row justify-between items-center pb-5 sm:pb-0">
           <%= render game %>
           <div class="w-full sm:w-auto flex flex-col sm:flex-row space-x-2 space-y-2">
-            <%= link_to "Show", game, class: "w-full sm:w-auto text-center rounded-md px-3.5 py-2.5 bg-gray-100 hover:bg-gray-50 inline-block font-medium" %>
-            <% if admin? %>
-              <%= link_to "Edit", edit_game_path(game), class: "w-full sm:w-auto text-center rounded-md px-3.5 py-2.5 bg-gray-100 hover:bg-gray-50 inline-block font-medium" %>
+            <% if game.status == "completed" %>
+              <%= link_to "View results", results_game_path(game), class: "btn-secondary w-full sm:w-auto" %>
+            <% else %>
+              <%= link_to "Continue", game, class: "btn-secondary w-full sm:w-auto" %>
             <% end %>
-            <%= button_to "Destroy", game, method: :delete, class: "w-full sm:w-auto rounded-md px-3.5 py-2.5 text-white bg-red-600 hover:bg-red-500 font-medium cursor-pointer", data: { turbo_confirm: "Are you sure?" } %>
+            <% if admin? %>
+              <%= link_to "Edit", edit_game_path(game), class: "btn-secondary w-full sm:w-auto" %>
+            <% end %>
+            <%= button_to "Delete", game, method: :delete,
+                  data: { turbo_confirm: "Delete this game? This cannot be undone." },
+                  class: "btn-danger w-full sm:w-auto" %>
           </div>
         </div>
       <% end %>
     <% else %>
-      <p class="text-center my-10">No games found.</p>
+      <p class="text-center my-10 text-gray-500">
+        <% case @status %>
+        <% when "completed" %>
+          No completed games yet — click "New game" to play your first.
+        <% when "in_progress" %>
+          No games in progress.
+        <% else %>
+          You haven't started any games yet — click "New game" to play your first.
+        <% end %>
+      </p>
     <% end %>
   </div>
 </div>

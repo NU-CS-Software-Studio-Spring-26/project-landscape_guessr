@@ -3,13 +3,13 @@
 <div class="w-full max-w-2xl mx-auto space-y-6 py-6">
   <div class="flex justify-between items-center">
     <div>
-      <h1 class="text-3xl font-bold">Leaderboard</h1>
-      <p class="text-sm text-gray-500">
+      <h1 class="heading-page">Leaderboard</h1>
+      <p class="muted">
         <%= link_to @image_set.name, @image_set, class: "font-medium text-gray-700 hover:text-blue-600" %>
         &middot; Top <%= @games.size %> games — highest score over <%= @total_rounds %> rounds wins.
       </p>
     </div>
-    <%= link_to "Back to games", games_path, class: "rounded-md px-3 py-2 bg-gray-100 hover:bg-gray-50 font-medium" %>
+    <%= link_to "Back to games", games_path, class: "btn-secondary text-sm py-2" %>
   </div>
 
   <% if @games.any? %>

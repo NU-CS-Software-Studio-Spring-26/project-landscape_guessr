@@ -22,7 +22,16 @@ Rails.application.configure do
   # config.asset_host = "http://assets.example.com"
 
   # Store uploaded files on the local file system (see config/storage.yml for options).
-  config.active_storage.service = :local
+  config.active_storage.service = :amazon
+
+  # Skip Active Storage's content analyzers. They re-download each blob
+  # from S3 and decode it via vips just to extract width/height into
+  # blob.metadata, which we don't read anywhere. On Heroku Basic (512MB)
+  # the per-blob decode pile-up after a bulk upload is enough to OOM the
+  # web dyno. With analyzers=[] the AnalyzeJob falls back to NullAnalyzer:
+  # the job still runs but does no download and no decode, just marks the
+  # blob as analyzed.
+  config.active_storage.analyzers = []
 
   # Assume all access to the app is happening through a SSL-terminating reverse proxy.
   # config.assume_ssl = true
@@ -49,15 +58,26 @@ Rails.application.configure do
   # Use in-memory cache (no separate cache database needed).
   config.cache_store = :memory_store
 
-  # Use async queue adapter (no separate queue database needed).
-  config.active_job.queue_adapter = :async
+  # Use async queue adapter (no separate queue database needed). max_threads
+  # is capped to 1 because Concurrent.processor_count returns the underlying
+  # Heroku host's core count (often 8) — the default would let 8
+  # ProcessImageJobs decode HEICs concurrently, which OOMs a 512MB Basic
+  # dyno even with vips cache disabled. Override via ENV for dev or larger
+  # plans where parallel processing is fine.
+  config.active_job.queue_adapter = ActiveJob::QueueAdapters::AsyncAdapter.new(
+    min_threads:     0,
+    max_threads:     ENV.fetch("ACTIVE_JOB_ASYNC_MAX_THREADS", "1").to_i,
+    idletime:        60,
+    max_queue:       0,
+    fallback_policy: :caller_runs
+  )
 
   # Ignore bad email addresses and do not raise email delivery errors.
   # Set this to true and configure the email server for immediate delivery to raise delivery errors.
   # config.action_mailer.raise_delivery_errors = false
 
   # Set host to be used by links generated in mailer templates.
-  config.action_mailer.default_url_options = { host: "example.com" }
+  config.action_mailer.default_url_options = { host: "landscape-guessr-cc7bc949a622.herokuapp.com", protocol: "https" }
 
   # Specify outgoing SMTP server. Remember to add smtp/* credentials via bin/rails credentials:edit.
   # config.action_mailer.smtp_settings = {

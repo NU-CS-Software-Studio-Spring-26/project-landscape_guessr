@@ -20,8 +20,14 @@ class GamesControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
-  test "should get new when signed in" do
+  test "non-admin redirected from /games/new" do
     sign_in_as @alice
+    get new_game_url
+    assert_redirected_to root_path
+  end
+
+  test "admin can get /games/new" do
+    sign_in_as @admin
     get new_game_url
     assert_response :success
   end
@@ -46,7 +52,11 @@ class GamesControllerTest < ActionDispatch::IntegrationTest
   test "should not show another user's game" do
     sign_in_as @alice
     get game_url(@bob_game)
-    assert_response :not_found
+    # ApplicationController#rescue_from ActiveRecord::RecordNotFound rewrites
+    # `Current.user.games.find(other_users_game)` into a friendly redirect with
+    # a flash, instead of letting the bare 404 leak out.
+    assert_redirected_to root_path
+    assert_match(/couldn't find/i, flash[:alert])
   end
 
   test "non-admin cannot edit own game" do
@@ -76,7 +86,8 @@ class GamesControllerTest < ActionDispatch::IntegrationTest
     assert_no_difference("Game.count") do
       delete game_url(@bob_game)
     end
-    assert_response :not_found
+    # See above — RecordNotFound is rescued globally and rendered as a redirect.
+    assert_redirected_to root_path
   end
 
   test "admin can edit own game" do
@@ -120,5 +131,25 @@ class GamesControllerTest < ActionDispatch::IntegrationTest
       assert_not_nil gi.answer_latitude
       assert_not_nil gi.answer_longitude
     end
+  end
+
+  test "create skips items missing coords and refuses if too few remain" do
+    # Regression: previously we'd silently include no-coord items and every
+    # round's "answer" would be (0, 0). Now we filter at the DB level and
+    # refuse to start if fewer than TOTAL_ROUNDS items have coordinates.
+    sign_in_as @alice
+    set = @alice.image_sets.create!(name: "Sparse", visibility: "private")
+    no_coord = Image.create!(title: "No coords")
+    set.image_set_items.create!(image: no_coord)
+    4.times do |i|
+      img = Image.create!(title: "With coords #{i}", latitude: 10 + i, longitude: 20 + i)
+      set.image_set_items.create!(image: img, latitude: 10 + i, longitude: 20 + i)
+    end
+
+    assert_no_difference("Game.count") do
+      post games_url, params: { image_set_id: set.id }
+    end
+    assert_redirected_to root_path
+    assert_match(/coordinates/i, flash[:alert])
   end
 end

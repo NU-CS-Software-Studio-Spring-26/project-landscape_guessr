@@ -1,10 +1,10 @@
 class GuessesController < ApplicationController
-  before_action :require_admin, only: %i[ new edit update destroy ]
+  before_action :require_admin, only: %i[ index show new edit update destroy ]
   before_action :set_guess, only: %i[ show edit update destroy ]
 
   # GET /guesses or /guesses.json
   def index
-    @guesses = Guess.where(game: Current.user.games)
+    @guesses = Guess.includes(:image, game: :user).order(created_at: :desc).limit(100)
   end
 
   # GET /guesses/1 or /guesses/1.json
@@ -23,6 +23,14 @@ class GuessesController < ApplicationController
   # POST /guesses or /guesses.json
   def create
     game = Current.user.games.includes(:game_images).find(params.dig(:guess, :game_id))
+    image_id = guess_params[:image_id].to_i
+    unless game.game_images.any? { |gi| gi.image_id == image_id }
+      respond_to do |format|
+        format.html { redirect_to game_path(game), alert: "That image isn't part of this game." and return }
+        format.json { render json: { error: "image_id not in this game" }, status: :unprocessable_entity and return }
+      end
+    end
+
     @guess = game.guesses.new(guess_params.except(:game_id))
 
     respond_to do |format|
@@ -63,7 +71,7 @@ class GuessesController < ApplicationController
   private
     # Use callbacks to share common setup or constraints between actions.
     def set_guess
-      @guess = Guess.where(game: Current.user.games).find(params.expect(:id))
+      @guess = Guess.find(params.expect(:id))
     end
 
     # Only allow a list of trusted parameters through.

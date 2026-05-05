@@ -14,8 +14,14 @@ class GuessesControllerTest < ActionDispatch::IntegrationTest
     assert_redirected_to new_session_url
   end
 
-  test "index only shows own guesses" do
+  test "non-admin redirected from /guesses index" do
     sign_in_as @alice
+    get guesses_url
+    assert_redirected_to root_path
+  end
+
+  test "admin can view /guesses index" do
+    sign_in_as @admin
     get guesses_url
     assert_response :success
   end
@@ -33,13 +39,15 @@ class GuessesControllerTest < ActionDispatch::IntegrationTest
     assert_no_difference("Guess.count") do
       post guesses_url, params: { guess: { game_id: @bob_guess.game_id, image_id: @bob_guess.image_id, latitude: 1.0, longitude: 2.0 } }
     end
-    assert_response :not_found
+    # Current.user.games.find(other_user.game) raises RecordNotFound, which is
+    # rescued globally in ApplicationController and turned into a redirect.
+    assert_redirected_to root_path
   end
 
-  test "cannot show another user's guess" do
+  test "non-admin redirected from another user's guess show" do
     sign_in_as @alice
     get guess_url(@bob_guess)
-    assert_response :not_found
+    assert_redirected_to root_path
   end
 
   test "non-admin cannot edit own guess" do

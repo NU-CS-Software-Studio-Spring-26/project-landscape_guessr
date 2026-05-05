@@ -1,18 +1,18 @@
 <div class="mx-auto md:w-2/3 w-full">
-  <h1 class="font-bold text-4xl">Sign in</h1>
+  <h1 class="heading-page">Sign in</h1>
 
   <%= form_with url: session_url, class: "contents" do |form| %>
     <div class="my-5">
-      <%= form.text_field :login, required: true, autofocus: true, autocomplete: "username", placeholder: "Email or username", value: params[:login], class: "block shadow-sm rounded-md border border-gray-400 focus:outline-blue-600 px-3 py-2 mt-2 w-full" %>
+      <%= form.text_field :login, required: true, autofocus: true, autocomplete: "username", placeholder: "Email or username", value: params[:login], class: "form-input" %>
     </div>
 
     <div class="my-5">
-      <%= form.password_field :password, required: true, autocomplete: "current-password", placeholder: "Enter your password", maxlength: 72, class: "block shadow-sm rounded-md border border-gray-400 focus:outline-blue-600 px-3 py-2 mt-2 w-full" %>
+      <%= form.password_field :password, required: true, autocomplete: "current-password", placeholder: "Enter your password", maxlength: 72, class: "form-input" %>
     </div>
 
     <div class="col-span-6 sm:flex sm:items-center sm:gap-4">
       <div class="inline">
-        <%= form.submit "Sign in", class: "w-full sm:w-auto text-center rounded-md px-3.5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white inline-block font-medium cursor-pointer" %>
+        <%= form.submit "Sign in", class: "btn-primary w-full sm:w-auto" %>
       </div>
 
       <div class="mt-4 text-sm text-gray-500 sm:mt-0">
