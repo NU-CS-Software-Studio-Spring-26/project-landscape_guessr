@@ -28,9 +28,9 @@ Rails.application.configure do
   # Change to :null_store to avoid any caching.
   config.cache_store = :memory_store
 
-  # Store uploaded files on S3 in dev too, so we exercise the same path as
-  # production. Flip this back to :local if you want to work offline.
-  config.active_storage.service = :amazon
+  # Store uploaded files on local disk in dev. Flip to :amazon to exercise
+  # the same S3 path as production (requires AWS_ACCESS_KEY_ID/SECRET).
+  config.active_storage.service = :local
 
   # Don't care if the mailer can't send.
   config.action_mailer.raise_delivery_errors = false
