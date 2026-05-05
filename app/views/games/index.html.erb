@@ -5,7 +5,9 @@
     <h1 class="heading-page">Games</h1>
     <div class="flex space-x-2">
       <%= link_to "Leaderboard", leaderboard_games_path, class: "btn-secondary" %>
-      <%= button_to "New game", games_path, method: :post, data: { turbo: false }, class: "btn-primary" %>
+      <%# Land on /image_sets so the user picks which set to play. The home
+          page's "Start new game" still kicks straight to the system default. %>
+      <%= link_to "New game", image_sets_path, class: "btn-primary" %>
     </div>
   </div>
 
