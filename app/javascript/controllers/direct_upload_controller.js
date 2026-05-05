@@ -30,6 +30,10 @@ export default class extends Controller {
     this.element.addEventListener("submit", this.#onSubmit.bind(this))
   }
 
+  disconnect() {
+    this.#removeBeforeUnloadGuard()
+  }
+
   async #onSubmit(event) {
     event.preventDefault()
 
@@ -47,6 +51,12 @@ export default class extends Controller {
     // upload completes. We never decrement or delete entries — that's
     // what makes the rendered total strictly non-decreasing.
     this.inflight       = new Map()
+
+    // Guard against accidental reload/navigation while uploads are in
+    // flight. Without this, every reload spawns a fresh batch of
+    // attach_blob calls (the in-flight ones may still complete server-
+    // side), creating duplicate Image rows in the set.
+    this.#installBeforeUnloadGuard()
 
     this.#showOverlay()
 
@@ -73,9 +83,31 @@ export default class extends Controller {
     }
     await Promise.all(Array.from({ length: concurrency }, worker))
 
+    // Remove the guard *before* triggering our own navigation, otherwise
+    // the redirect would itself fire the "are you sure?" dialog.
+    this.#removeBeforeUnloadGuard()
+
     this.#renderDone()
     setTimeout(() => { window.location.href = this.redirectUrlValue },
       this.failedCount > 0 ? 4000 : 800)
+  }
+
+  #installBeforeUnloadGuard() {
+    this.beforeUnloadHandler = (e) => {
+      // Modern browsers ignore custom strings here and show a generic
+      // "Leave site?" dialog, but we still need to set returnValue (or
+      // call preventDefault) for the dialog to appear at all.
+      e.preventDefault()
+      e.returnValue = ""
+    }
+    window.addEventListener("beforeunload", this.beforeUnloadHandler)
+  }
+
+  #removeBeforeUnloadGuard() {
+    if (this.beforeUnloadHandler) {
+      window.removeEventListener("beforeunload", this.beforeUnloadHandler)
+      this.beforeUnloadHandler = null
+    }
   }
 
   async #uploadOneWithRetry(file) {
