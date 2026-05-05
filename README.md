@@ -67,7 +67,9 @@ To manage the image library or edit past guesses through the UI, you need an adm
 
 ### S3 / Active Storage setup (for user uploads)
 
-User-uploaded images go through Active Storage's direct-upload flow to S3 (the browser PUTs the original file straight to S3, then a background job converts it). To enable in development, set:
+User-uploaded images go through Active Storage's direct-upload flow. Development defaults to local disk (`storage/`) — no AWS setup required. Production uses S3.
+
+To exercise the S3 path locally (parity testing), flip `config.active_storage.service` to `:amazon` in `config/environments/development.rb` and export:
 
 ```bash
 export AWS_ACCESS_KEY_ID=...
@@ -75,8 +77,6 @@ export AWS_SECRET_ACCESS_KEY=...
 export S3_BUCKET=landscape-guessr-dev
 export AWS_REGION=us-east-2
 ```
-
-If you don't want to use S3 locally, edit `config/environments/development.rb` and change `config.active_storage.service` to `:local`. Bulk uploads will then write to `storage/`. (Production always uses S3 — see `config/storage.yml`.)
 
 ## Data model
 
