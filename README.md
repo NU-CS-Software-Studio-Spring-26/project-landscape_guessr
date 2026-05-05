@@ -203,6 +203,15 @@ This avoids R14 OOMs on Heroku Basic (which would happen if the dyno tried to re
 
 All maps use **MapLibre GL JS** with **MapTiler outdoor-v2** vector tiles. Three Stimulus controllers — `image_map`, `guess_map`, `results_map` — share a single MapTiler key, a small lazy-loader for the MapLibre script, and a `hideOutdoorTrails(map)` helper that runs on `style.load` to suppress the layers in `source: "outdoor", source-layer: "trail"` (the bright hiking/cycling/via-ferrata overlays ship with the style and would otherwise clutter the guessing UX). Mountain peaks, contours, terrain shading, and POI labels (country / region / city / village) all stay. Adding a new map page = include `shared/_maplibre_assets` in `content_for(:head)` plus one of the controllers. No inline `<script>` tags, so Turbo navigation works without `data-turbo="false"` workarounds.
 
+### Component classes (Tailwind)
+
+Reusable styles live in `app/assets/tailwind/application.css` as `@apply` component classes. Reach for these before stringing utilities together — keeps things consistent and means a re-theme is one edit, not a grep-and-replace.
+
+- Buttons: `btn-primary` / `btn-secondary` / `btn-danger` / `btn-ghost` (subtle inline links)
+- Forms: `form-input` (and `form-input-error` for validation states), `select-with-arrow` (custom chevron — pair with `pr-8`)
+- Layout: `page-container` (max-width wrapper for top-level pages)
+- Typography: `heading-hero` / `heading-page` / `heading-section`, `eyebrow` (small all-caps label), `muted` (gray caption text)
+
 ### Wikidata seeder
 
 `db/seeds.rb` uses **`SERVICE bd:sample`** for random sampling — not `ORDER BY RAND()` or hashed orderings, both of which time out at scale when unioning multiple landform types. `bd:sample` accepts only a single triple pattern, so the seeder samples by `wdt:P31` (instance-of) inside the `SERVICE` block and joins `wdt:P18`/`wdt:P625` outside. Over-sampling (`limit 2000`) is intentional — only ~5–20% of any landform type has both an image and coordinates. Filenames are filtered for non-photo contamination (satellite imagery, maps); when adding new landform types, spot-check for new junk patterns.
