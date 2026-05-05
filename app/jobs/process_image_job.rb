@@ -26,10 +26,13 @@ class ProcessImageJob < ApplicationJob
       end
 
       processed = Image.process_path(file.path, blob.filename.to_s)
-      image.photo.attach(processed)
-      image.photo.blob.update!(
-        metadata: image.photo.blob.metadata.merge("processed" => true)
-      )
+      # Stamp "processed" at blob-creation time, not after, so it lives in
+      # the same INSERT as the row itself. The auto-enqueued AnalyzeJob
+      # then deserializes the blob *after* commit, reads metadata with
+      # "processed" already present, and merges its own keys on top —
+      # closing the race where AnalyzeJob's update! could clobber a
+      # post-attach metadata write.
+      image.photo.attach(processed.merge(metadata: { "processed" => true }))
     end
 
     # Backfill ImageSetItem coords from the image's newly-extracted GPS so
