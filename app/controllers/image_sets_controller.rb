@@ -54,7 +54,8 @@ class ImageSetsController < ApplicationController
 
   # GET /image_sets/1/locations
   def locations
-    @items = @image_set.image_set_items.includes(:image).order("images.title")
+    @items = @image_set.image_set_items.includes(image: { photo_attachment: :blob }).order("images.title")
+    @processing_count = @items.count { |i| !i.image.processed? }
   end
 
   # PUT /image_sets/1/locations
@@ -132,52 +133,47 @@ class ImageSetsController < ApplicationController
   end
 
   # POST /image_sets/1/bulk_upload
-  BULK_UPLOAD_CONCURRENCY = 4
-
+  #
+  # Direct-upload flow: the browser PUTs each original (HEIC/JPEG/...)
+  # straight to S3 via Active Storage's direct_upload, then submits this
+  # form with an array of blob signed_ids in params[:files]. This action
+  # is now I/O-trivial: it just attaches each blob to a new Image and
+  # enqueues a ProcessImageJob to do the libvips work in the background.
+  # Heroku web dyno never sees the original bytes -> no R14, no H12.
   def bulk_upload
-    files = Array(params[:files]).select(&:present?)
+    signed_ids = Array(params[:files]).map(&:to_s).reject(&:empty?)
 
-    if files.empty?
+    if signed_ids.empty?
       redirect_to locations_image_set_path(@image_set), alert: "No files selected." and return
     end
 
-    image_set_id = @image_set.id
-    added_counter = Concurrent::AtomicFixnum.new(0)
-    errors = Concurrent::Array.new
-    pool = Concurrent::FixedThreadPool.new(BULK_UPLOAD_CONCURRENCY)
+    added = 0
+    errors = []
 
-    files.each do |file|
-      pool.post do
-        ActiveRecord::Base.connection_pool.with_connection do
-          title = File.basename(file.original_filename, ".*").gsub(/[_-]+/, " ").titleize
-          gps = Image.gps_from_upload(file)
-          lat, lng = gps if gps
-          image = Image.create!(title: title, latitude: lat, longitude: lng)
-          image.photo.attach(Image.process_upload(file))
-          set = ImageSet.find(image_set_id)
-          item = set.image_set_items.find_or_initialize_by(image: image)
-          if item.new_record?
-            item.latitude  = lat
-            item.longitude = lng
-            item.save!
-            added_counter.increment
-          end
-        rescue => e
-          errors << "#{file.original_filename}: #{e.message}"
-        end
+    signed_ids.each do |signed_id|
+      blob = ActiveStorage::Blob.find_signed(signed_id)
+      next unless blob
+
+      title = File.basename(blob.filename.to_s, ".*").gsub(/[_-]+/, " ").titleize
+      image = Image.create!(title: title)
+      image.photo.attach(blob)
+
+      item = @image_set.image_set_items.find_or_initialize_by(image: image)
+      if item.new_record?
+        item.save!
+        added += 1
       end
+
+      ProcessImageJob.perform_later(image)
+    rescue => e
+      errors << "#{blob&.filename || signed_id}: #{e.message}"
     end
 
-    pool.shutdown
-    pool.wait_for_termination
-    added = added_counter.value
-
+    msg = "#{added} image(s) queued. Thumbnails and EXIF coordinates will appear as background processing finishes — refresh in a minute."
     if errors.any?
-      redirect_to locations_image_set_path(@image_set),
-        alert: "#{added} image(s) added. Errors: #{errors.join('; ')}"
+      redirect_to locations_image_set_path(@image_set), alert: "#{msg} Errors: #{errors.join('; ')}"
     else
-      redirect_to locations_image_set_path(@image_set),
-        notice: "#{added} image(s) added — fill in their coordinates below."
+      redirect_to locations_image_set_path(@image_set), notice: msg
     end
   end
 

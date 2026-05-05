@@ -22,14 +22,10 @@ class ImageSetItem < ApplicationRecord
 
   # When the last set membership goes away, destroy the Image too so the
   # S3 blob (purged via has_one_attached's :purge_later default) doesn't
-  # leak. Skip if the image is still load-bearing for game history:
-  # game_images preserves which images appeared in a played game, and
-  # guesses are the per-round records.
+  # leak. Image#purge_if_orphan! is conservative — it skips destruction
+  # if any other association still points at the image, so this is safe
+  # even when the image lives in multiple sets or has played games.
   def purge_image_if_orphan
-    return unless image
-    return if image.image_set_items.exists?
-    return if image.game_images.exists?
-    return if image.guesses.exists?
-    image.destroy
+    image&.purge_if_orphan!
   end
 end

@@ -5,6 +5,29 @@ class Image < ApplicationRecord
   has_many :image_set_items, dependent: :destroy
   has_many :image_sets, through: :image_set_items
 
+  # Destroy this image (and its S3 blob via has_one_attached purge_later)
+  # if no record still references it. Called from ImageSetItem and
+  # GameImage after_destroy hooks so removing an image's last set
+  # membership *or* deleting the games that played it both clean up the
+  # underlying S3 storage. Conservative — refuses to destroy as long as
+  # any join row still points here.
+  def purge_if_orphan!
+    return if image_set_items.exists?
+    return if game_images.exists?
+    return if guesses.exists?
+    destroy
+  end
+
+  # True once ProcessImageJob has run on this Image's current attachment.
+  # The marker is set on the freshly-attached processed JPEG blob; the
+  # original raw blob never carries it. URL-only Images (no Active Storage
+  # attachment) are treated as already-processed since there's nothing to
+  # convert.
+  def processed?
+    return true unless photo.attached?
+    photo.blob.metadata["processed"] == true
+  end
+
   # Upload pipeline targets. 2560 covers retina edge cases (e.g. 16"
   # MBP) without breaking storage budgets; quality 75 is visually
   # indistinguishable from source on landscape photos.
@@ -54,17 +77,32 @@ class Image < ApplicationRecord
   # re-encoded at PROCESSED_QUALITY. Returns the kwargs you can pass
   # straight to ActiveStorage::Attached#attach.
   #
-  # Requires libvips on the host (brew install vips, or a vips buildpack
-  # on Heroku). Falls back to the original file if processing fails so
-  # uploads don't 500 even on a misconfigured machine.
+  # Requires libvips on the host (brew install vips, or libvips42t64 from
+  # the apt buildpack on Heroku). Falls back to the original file if
+  # processing fails so uploads don't 500 even on a misconfigured machine.
   def self.process_upload(file)
+    process_path(file.path, file.original_filename)
+  rescue StandardError => e
+    Rails.logger.warn "[Image.process_upload] falling back to raw upload: #{e.class}: #{e.message}"
+    file.rewind if file.respond_to?(:rewind)
+    {
+      io: file,
+      filename: file.original_filename,
+      content_type: file.content_type
+    }
+  end
+
+  # Path-based version of process_upload, for code paths that have a path
+  # without an UploadedFile wrapper (e.g. ProcessImageJob downloading an
+  # original HEIC blob from S3). Same vips pipeline as above.
+  def self.process_path(path, original_filename)
     require "image_processing/vips"
-    base = File.basename(file.original_filename, ".*")
+    base = File.basename(original_filename, ".*")
     # Convert to sRGB *before* stripping metadata so browsers render colors
     # correctly. iPhone shoots Display P3; without this step the wider-gamut
     # P3 values get rendered as sRGB and look desaturated.
     processed = ImageProcessing::Vips
-      .source(file.path)
+      .source(path)
       # sharpen: false disables image_processing's default 3x3 sharpen mask.
       # Apple's HEIC->JPEG transcode doesn't sharpen, and the extra
       # high-frequency noise both shifts colors slightly and bloats the JPEG.
@@ -77,14 +115,6 @@ class Image < ApplicationRecord
       io: processed,
       filename: "#{base}.jpg",
       content_type: "image/jpeg"
-    }
-  rescue StandardError => e
-    Rails.logger.warn "[Image.process_upload] falling back to raw upload: #{e.class}: #{e.message}"
-    file.rewind if file.respond_to?(:rewind)
-    {
-      io: file,
-      filename: file.original_filename,
-      content_type: file.content_type
     }
   end
 end

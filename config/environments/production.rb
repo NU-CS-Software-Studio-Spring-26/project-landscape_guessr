@@ -24,6 +24,15 @@ Rails.application.configure do
   # Store uploaded files on the local file system (see config/storage.yml for options).
   config.active_storage.service = :amazon
 
+  # Skip Active Storage's content analyzers. They re-download each blob
+  # from S3 and decode it via vips just to extract width/height into
+  # blob.metadata, which we don't read anywhere. On Heroku Basic (512MB)
+  # the per-blob decode pile-up after a bulk upload is enough to OOM the
+  # web dyno. With analyzers=[] the AnalyzeJob falls back to NullAnalyzer:
+  # the job still runs but does no download and no decode, just marks the
+  # blob as analyzed.
+  config.active_storage.analyzers = []
+
   # Assume all access to the app is happening through a SSL-terminating reverse proxy.
   # config.assume_ssl = true
 
