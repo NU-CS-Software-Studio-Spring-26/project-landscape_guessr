@@ -1,7 +1,8 @@
 class ImagesController < ApplicationController
   allow_unauthenticated_access only: %i[ index show map ]
-  before_action :require_admin, only: %i[ new create edit update destroy ]
-  before_action :set_image, only: %i[ show edit update destroy ]
+  before_action :require_admin,    only: %i[ new create destroy ]
+  before_action :set_image,        only: %i[ show edit update destroy ]
+  before_action :require_editable, only: %i[ edit update ]
 
   # GET /images or /images.json
   def index
@@ -35,6 +36,15 @@ class ImagesController < ApplicationController
     unless admin? || @image.visible_to?(Current.user)
       redirect_to images_path, alert: "That image is private." and return
     end
+
+    # Set memberships visible to the current viewer, ordered alphabetically.
+    # Used by the detail page's "In sets" panel and to surface a per-set
+    # "Remove from this set" button on sets the user owns.
+    @memberships = @image.image_sets
+                         .merge(visible_image_sets)
+                         .order(:name)
+                         .preload(:user)
+    @items_by_set_id = @image.image_set_items.index_by(&:image_set_id)
   end
 
   # GET /images/new
@@ -97,8 +107,29 @@ class ImagesController < ApplicationController
       @image = Image.find(params.expect(:id))
     end
 
-    # Only allow a list of trusted parameters through.
+    # Only allow a list of trusted parameters through. The :url field is
+    # admin-only — once an image exists, swapping its underlying URL out
+    # from under set members would silently change every game that's
+    # already played that image. Title and coords are safe to edit.
     def image_params
-      params.expect(image: [ :url, :latitude, :longitude, :title ])
+      permitted = [ :latitude, :longitude, :title ]
+      permitted << :url if admin?
+      params.expect(image: permitted)
+    end
+
+    # 403 unless the current user owns at least one set containing this
+    # image (or is admin). See Image#editable_by? for the rationale.
+    def require_editable
+      return if @image.editable_by?(Current.user)
+      redirect_to @image, alert: "You don't have permission to edit this image."
+    end
+
+    # Sets that the current viewer is allowed to see — same rule as
+    # Image#visible_to: system_default, public, or owned by the user.
+    def visible_image_sets
+      return ImageSet.all if admin?
+      ImageSet.where(is_system_default: true)
+              .or(ImageSet.where(visibility: "public"))
+              .or(ImageSet.where(user_id: Current.user&.id))
     end
 end

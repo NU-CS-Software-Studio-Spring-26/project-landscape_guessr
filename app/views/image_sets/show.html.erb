@@ -33,9 +33,13 @@
       <% end %>
     </div>
   <% else %>
+    <%# Each card is a link to the image's detail page, where edit /
+        remove-from-set / Open-in-Maps live. Bulk pruning still happens
+        on the locations (Manage) page — link at the top of this header. %>
     <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
       <% @items.each do |item| %>
-        <div class="rounded-md overflow-hidden border border-gray-200 relative group">
+        <%= link_to item.image,
+              class: "block rounded-md overflow-hidden border border-gray-200 hover:border-blue-300 transition" do %>
           <img src="<%= image_src(item.image, width: 400) %>" alt="<%= item.title %>"
                loading="lazy" decoding="async"
                class="w-full h-32 object-cover">
@@ -49,13 +53,7 @@
               <% end %>
             </p>
           </div>
-          <% if @image_set.owned_by?(Current.user) %>
-            <%= button_to "Remove", image_set_remove_item_path(@image_set, item),
-                  method: :delete,
-                  form: { data: { turbo_confirm: "Remove “#{item.title}” from this set?" } },
-                  class: "absolute top-1 right-1 rounded bg-white/90 hover:bg-red-50 hover:text-red-600 text-xs px-2 py-0.5 border border-gray-200 opacity-0 group-hover:opacity-100 transition cursor-pointer" %>
-          <% end %>
-        </div>
+        <% end %>
       <% end %>
     </div>
 

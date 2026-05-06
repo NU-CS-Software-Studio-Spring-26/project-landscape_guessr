@@ -15,6 +15,6 @@
   <% if @image_data.empty? %>
     <p class="text-gray-500 text-sm">None of the images in this set have coordinates yet.</p>
   <% else %>
-    <%= render "shared/image_map", points: @image_data, element_id: "image-set-map" %>
+    <%= render "shared/image_map", points: @image_data, element_id: "image-set-map", style: @image_set.map_style %>
   <% end %>
 </div>

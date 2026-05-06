@@ -169,18 +169,6 @@ class GamesController < ApplicationController
       }
     end
 
-    # If the user owns the set this game was played on, build a
-    # image_id -> image_set_item_id map so the view can render a
-    # "Remove from set" button next to each round. Empty map (no
-    # buttons rendered) when there's no editable set.
-    @set_item_id_by_image = if @game.image_set&.owned_by?(Current.user)
-      @game.image_set.image_set_items
-           .where(image_id: guesses.map(&:image_id))
-           .pluck(:image_id, :id).to_h
-    else
-      {}
-    end
-
     if @game.status != "completed"
       @game.update!(status: "completed", score: @score, completed_at: Time.current)
     end
