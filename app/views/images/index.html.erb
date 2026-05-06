@@ -2,7 +2,7 @@
 
 <div class="w-full">
   <div class="flex justify-between items-center">
-    <h1 class="heading-page">Images</h1>
+    <h1 class="heading-page">Images <span class="muted text-base font-normal">(<%= @total_items %>)</span></h1>
     <div class="flex space-x-2">
       <%= link_to "Map view", map_images_path, class: "btn-secondary" %>
       <% if admin? %>
@@ -10,6 +10,11 @@
       <% end %>
     </div>
   </div>
+
+  <%= render "image_sets/pagination",
+            page_url: ->(n) { images_path(page: n) },
+            page: @page, total_pages: @total_pages,
+            total_items: @total_items, per_page: @per_page %>
 
   <div id="images" class="min-w-full divide-y divide-gray-200 space-y-5">
     <% if @images.any? %>
@@ -29,4 +34,9 @@
       <p class="text-center my-10">No images found.</p>
     <% end %>
   </div>
+
+  <%= render "image_sets/pagination",
+            page_url: ->(n) { images_path(page: n) },
+            page: @page, total_pages: @total_pages,
+            total_items: @total_items, per_page: @per_page %>
 </div>

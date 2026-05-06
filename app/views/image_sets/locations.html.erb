@@ -5,7 +5,7 @@
   <div class="flex items-center justify-between gap-4">
     <div>
       <h1 class="heading-page">Manage Images</h1>
-      <p class="muted mt-0.5"><%= @image_set.name %> &middot; <%= @items.size %> image(s)</p>
+      <p class="muted mt-0.5"><%= @image_set.name %> &middot; <%= @total_items %> image(s)</p>
     </div>
     <%= link_to "Done", @image_set, class: "btn-secondary shrink-0" %>
   </div>
@@ -101,13 +101,18 @@
       <% missing_count = @items.count { |i| (i.latitude || i.image.latitude).blank? || (i.longitude || i.image.longitude).blank? } %>
 
       <div class="flex items-center justify-between flex-wrap gap-2">
-        <h2 class="heading-section">Edit images (<%= @items.size %>)</h2>
+        <h2 class="heading-section">Edit images (<%= @total_items %>)</h2>
         <% if missing_count > 0 %>
           <p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
-            <%= missing_count %> image(s) missing location — set lat/lng below or those images will be skipped when you play this set.
+            <%= missing_count %> image(s) missing location on this page — set lat/lng below or those images will be skipped when you play this set.
           </p>
         <% end %>
       </div>
+
+      <%= render "pagination",
+                page_url: ->(n) { locations_image_set_path(@image_set, page: n) },
+                page: @page, total_pages: @total_pages,
+                total_items: @total_items, per_page: @per_page %>
 
       <div class="space-y-3 pb-20">
         <% @items.each do |item| %>
@@ -122,6 +127,7 @@
                 converts the freshly-uploaded HEIC) %>
             <% if item.image.processed? %>
               <img src="<%= image_src(item.image, width: 200) %>" alt="<%= item.title %>"
+                   loading="lazy" decoding="async"
                    class="w-full sm:w-24 h-20 sm:h-16 object-cover rounded-md border border-gray-100 shrink-0">
             <% else %>
               <div class="processing-placeholder w-full sm:w-24 h-20 sm:h-16 rounded-md border border-gray-100 bg-gray-50 flex items-center justify-center text-[10px] text-gray-500 shrink-0 animate-pulse"
@@ -171,12 +177,23 @@
         <% end %>
       </div>
 
+      <%= render "pagination",
+                page_url: ->(n) { locations_image_set_path(@image_set, page: n) },
+                page: @page, total_pages: @total_pages,
+                total_items: @total_items, per_page: @per_page %>
+
       <%# Sticky save bar — sits at the bottom of the viewport whenever any
           edits have been made and the user is somewhere in the long item
           list. Scrolling past it (e.g. to the page footer) just lets it
           rest in flow. %>
       <div class="sticky bottom-0 bg-white/95 backdrop-blur border-t border-gray-200 -mx-3 px-3 py-3 flex items-center justify-end gap-3 z-40">
-        <p class="text-xs text-gray-500 mr-auto">Edits aren't saved until you click Save.</p>
+        <p class="text-xs text-gray-500 mr-auto">
+          <% if @total_pages > 1 %>
+            Editing page <%= @page %> of <%= @total_pages %>. Save before navigating — edits on this page only.
+          <% else %>
+            Edits aren't saved until you click Save.
+          <% end %>
+        </p>
         <%= submit_tag "Save changes", class: "btn-primary" %>
       </div>
     <% end %>

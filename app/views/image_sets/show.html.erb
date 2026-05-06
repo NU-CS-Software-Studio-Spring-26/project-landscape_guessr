@@ -6,7 +6,7 @@
     <div>
       <h1 class="heading-page"><%= @image_set.name %></h1>
       <p class="muted mt-1">
-        <%= @items.size %> images &middot;
+        <%= @total_items %> images &middot;
         <span class="<%= @image_set.visibility == 'public' ? 'text-green-600' : 'text-gray-400' %>"><%= @image_set.visibility %></span>
       </p>
     </div>
@@ -25,7 +25,7 @@
     </div>
   </div>
 
-  <% if @items.empty? %>
+  <% if @total_items.zero? %>
     <div class="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-6 py-10 text-center space-y-3">
       <p class="text-gray-600">No images in this set yet.</p>
       <% if @image_set.owned_by?(Current.user) %>
@@ -37,6 +37,7 @@
       <% @items.each do |item| %>
         <div class="rounded-md overflow-hidden border border-gray-200 relative group">
           <img src="<%= image_src(item.image, width: 400) %>" alt="<%= item.title %>"
+               loading="lazy" decoding="async"
                class="w-full h-32 object-cover">
           <div class="px-2 py-1.5 bg-white">
             <p class="text-xs font-medium text-gray-800 truncate"><%= item.title %></p>
@@ -57,6 +58,11 @@
         </div>
       <% end %>
     </div>
+
+    <%= render "pagination",
+              page_url: ->(n) { image_set_path(@image_set, page: n) },
+              page: @page, total_pages: @total_pages,
+              total_items: @total_items, per_page: @per_page %>
   <% end %>
 
   <%= link_to "Back to sets", image_sets_path, class: "btn-ghost" %>

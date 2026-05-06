@@ -40,7 +40,8 @@
   <div class="space-y-3">
     <h2 class="heading-section">Round Breakdown</h2>
     <% @rounds.each_with_index do |row, idx| %>
-      <div class="rounded-lg border border-gray-200 px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
+      <% set_item_id = @set_item_id_by_image[row[:guess].image_id] %>
+      <div class="rounded-lg border border-gray-200 px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3 relative">
         <% thumb = image_src(row[:guess].image, width: 200) %>
         <% if thumb %>
           <a href="<%= thumb %>" target="_blank" rel="noopener" class="shrink-0">
@@ -49,7 +50,7 @@
                  class="w-full sm:w-24 h-20 sm:h-16 object-cover rounded-md border border-gray-100">
           </a>
         <% end %>
-        <div class="flex-1 min-w-0">
+        <div class="flex-1 min-w-0 sm:pr-20">
           <span class="eyebrow text-gray-400">Round <%= idx + 1 %></span>
           <p class="font-medium text-gray-800 truncate"><%= row[:guess].image.title %></p>
           <p class="text-xs text-gray-500">
@@ -69,6 +70,24 @@
             <p class="font-medium text-gray-600"><%= format_distance_compact(row[:distance_km]) %></p>
           </div>
         </div>
+        <%# Owners of the set this game was played on can prune bad
+            images straight from results — defunct stations, wrong
+            coords, low-quality photos. Tucked top-right so it doesn't
+            compete with the Score/Distance values for attention.
+            Subtle by default; goes red on hover so the destructive
+            action is clear once the user reaches for it. The image
+            stays in any other set it's a member of — purge_if_orphan!
+            only deletes the Image when no links remain. %>
+        <% if set_item_id %>
+          <%= button_to "× Remove",
+                image_set_remove_item_path(@game.image_set, item_id: set_item_id),
+                method: :delete,
+                form: {
+                  class: "absolute top-2 right-2 m-0",
+                  data: { turbo_confirm: "Remove “#{row[:guess].image.title}” from “#{@game.image_set.name}”? Already-played games keep their answers." }
+                },
+                class: "rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700 transition cursor-pointer" %>
+        <% end %>
       </div>
     <% end %>
   </div>
