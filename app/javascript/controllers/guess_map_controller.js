@@ -30,14 +30,15 @@ function ensureMaplibre() {
 export default class extends Controller {
   static targets = ["container"]
   static values = {
-    answer: { type: Array, default: [] }
+    answer: { type: Array,  default: [] },
+    style:  { type: String, default: "outdoor-v2" }
   }
 
   async connect() {
     await ensureMaplibre()
     this.map = new maplibregl.Map({
       container: this.containerTarget,
-      style: "https://api.maptiler.com/maps/outdoor-v2/style.json?key=RWz2xTwJMGVfRP9y6hhf",
+      style: `https://api.maptiler.com/maps/${this.styleValue}/style.json?key=RWz2xTwJMGVfRP9y6hhf`,
       center: [0, 20],
       zoom: 1.5
     })

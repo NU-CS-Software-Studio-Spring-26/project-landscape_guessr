@@ -34,14 +34,17 @@ function ensureMaplibre() {
 
 export default class extends Controller {
   static targets = ["container"]
-  static values  = { rounds: { type: Array, default: [] } }
+  static values  = {
+    rounds: { type: Array,  default: [] },
+    style:  { type: String, default: "outdoor-v2" }
+  }
 
   async connect() {
     await ensureMaplibre()
 
     this.map = new maplibregl.Map({
       container: this.containerTarget,
-      style: "https://api.maptiler.com/maps/outdoor-v2/style.json?key=RWz2xTwJMGVfRP9y6hhf",
+      style: `https://api.maptiler.com/maps/${this.styleValue}/style.json?key=RWz2xTwJMGVfRP9y6hhf`,
       center: [0, 20],
       zoom: 1.5
     })
@@ -112,6 +115,33 @@ export default class extends Controller {
     })
 
     this.map.fitBounds(bounds, { padding: 60, maxZoom: 8 })
+  }
+
+  // Smooth-pan to a single round's guess+answer pair. Wired up from
+  // the per-round thumbnails on /games/:id/results — clicking a round
+  // thumbnail dives the map onto that round so the player can see how
+  // far off they were. Also scrolls the map element into view since
+  // it's typically scrolled past on a results page.
+  focus(event) {
+    const round = parseInt(event.params?.round, 10)
+    const r = this.roundsValue.find((x) => x.round === round)
+    if (!r || !this.map) return
+
+    const bounds = new maplibregl.LngLatBounds()
+    bounds.extend([r.guess_lng, r.guess_lat])
+    bounds.extend([r.answer_lng, r.answer_lat])
+    this.map.fitBounds(bounds, { padding: 80, maxZoom: 14, duration: 700 })
+
+    this.containerTarget.scrollIntoView({ behavior: "smooth", block: "center" })
+  }
+
+  // Wired up on the per-row "Details ↗" link in the round breakdown.
+  // The whole row is clickable for map-focus, so without this the
+  // click on the inner link would bubble up and trigger #focus before
+  // the browser navigates. stopPropagation keeps the row's action from
+  // firing; the link itself still navigates normally.
+  stopRowClick(event) {
+    event.stopPropagation()
   }
 
   disconnect() {

@@ -36,14 +36,17 @@ function ensureMaplibre() {
 // not maplibregl.Marker DOM elements — that scales fine to a thousand+
 // points where a Marker per point would tank the page.
 export default class extends Controller {
-  static values = { points: { type: Array, default: [] } }
+  static values = {
+    points: { type: Array,  default: [] },
+    style:  { type: String, default: "outdoor-v2" }
+  }
 
   async connect() {
     await ensureMaplibre()
 
     this.map = new maplibregl.Map({
       container: this.element,
-      style: `https://api.maptiler.com/maps/outdoor-v2/style.json?key=${MAPTILER_KEY}`,
+      style: `https://api.maptiler.com/maps/${this.styleValue}/style.json?key=${MAPTILER_KEY}`,
       center: [0, 20],
       zoom: 1
     })
@@ -101,8 +104,10 @@ export default class extends Controller {
       if (!f) return
       const { id, title, url, lat, lng } = f.properties
       const safeTitle = String(title).replace(/</g, "&lt;")
+      // 600 source for the 240×120 popup so retina displays render
+      // crisp; 300 looked soft on >1x DPR.
       const imgHtml = url
-        ? `<img src="${url}${url.includes("?") ? "&" : "?"}width=300" loading="lazy" style="width:100%;height:120px;object-fit:cover;border-radius:4px" alt="">`
+        ? `<img src="${url}${url.includes("?") ? "&" : "?"}width=600" loading="lazy" style="width:100%;height:120px;object-fit:cover;border-radius:4px" alt="">`
         : ""
       const html = `
         <div style="min-width:200px">

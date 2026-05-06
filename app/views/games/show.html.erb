@@ -20,15 +20,50 @@
          data-action="guess-map:pinned->game#pinChanged"
          data-game-game-path-value="<%= game_path(@game) %>"
          class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <%# object-contain (not -cover): show the entire photo, letterboxed
-          if it doesn't match 60vh. With -cover, tall/portrait images
-          had their edges cropped — confusing in a guesser game. %>
-      <div class="h-[60vh] flex items-center justify-center bg-gray-100 rounded-md border border-gray-200">
-        <img src="<%= image_src(@image, width: 800) %>" alt="Guess this location"
-             class="max-w-full max-h-full object-contain">
+      <%# Photo column. Wrap the zoomable container + hint + "view
+          original" link in one div so they all share grid column 1;
+          the map is column 2. (Earlier the hint <p> sat as a sibling
+          and broke the 2-column layout, pushing the map to the next
+          row.) %>
+      <div class="space-y-1">
+        <%# In-place scroll-zoom: wheel zooms centered on the cursor
+            (Google-Maps style), drag pans when zoomed in, double-click
+            resets. Source is 3840 px (4K-cached on Wikimedia) so ~8×
+            zoom stays crisp; for higher zoom than that, the "View
+            original" link below opens the unmodified file (often
+            8000+ px) in a new tab.
+            object-contain (not -cover): show the entire photo,
+            letterboxed if it doesn't match 60vh — cropping the edges
+            of a clue photo is confusing in a guesser game. %>
+        <div data-controller="zoomable"
+             data-zoomable-cap-width-value="3840"
+             class="h-[60vh] flex items-center justify-center bg-gray-100 rounded-md border border-gray-200 select-none">
+          <img src="<%= image_src(@image, width: 3840) %>" alt="Guess this location"
+               class="max-w-full max-h-full object-contain">
+        </div>
+        <div class="flex items-center justify-between gap-2 text-xs text-gray-400">
+          <span>scroll to zoom · drag to pan · double-click to reset</span>
+          <%# Inline-replace the displayed photo with the unmodified
+              original (often 8000+ px). Stays on the page so the player
+              doesn't lose context, and the zoom state persists through
+              the swap. Hidden by default; the zoomable controller reveals
+              it after image load if naturalWidth ≥ the cap (i.e. we got
+              a downsized thumbnail and there's a fuller version to load).
+              Skipped entirely for Active Storage uploads — those are
+              served at native resolution and the helper ignores width. %>
+          <% unless @image.respond_to?(:photo) && @image.photo.attached? %>
+            <button type="button"
+                    data-zoomable-target="originalButton"
+                    data-action="zoomable#loadOriginal"
+                    data-zoomable-url-param="<%= image_src(@image) %>"
+                    class="hidden text-gray-500 hover:text-blue-600 underline-offset-2 hover:underline cursor-pointer">
+              load full quality
+            </button>
+          <% end %>
+        </div>
       </div>
       <div class="space-y-3">
-        <%= render "shared/guess_map" %>
+        <%= render "shared/guess_map", style: @game.image_set&.map_style || "outdoor-v2" %>
         <%= form_with url: guesses_path, local: true, class: "flex items-center gap-2" do |f| %>
           <%= hidden_field_tag "guess[game_id]", @game.id %>
           <%= hidden_field_tag "guess[image_id]", @image.id %>

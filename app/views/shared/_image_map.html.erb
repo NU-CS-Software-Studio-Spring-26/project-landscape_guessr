@@ -6,13 +6,16 @@
     points       — array of { id:, lat:, lng:, title:, url: } hashes
     element_id   — DOM id for the map container (default "image-map")
     height_class — Tailwind height class (default "h-[80vh]")
+    style        — MapTiler style slug (default "outdoor-v2")
 
   The page must include shared/_maplibre_assets in content_for(:head).
 %>
 <% element_id   ||= "image-map" %>
 <% height_class ||= "h-[80vh]" %>
+<% style       ||= "outdoor-v2" %>
 
 <div id="<%= element_id %>"
      class="w-full <%= height_class %> rounded-md border border-gray-200 overflow-hidden"
      data-controller="image-map"
+     data-image-map-style-value="<%= style %>"
      data-image-map-points-value="<%= points.to_json %>"></div>

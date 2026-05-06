@@ -21,6 +21,27 @@ class Image < ApplicationRecord
     image_sets.any? { |s| s.is_system_default? || s.visibility == "public" || s.user_id == user&.id }
   end
 
+  # An image is editable by anyone who owns at least one set containing
+  # it (admins included). Matches the existing precedent in
+  # ImageSetsController#update_locations, where a set owner can already
+  # mutate Image#title via the bulk-edit form. Edits propagate across
+  # every set the image is in — by design, since Image is the canonical
+  # record and ImageSetItem is just a join row.
+  def editable_by?(user)
+    return false unless user
+    return true if user.admin?
+    image_sets.exists?(user_id: user.id)
+  end
+
+  # Convenience: a Google Maps URL pointing at this image's coordinates.
+  # Nil if either coord is missing. Used by the detail and results pages
+  # for "Open in Maps ↗" — works for every image (Wikimedia, uploads,
+  # arbitrary URL) since lat/lng is the only requirement.
+  def google_maps_url
+    return nil unless latitude && longitude
+    "https://www.google.com/maps?q=#{latitude},#{longitude}"
+  end
+
   # Destroy this image (and its S3 blob via has_one_attached purge_later)
   # if no record still references it. Called from ImageSetItem and
   # GameImage after_destroy hooks so removing an image's last set

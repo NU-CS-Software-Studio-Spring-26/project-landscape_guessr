@@ -283,6 +283,6 @@ class ImageSetsController < ApplicationController
   end
 
   def image_set_params
-    params.expect(image_set: [ :name, :visibility ])
+    params.expect(image_set: [ :name, :visibility, :map_style ])
   end
 end

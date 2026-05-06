@@ -4,8 +4,17 @@ class ImageSet < ApplicationRecord
   has_many :images, through: :image_set_items
   has_many :games, dependent: :nullify
 
+  # MapTiler basemap styles available per set. Used by the guess /
+  # results / set-map controllers — see app/javascript/controllers/*.js.
+  # outdoor-v2 is the default ("terrain + mountain peaks + POIs"); the
+  # others are common pickings for urban (streets, bright) or aerial
+  # (satellite, hybrid) sets. Adding more = same line + one option in
+  # the form's select.
+  MAP_STYLES = %w[outdoor-v2 streets-v2 bright-v2 topo-v2 satellite hybrid].freeze
+
   validates :name, presence: true
   validates :visibility, inclusion: { in: %w[private public] }
+  validates :map_style, inclusion: { in: MAP_STYLES }
   validate :system_default_has_no_user
   validate :only_one_system_default, if: :is_system_default?
 

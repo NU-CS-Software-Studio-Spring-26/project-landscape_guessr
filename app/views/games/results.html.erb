@@ -3,7 +3,13 @@
   <%= render "shared/maplibre_assets" %>
 <% end %>
 
-<div class="w-full max-w-2xl mx-auto space-y-6 py-6">
+<%# results-map controller wraps the map AND the round breakdown so
+    each thumbnail can dispatch click->results-map#focus to dive the
+    shared map onto that round's guess+answer pair. %>
+<div class="w-full max-w-2xl mx-auto space-y-6 py-6"
+     data-controller="results-map"
+     data-results-map-style-value="<%= @game.image_set&.map_style || 'outdoor-v2' %>"
+     data-results-map-rounds-value="<%= @map_rounds.to_json %>">
 
   <%# Header %>
   <div class="text-center space-y-1">
@@ -22,9 +28,7 @@
   </div>
 
   <%# Summary map %>
-  <div data-controller="results-map"
-       data-results-map-rounds-value="<%= @map_rounds.to_json %>"
-       class="rounded-xl border border-gray-200 overflow-hidden">
+  <div class="rounded-xl border border-gray-200 overflow-hidden">
     <div class="px-4 py-2.5 border-b border-gray-200 bg-gray-50 flex items-center gap-2">
       <span class="eyebrow text-gray-600">Map</span>
       <span class="text-xs text-gray-400">&mdash;</span>
@@ -32,6 +36,7 @@
         <span class="inline-block w-2.5 h-2.5 rounded-full bg-red-400"></span> your guess
         <span class="ml-2 inline-block w-2.5 h-2.5 rounded-full bg-green-500"></span> actual location
       </span>
+      <span class="ml-auto text-xs text-gray-400">click any round below to focus</span>
     </div>
     <div data-results-map-target="container" class="w-full h-72"></div>
   </div>
@@ -39,26 +44,31 @@
   <%# Per-round breakdown %>
   <div class="space-y-3">
     <h2 class="heading-section">Round Breakdown</h2>
+    <%# Whole row click → focus the summary map on this round's
+        guess+answer pair. The map header copy "click any round below
+        to focus" already trains the user; making the entire row the
+        target (rather than just the thumbnail) makes the affordance
+        obvious — every cursor-pointer hover is a hint.
+
+        Coord lines and the inline × Remove are gone:
+        - Lat/lng for guess and answer are already rendered as markers
+          on the summary map above.
+        - Per-image actions (edit, remove from set, Open in Maps) live
+          on the image detail page, reachable via the "Details ↗" link
+          on the right of each row. %>
     <% @rounds.each_with_index do |row, idx| %>
-      <% set_item_id = @set_item_id_by_image[row[:guess].image_id] %>
-      <div class="rounded-lg border border-gray-200 px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3 relative">
+      <div data-action="click->results-map#focus"
+           data-results-map-round-param="<%= idx + 1 %>"
+           class="rounded-lg border border-gray-200 hover:border-blue-300 transition cursor-pointer px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
         <% thumb = image_src(row[:guess].image, width: 200) %>
         <% if thumb %>
-          <a href="<%= thumb %>" target="_blank" rel="noopener" class="shrink-0">
-            <img src="<%= thumb %>" alt="<%= row[:guess].image.title %>"
-                 loading="lazy"
-                 class="w-full sm:w-24 h-20 sm:h-16 object-cover rounded-md border border-gray-100">
-          </a>
+          <img src="<%= thumb %>" alt="<%= row[:guess].image.title %>"
+               loading="lazy"
+               class="shrink-0 w-full sm:w-24 h-20 sm:h-16 object-cover rounded-md border border-gray-100">
         <% end %>
-        <div class="flex-1 min-w-0 sm:pr-20">
+        <div class="flex-1 min-w-0">
           <span class="eyebrow text-gray-400">Round <%= idx + 1 %></span>
           <p class="font-medium text-gray-800 truncate"><%= row[:guess].image.title %></p>
-          <p class="text-xs text-gray-500">
-            Your guess: <%= row[:guess].latitude.to_f.round(3) %>, <%= row[:guess].longitude.to_f.round(3) %>
-          </p>
-          <p class="text-xs text-gray-400">
-            Actual: <%= row[:answer_lat].to_f.round(3) %>, <%= row[:answer_lng].to_f.round(3) %>
-          </p>
         </div>
         <div class="flex gap-4 sm:text-right shrink-0">
           <div>
@@ -70,24 +80,12 @@
             <p class="font-medium text-gray-600"><%= format_distance_compact(row[:distance_km]) %></p>
           </div>
         </div>
-        <%# Owners of the set this game was played on can prune bad
-            images straight from results — defunct stations, wrong
-            coords, low-quality photos. Tucked top-right so it doesn't
-            compete with the Score/Distance values for attention.
-            Subtle by default; goes red on hover so the destructive
-            action is clear once the user reaches for it. The image
-            stays in any other set it's a member of — purge_if_orphan!
-            only deletes the Image when no links remain. %>
-        <% if set_item_id %>
-          <%= button_to "× Remove",
-                image_set_remove_item_path(@game.image_set, item_id: set_item_id),
-                method: :delete,
-                form: {
-                  class: "absolute top-2 right-2 m-0",
-                  data: { turbo_confirm: "Remove “#{row[:guess].image.title}” from “#{@game.image_set.name}”? Already-played games keep their answers." }
-                },
-                class: "rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700 transition cursor-pointer" %>
-        <% end %>
+        <%# Tertiary affordance — small, muted, with ↗ to signal "leaves
+            this page." stopRowClick keeps the row's focus action from
+            firing when this link is clicked. %>
+        <%= link_to "Details ↗", row[:guess].image,
+              data: { action: "click->results-map#stopRowClick" },
+              class: "shrink-0 self-end sm:self-auto px-2 py-1.5 text-xs text-gray-400 hover:text-blue-600 hover:underline underline-offset-2" %>
       </div>
     <% end %>
   </div>
