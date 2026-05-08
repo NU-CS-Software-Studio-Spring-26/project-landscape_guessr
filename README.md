@@ -106,7 +106,7 @@ The `Image.visible_to(user)` scope (in `app/models/image.rb`) is the canonical w
 | `/` | Landing page; primary CTA = "Start new game" on the system-default set |
 | `/registration/new`, `/session/new`, `/passwords/new` | Sign up, sign in, password reset |
 | `/profile` | Current user's profile |
-| `/games` | List of your games (filter by status, sort by date or score) |
+| `/games` | Paginated list of your games (filter by status, sort by date or score) |
 | `/games/:id` | Play the next round of an in-progress game |
 | `/games/:id/results` | Per-round breakdown + summary map after game finishes |
 | `/games/leaderboard?image_set_id=N` | Top-20 leaderboard scoped to an image set |
@@ -210,7 +210,7 @@ Popup HTML in map controllers uses `setHTML()`, which executes embedded markup �
 
 ### Pagination
 
-Galleries that can grow large (`/images`, `/image_sets/:id`, `/image_sets/:id/locations`) page through `ApplicationController#paginate(scope, per_page:)`. It clamps `?page=` to `[1, total_pages]`, sets `@page / @total_pages / @total_items / @per_page`, and returns the windowed scope. Render the controls with `<%= render "image_sets/pagination", page_url: ->(n) { … }, page: @page, total_pages: @total_pages, total_items: @total_items, per_page: @per_page %>` — `page_url` is a lambda so the partial works for any route.
+Long lists (`/images`, `/image_sets/:id`, `/image_sets/:id/locations`, `/games`) page through `ApplicationController#paginate(scope, per_page:)`. It clamps `?page=` to `[1, total_pages]`, honors `?per_page=` against the `PER_PAGE_OPTIONS` allowlist (default `[25, 50, 100, 250, 500]`, fallback to the caller's `per_page:`), sets `@page / @total_pages / @total_items / @per_page`, and returns the windowed scope. Render the controls with `<%= render "shared/pagination", page_url: ->(opts) { route_path(opts) }, page: @page, total_pages: @total_pages, total_items: @total_items, per_page: @per_page %>`. `page_url` is a lambda receiving `{ page:, per_page: }` so the partial works for any route and any persistent filters (sort, status, etc., merged into the lambda).
 
 ### Component classes (Tailwind)
 

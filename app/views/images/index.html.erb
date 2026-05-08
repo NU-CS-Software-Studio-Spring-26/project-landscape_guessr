@@ -13,8 +13,8 @@
     </div>
   </div>
 
-  <%= render "image_sets/pagination",
-            page_url: ->(n) { images_path(page: n) },
+  <%= render "shared/pagination",
+            page_url: ->(opts) { images_path(opts) },
             page: @page, total_pages: @total_pages,
             total_items: @total_items, per_page: @per_page %>
 
@@ -28,8 +28,8 @@
     <p class="text-center my-10 text-gray-500">No images found.</p>
   <% end %>
 
-  <%= render "image_sets/pagination",
-            page_url: ->(n) { images_path(page: n) },
+  <%= render "shared/pagination",
+            page_url: ->(opts) { images_path(opts) },
             page: @page, total_pages: @total_pages,
             total_items: @total_items, per_page: @per_page %>
 </div>

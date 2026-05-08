@@ -24,7 +24,7 @@
                     controller: "direct-upload",
                     direct_upload_attach_url_value:        attach_blob_image_set_path(@image_set),
                     direct_upload_direct_upload_url_value: rails_direct_uploads_path,
-                    direct_upload_redirect_url_value:      locations_image_set_path(@image_set)
+                    direct_upload_redirect_url_value:      locations_image_set_path(@image_set, page: @page, per_page: @per_page)
                   },
                   class: "flex flex-col sm:flex-row items-start sm:items-end gap-3" do %>
       <div class="flex-1 space-y-1 w-full">
@@ -93,10 +93,20 @@
     <%= form_with url: locations_image_set_path(@image_set), method: :put, local: true,
                   class: "space-y-4",
                   data: {
-                    controller:                          "processing-poll",
+                    controller:                          "processing-poll dirty-form",
                     processing_poll_url_value:           processing_status_image_set_path(@image_set),
                     processing_poll_banner_id_value:     "processing-banner",
+                    dirty_form_message_value:            "You have unsaved edits on this page. Leave anyway? (Save first to keep them.)",
                   } do %>
+
+      <%# Carry the current page + per_page through the submit so
+          update_locations can redirect the user back to the same slice
+          they were editing. Without these, params[:page] / [:per_page]
+          would be nil and the redirect would silently land them on
+          page 1 / default per_page — which feels like a reload that
+          "lost" their per-page choice. %>
+      <%= hidden_field_tag :page,     @page %>
+      <%= hidden_field_tag :per_page, @per_page %>
 
       <% missing_count = @items.count { |i| (i.latitude || i.image.latitude).blank? || (i.longitude || i.image.longitude).blank? } %>
 
@@ -109,8 +119,8 @@
         <% end %>
       </div>
 
-      <%= render "pagination",
-                page_url: ->(n) { locations_image_set_path(@image_set, page: n) },
+      <%= render "shared/pagination",
+                page_url: ->(opts) { locations_image_set_path(@image_set, opts) },
                 page: @page, total_pages: @total_pages,
                 total_items: @total_items, per_page: @per_page %>
 
@@ -177,8 +187,8 @@
         <% end %>
       </div>
 
-      <%= render "pagination",
-                page_url: ->(n) { locations_image_set_path(@image_set, page: n) },
+      <%= render "shared/pagination",
+                page_url: ->(opts) { locations_image_set_path(@image_set, opts) },
                 page: @page, total_pages: @total_pages,
                 total_items: @total_items, per_page: @per_page %>
 

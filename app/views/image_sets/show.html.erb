@@ -33,6 +33,11 @@
       <% end %>
     </div>
   <% else %>
+    <%= render "shared/pagination",
+              page_url: ->(opts) { image_set_path(@image_set, opts) },
+              page: @page, total_pages: @total_pages,
+              total_items: @total_items, per_page: @per_page %>
+
     <%# Each card is a link to the image's detail page, where edit /
         remove-from-set / Open-in-Maps live. Bulk pruning still happens
         on the locations (Manage) page — link at the top of this header. %>
@@ -57,8 +62,8 @@
       <% end %>
     </div>
 
-    <%= render "pagination",
-              page_url: ->(n) { image_set_path(@image_set, page: n) },
+    <%= render "shared/pagination",
+              page_url: ->(opts) { image_set_path(@image_set, opts) },
               page: @page, total_pages: @total_pages,
               total_items: @total_items, per_page: @per_page %>
   <% end %>

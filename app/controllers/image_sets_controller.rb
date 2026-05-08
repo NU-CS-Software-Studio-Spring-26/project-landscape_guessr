@@ -15,20 +15,20 @@ class ImageSetsController < ApplicationController
 
   # GET /image_sets/1
   #
-  # Paginated mainly to keep the DOM bounded; `loading="lazy"` on the
-  # <img> tags below already defers the thumbnail GETs until each card
-  # scrolls into view, so 500/page renders comfortably even on large
-  # sets. URL-only images (Wikimedia) make this cheap; an Active Storage
-  # set of this size would be heavier per item (signed URL generation).
+  # Paginated to keep the DOM bounded. Default 100/page (matches the rest
+  # of the app); users can bump up to 500 via the per-page picker for
+  # URL-only sets like Wikimedia, where there are no signed-URL costs.
+  # `loading="lazy"` on the <img> tags below defers thumbnail GETs until
+  # each card scrolls into view.
   def show
     # Eager-load photo+blob: every row calls image_src(item.image), which
     # hits photo.attached? and would otherwise fire one ActiveStorage
-    # ::Attachment Load per item (500 N+1 queries on a full page).
+    # ::Attachment Load per item (N+1 across the full page).
     @items = paginate(
       @image_set.image_set_items
                 .includes(image: { photo_attachment: :blob })
                 .order("images.title"),
-      per_page: 500
+      per_page: 100
     )
   end
 
@@ -127,6 +127,7 @@ class ImageSetsController < ApplicationController
       # Re-render with the SAME per_page as locations#GET so the user
       # sees the page they were editing. (Previous code used 25, which
       # silently shuffled them to a different slice on validation error.)
+      # paginate(...) already honors ?per_page= when valid.
       @items = paginate(
         @image_set.image_set_items.includes(image: { photo_attachment: :blob }).order(:id),
         per_page: 100
@@ -135,9 +136,10 @@ class ImageSetsController < ApplicationController
       flash.now[:alert] = errors.join("; ")
       render :locations, status: :unprocessable_entity
     else
-      # Preserve the page the user was on so they don't get bounced back to
-      # page 1 after every save.
-      redirect_to locations_image_set_path(@image_set, page: params[:page]), notice: "Changes saved."
+      # Preserve the page + per_page the user was on so they don't get
+      # bounced back to page 1 / default size after every save.
+      redirect_to locations_image_set_path(@image_set, page: params[:page], per_page: params[:per_page]),
+                  notice: "Changes saved."
     end
   end
 
@@ -149,7 +151,7 @@ class ImageSetsController < ApplicationController
   def add_image
     url = params[:url].to_s.strip
     if url.empty?
-      redirect_to locations_image_set_path(@image_set), alert: "Please enter an image URL." and return
+      redirect_back fallback_location: locations_image_set_path(@image_set), alert: "Please enter an image URL." and return
     end
 
     title = params[:title].to_s.strip.presence || "Untitled"
@@ -167,9 +169,9 @@ class ImageSetsController < ApplicationController
       item.latitude  = lat || image.latitude
       item.longitude = lng || image.longitude
       item.save!
-      redirect_to locations_image_set_path(@image_set), notice: "Image added to set."
+      redirect_back fallback_location: locations_image_set_path(@image_set), notice: "Image added to set."
     else
-      redirect_to locations_image_set_path(@image_set), alert: "That image is already in this set."
+      redirect_back fallback_location: locations_image_set_path(@image_set), alert: "That image is already in this set."
     end
   end
 

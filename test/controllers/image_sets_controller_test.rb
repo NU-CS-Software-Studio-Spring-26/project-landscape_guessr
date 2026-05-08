@@ -60,6 +60,20 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
     assert_equal 10.5, item.reload.latitude.to_f
   end
 
+  test "update_locations preserves page and per_page on save" do
+    # Regression: the form's hidden :page / :per_page fields feed back
+    # into the redirect so the user lands on the same slice they were
+    # editing. Without the hidden fields the redirect dropped them and
+    # bounced the user to page 1 / default size.
+    item = image_set_items(:alice_private_one)
+    put locations_image_set_path(image_sets(:alice_private)),
+        params: {
+          page: "2", per_page: "25",
+          image_set_items: { item.id.to_s => { latitude: "10.5", longitude: "20.5" } }
+        }
+    assert_redirected_to locations_image_set_path(image_sets(:alice_private), page: "2", per_page: "25")
+  end
+
   test "destroy deletes the set" do
     set = @alice.image_sets.create!(name: "Temp", visibility: "private")
     assert_difference("ImageSet.count", -1) do

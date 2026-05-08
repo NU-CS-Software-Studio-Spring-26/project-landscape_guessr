@@ -14,6 +14,8 @@ class ApplicationController < ActionController::Base
 
   helper_method :admin?
 
+  PER_PAGE_OPTIONS = [ 25, 50, 100, 250, 500 ].freeze
+
   private
     def admin?
       authenticated? && Current.user.admin?
@@ -31,14 +33,18 @@ class ApplicationController < ActionController::Base
     end
 
     # Slice a relation into a page based on params[:page]. Used by image
-    # galleries (image_sets#show, image_sets#locations, images#index) to
-    # cap DOM/blob load on big sets. Returns the windowed relation; sets
-    # @page / @total_pages / @total_items / @per_page on the controller
-    # for the view to render the shared _pagination partial.
+    # galleries (image_sets#show, image_sets#locations, images#index) and
+    # the games index to cap DOM load on long lists. Returns the windowed
+    # relation; sets @page / @total_pages / @total_items / @per_page on
+    # the controller for the view to render the shared _pagination partial.
     #
-    # ?page= is clamped to [1, total_pages] so users fiddling the URL
-    # never land on an empty page or a negative offset.
+    # `per_page:` is the *default* — if ?per_page= is in the allowed list
+    # (PER_PAGE_OPTIONS) the user override wins. ?page= is clamped to
+    # [1, total_pages] so users fiddling the URL never land on an empty
+    # page or a negative offset.
     def paginate(scope, per_page:)
+      requested = params[:per_page].to_i
+      per_page  = requested if PER_PAGE_OPTIONS.include?(requested)
       total = scope.size
       pages = [ (total.to_f / per_page).ceil, 1 ].max
       page  = params[:page].to_i.clamp(1, pages)
