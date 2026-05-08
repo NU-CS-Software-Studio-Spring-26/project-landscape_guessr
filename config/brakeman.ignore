@@ -1,10 +1,14 @@
 {
   "ignored_warnings": [
     {
-      "fingerprint": "39c01c1e8312f353125fdea3a3bf83b05311abab36ddd537eb44f1bb96f68faf",
-      "note": "Image URLs come from Wikidata seeds, not user input"
+      "fingerprint": "67595a857f4c66e5863d9db8569c249f719e6696d66431381d7094defd491b87",
+      "note": "google_maps_url builds an https URL from numeric lat/lng (decimal columns). The URL string is structurally safe — only digits and a comma can land in it."
+    },
+    {
+      "fingerprint": "c142c51e3bf52d8f8a1c1652932061ae01c8a0ce9aadde6f87d76f507e7d21af",
+      "note": "Image#url is admin-only-editable; the view also gates on an http(s):// scheme regex before rendering the link, so a javascript: URL can't reach link_to even from a compromised admin or corrupted seed."
     }
   ],
-  "updated": "2026-04-22",
+  "updated": "2026-05-08",
   "brakeman_version": "8.0.4"
 }
