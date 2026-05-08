@@ -1,7 +1,4 @@
 <% content_for :title, "Results — Game ##{@game.id}" %>
-<% content_for :head do %>
-  <%= render "shared/maplibre_assets" %>
-<% end %>
 
 <%# results-map controller wraps the map AND the round breakdown so
     each thumbnail can dispatch click->results-map#focus to dive the
