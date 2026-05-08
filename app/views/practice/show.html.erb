@@ -19,11 +19,11 @@
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
     <%# Same scroll-zoom + inline-replace-with-original as /games/:id. %>
     <div data-controller="zoomable"
-         data-zoomable-cap-width-value="3840"
+         data-zoomable-cap-width-value="<%= Image::ZOOM_CAP_WIDTH %>"
          class="space-y-1">
       <div data-zoomable-target="viewport"
            class="max-h-[60vh] rounded-md border border-gray-200 overflow-hidden select-none">
-        <img src="<%= image_src(@image, width: 3840) %>"
+        <img src="<%= image_src(@image, width: Image::ZOOM_CAP_WIDTH) %>"
              alt="Guess this location"
              class="max-w-full max-h-[60vh] block mx-auto" />
       </div>
@@ -32,7 +32,7 @@
         <%# Hidden by default; revealed by zoomable controller only when
             the loaded image was actually downsized (naturalWidth ≥ cap),
             so it never shows up as a no-op. %>
-        <% unless @image.respond_to?(:photo) && @image.photo.attached? %>
+        <% unless @image.photo.attached? %>
           <button type="button"
                   data-zoomable-target="originalButton"
                   data-action="zoomable#loadOriginal"

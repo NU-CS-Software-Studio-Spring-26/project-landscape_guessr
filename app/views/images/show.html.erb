@@ -28,11 +28,11 @@
     <%# Photo column (2 of 3). Same scroll-zoom + load-original logic
         as the game/practice screens. %>
     <div data-controller="zoomable"
-         data-zoomable-cap-width-value="3840"
+         data-zoomable-cap-width-value="<%= Image::ZOOM_CAP_WIDTH %>"
          class="lg:col-span-2 space-y-1">
       <div data-zoomable-target="viewport"
            class="h-[60vh] flex items-center justify-center bg-gray-100 rounded-md border border-gray-200 select-none">
-        <img src="<%= image_src(@image, width: 3840) %>" alt="<%= @image.title %>"
+        <img src="<%= image_src(@image, width: Image::ZOOM_CAP_WIDTH) %>" alt="<%= @image.title %>"
              class="max-w-full max-h-full object-contain">
       </div>
       <div class="flex items-center justify-between gap-2 text-xs text-gray-400">
