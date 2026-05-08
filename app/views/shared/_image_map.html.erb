@@ -1,5 +1,5 @@
 <%#
-  Shared MapLibre world map with one circle per point.
+  Shared world map with one circle per point.
   Used by /images/map and /image_sets/:id/map.
 
   Locals:
@@ -8,7 +8,8 @@
     height_class — Tailwind height class (default "h-[80vh]")
     style        — MapTiler style slug (default "outdoor-v2")
 
-  The page must include shared/_maplibre_assets in content_for(:head).
+  The image-map Stimulus controller loads the MapTiler SDK on connect,
+  so the page doesn't need to inject any map assets in <head>.
 %>
 <% element_id   ||= "image-map" %>
 <% height_class ||= "h-[80vh]" %>
