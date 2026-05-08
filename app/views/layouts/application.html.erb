@@ -34,7 +34,11 @@
       </div>
       <div class="flex items-center gap-3">
         <% if authenticated? %>
-          <%= link_to Current.user.username, profile_path, class: "text-gray-700 hover:text-blue-600 font-medium hidden sm:inline" %>
+          <% if Current.user.username.present? %>
+            <%= link_to Current.user.username, profile_path, class: "text-gray-700 hover:text-blue-600 font-medium hidden sm:inline" %>
+          <% else %>
+            <%= link_to "Finish setup", setup_username_profile_path, class: "text-gray-700 hover:text-blue-600 font-medium hidden sm:inline" %>
+          <% end %>
           <%= button_to "Sign out", session_path, method: :delete, class: "btn-secondary text-sm py-1.5" %>
         <% else %>
           <%= link_to "Sign in", new_session_path, class: "btn-secondary text-sm py-1.5" %>
