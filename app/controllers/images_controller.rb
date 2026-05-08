@@ -6,16 +6,10 @@ class ImagesController < ApplicationController
 
   # GET /images or /images.json
   def index
-    per_page = 100
-    base = (admin? ? Image.all : Image.visible_to(Current.user))
-             .with_attached_photo
-             .order(:id)
-    @total_items  = base.count
-    @total_pages  = [ (@total_items.to_f / per_page).ceil, 1 ].max
-    @page         = params[:page].to_i.clamp(1, @total_pages)
-    @page         = 1 if @page < 1
-    @per_page     = per_page
-    @images       = base.offset((@page - 1) * per_page).limit(per_page)
+    @images = paginate(
+      (admin? ? Image.all : Image.visible_to(Current.user)).with_attached_photo.order(:id),
+      per_page: 100
+    )
   end
 
   # GET /images/map
