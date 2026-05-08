@@ -37,7 +37,7 @@ A GeoGuessr-style web game: players see a landscape photograph (mountain, lake, 
 - **Rails** 8.1.3
 - **PostgreSQL** (dev and production — Heroku-compatible)
 - **TailwindCSS** via `tailwindcss-rails`
-- **MapLibre GL** + **MapTiler outdoor-v2** vector tiles for all maps (smooth zoom, terrain shading, mountain peak labels with elevations, country/region/city POIs). The bright hiking/cycling/via-ferrata trail layers that ship with `outdoor-v2` are programmatically hidden so the map reads as terrain + POIs, not as a trail map.
+- **MapTiler SDK JS** (wraps MapLibre GL) for all maps, with session-based tile billing and per-`ImageSet` basemap (`outdoor-v2` default; streets / bright / topo / satellite / hybrid). See *Conventions → Maps* for the loader, trail-hiding, and Turbo gotchas.
 - **Active Storage** + **AWS S3** for user uploads
 - **libvips** (via `image_processing`) for HEIC -> JPEG conversion, resize, color-space normalization
 
@@ -87,7 +87,7 @@ export AWS_REGION=us-east-2
 | `Game` | `User`, `ImageSet?` | `game_images`, `guesses`, `images` (through `game_images`) | `status`, `score`, `completed_at` |
 | `GameImage` | `Game`, `Image` | — | `position` (1–5), `answer_latitude`, `answer_longitude` (snapshot at game-creation time) |
 | `Image` | — | `guesses`, `game_images`, `image_set_items`, `image_sets` (through items) | `url`, `latitude`, `longitude`, `title`; optional `photo` Active Storage attachment |
-| `ImageSet` | `User?` | `image_set_items`, `images` (through items), `games` | `name`, `visibility` (`private`\|`public`), `is_system_default` |
+| `ImageSet` | `User?` | `image_set_items`, `images` (through items), `games` | `name`, `visibility` (`private`\|`public`), `is_system_default`, `map_style` |
 | `ImageSetItem` | `ImageSet`, `Image` | — | `latitude`, `longitude` (per-set override of the image's coords) |
 | `Guess` | `Game`, `Image` | — | `latitude`, `longitude` (player's pick) |
 
@@ -114,7 +114,8 @@ The `Image.visible_to(user)` scope (in `app/models/image.rb`) is the canonical w
 | `/image_sets/:id` | Read-only gallery view of a set |
 | `/image_sets/:id/locations` | Owner-only: upload, edit titles/coords, remove items |
 | `/image_sets/:id/map` | Map of all located images in a set |
-| `/images`, `/images/map` | Images list / world map (admins see all; everyone else sees `Image.visible_to`) |
+| `/images`, `/images/map` | Paginated images list / world map (admins see all; everyone else sees `Image.visible_to`) |
+| `/images/:id` | Image detail: photo (scroll-zoom), edit form (anyone owning a set with the image), set memberships, "Open in Google Maps" |
 | `/practice` | Single-image guessing without saving a game (no auth required) |
 
 ## Scoring
@@ -201,7 +202,15 @@ This avoids R14 OOMs on Heroku Basic (which would happen if the dyno tried to re
 
 ### Maps
 
-All maps use **MapLibre GL JS** with **MapTiler outdoor-v2** vector tiles. Three Stimulus controllers — `image_map`, `guess_map`, `results_map` — share a single MapTiler key, a small lazy-loader for the MapLibre script, and a `hideOutdoorTrails(map)` helper that runs on `style.load` to suppress the layers in `source: "outdoor", source-layer: "trail"` (the bright hiking/cycling/via-ferrata overlays ship with the style and would otherwise clutter the guessing UX). Mountain peaks, contours, terrain shading, and POI labels (country / region / city / village) all stay. Adding a new map page = include `shared/_maplibre_assets` in `content_for(:head)` plus one of the controllers. No inline `<script>` tags, so Turbo navigation works without `data-turbo="false"` workarounds.
+All maps load the **MapTiler SDK** (which wraps MapLibre GL) and render an `ImageSet#map_style`-configurable basemap (default `outdoor-v2`). The three Stimulus controllers — `image_map`, `guess_map`, `results_map` — share `app/javascript/lib/maptiler.js` for the API key, the lazy SDK loader (`ensureMaptilerSdk()`), the `hideOutdoorTrails(map)` `style.load` hook, and an `escapeText()` helper for popup HTML. The trail-hiding hook is scoped to `source: "outdoor", source-layer: "trail"` so non-outdoor styles (streets-v2's footpaths, etc.) keep their pedestrian detail. Mountain peaks, contours, terrain shading, and POI labels all stay on outdoor.
+
+Adding a new map page = pick one of the controllers, pass `style:` if the page has a per-set basemap, and **don't** add a `<script>` tag for the SDK (the loader handles it). Don't use `data-turbo="false"` to "fix" map issues either — Turbo Drive keeps `window.maptilersdk` warm across navs, which is what makes the per-visitor billing work. If a same-URL Turbo navigation flashes the previous round's photo, add `<meta name="turbo-cache-control" content="no-preview">` (see `games/show.html.erb`).
+
+Popup HTML in map controllers uses `setHTML()`, which executes embedded markup — escape any user-controlled string going in there with `escapeText()`. `Image#title` in particular is editable by anyone owning a set the image is in (see `Image#editable_by?`), so it must always go through `escapeText()` before reaching `setHTML`.
+
+### Pagination
+
+Galleries that can grow large (`/images`, `/image_sets/:id`, `/image_sets/:id/locations`) page through `ApplicationController#paginate(scope, per_page:)`. It clamps `?page=` to `[1, total_pages]`, sets `@page / @total_pages / @total_items / @per_page`, and returns the windowed scope. Render the controls with `<%= render "image_sets/pagination", page_url: ->(n) { … }, page: @page, total_pages: @total_pages, total_items: @total_items, per_page: @per_page %>` — `page_url` is a lambda so the partial works for any route.
 
 ### Component classes (Tailwind)
 
