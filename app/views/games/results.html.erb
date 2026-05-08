@@ -81,10 +81,9 @@
           </div>
         </div>
         <%# Tertiary affordance — small, muted, with ↗ to signal "leaves
-            this page." stopRowClick keeps the row's focus action from
-            firing when this link is clicked. %>
+            this page." The row's #focus action ignores clicks on
+            <a>/<button> targets, so this link doesn't also trigger pan. %>
         <%= link_to "Details ↗", row[:guess].image,
-              data: { action: "click->results-map#stopRowClick" },
               class: "shrink-0 self-end sm:self-auto px-2 py-1.5 text-xs text-gray-400 hover:text-blue-600 hover:underline underline-offset-2" %>
       </div>
     <% end %>

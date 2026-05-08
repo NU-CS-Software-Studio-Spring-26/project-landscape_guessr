@@ -128,6 +128,14 @@ export default class extends Controller {
   // far off they were. Also scrolls the map element into view since
   // it's typically scrolled past on a results page.
   focus(event) {
+    // Bail when the click landed on a real link/button inside the row —
+    // we don't want clicking "Details ↗" to also pan the map. Earlier
+    // versions used a stopPropagation() handler on the link instead, but
+    // that swallowed the click before Turbo Drive's document-level
+    // interceptor saw it, forcing a full page reload (and a fresh
+    // MapTiler session) on every Details click.
+    if (event.target.closest("a, button")) return
+
     const round = parseInt(event.params?.round, 10)
     const r = this.roundsValue.find((x) => x.round === round)
     if (!r || !this.map) return
@@ -138,15 +146,6 @@ export default class extends Controller {
     this.map.fitBounds(bounds, { padding: 80, maxZoom: 14, duration: 700 })
 
     this.containerTarget.scrollIntoView({ behavior: "smooth", block: "center" })
-  }
-
-  // Wired up on the per-row "Details ↗" link in the round breakdown.
-  // The whole row is clickable for map-focus, so without this the
-  // click on the inner link would bubble up and trigger #focus before
-  // the browser navigates. stopPropagation keeps the row's action from
-  // firing; the link itself still navigates normally.
-  stopRowClick(event) {
-    event.stopPropagation()
   }
 
   disconnect() {
