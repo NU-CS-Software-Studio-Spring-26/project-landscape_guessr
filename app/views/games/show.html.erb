@@ -32,7 +32,7 @@
           and broke the 2-column layout, pushing the map to the next
           row.) %>
       <div data-controller="zoomable"
-           data-zoomable-cap-width-value="3840"
+           data-zoomable-cap-width-value="<%= Image::ZOOM_CAP_WIDTH %>"
            class="space-y-1">
         <%# In-place scroll-zoom: wheel zooms centered on the cursor
             (Google-Maps style), drag pans when zoomed in, double-click
@@ -45,7 +45,7 @@
             of a clue photo is confusing in a guesser game. %>
         <div data-zoomable-target="viewport"
              class="h-[60vh] flex items-center justify-center bg-gray-100 rounded-md border border-gray-200 select-none">
-          <img src="<%= image_src(@image, width: 3840) %>" alt="Guess this location"
+          <img src="<%= image_src(@image, width: Image::ZOOM_CAP_WIDTH) %>" alt="Guess this location"
                class="max-w-full max-h-full object-contain">
         </div>
         <div class="flex items-center justify-between gap-2 text-xs text-gray-400">
@@ -58,7 +58,7 @@
               a downsized thumbnail and there's a fuller version to load).
               Skipped entirely for Active Storage uploads — those are
               served at native resolution and the helper ignores width. %>
-          <% unless @image.respond_to?(:photo) && @image.photo.attached? %>
+          <% unless @image.photo.attached? %>
             <button type="button"
                     data-zoomable-target="originalButton"
                     data-action="zoomable#loadOriginal"

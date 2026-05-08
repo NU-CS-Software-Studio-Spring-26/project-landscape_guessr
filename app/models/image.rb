@@ -71,6 +71,15 @@ class Image < ApplicationRecord
   PROCESSED_MAX_DIMENSION = 2560
   PROCESSED_QUALITY       = 75
 
+  # Display target for the zoomable game/practice/detail viewer.
+  # Wikimedia serves a 3840-wide thumbnail when ?width=3840 is appended,
+  # and the zoomable Stimulus controller reveals "load full quality"
+  # only when the loaded img.naturalWidth ≥ this value (so the button
+  # only shows up when there's a higher-res original to fetch). The
+  # Ruby `image_src(image, width: …)` call and the JS
+  # data-zoomable-cap-width-value have to agree — both read this.
+  ZOOM_CAP_WIDTH = 3840
+
   # Read GPS coords from an upload's EXIF, or nil if absent/unreadable.
   # Accepts ActionDispatch::Http::UploadedFile or anything with #path.
   #
