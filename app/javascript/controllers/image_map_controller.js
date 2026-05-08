@@ -1,8 +1,9 @@
 import { Controller } from "@hotwired/stimulus"
 
-const MAPLIBRE_CSS = "https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.css"
-const MAPLIBRE_JS  = "https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.js"
-const MAPTILER_KEY = "RWz2xTwJMGVfRP9y6hhf"
+// See guess_map_controller.js for why we use MapTiler SDK over raw MapLibre.
+const MAPTILER_SDK_CSS = "https://cdn.maptiler.com/maptiler-sdk-js/v4.0.2/maptiler-sdk.css"
+const MAPTILER_SDK_JS  = "https://cdn.maptiler.com/maptiler-sdk-js/v4.0.2/maptiler-sdk.umd.min.js"
+const MAPTILER_KEY     = "biJMFiy9HEvnGGS540u4"
 
 function hideOutdoorTrails(map) {
   for (const layer of map.getStyle()?.layers || []) {
@@ -12,15 +13,18 @@ function hideOutdoorTrails(map) {
   }
 }
 
-function ensureMaplibre() {
-  if (window.maplibregl) return Promise.resolve()
-  if (!document.querySelector(`link[href="${MAPLIBRE_CSS}"]`)) {
-    const link = Object.assign(document.createElement("link"), { rel: "stylesheet", href: MAPLIBRE_CSS })
+function ensureMaptilerSdk() {
+  if (window.maptilersdk) return Promise.resolve()
+  if (!document.querySelector(`link[href="${MAPTILER_SDK_CSS}"]`)) {
+    const link = Object.assign(document.createElement("link"), { rel: "stylesheet", href: MAPTILER_SDK_CSS })
     document.head.appendChild(link)
   }
   return new Promise((resolve, reject) => {
-    const script = Object.assign(document.createElement("script"), { src: MAPLIBRE_JS })
-    script.onload = resolve
+    const script = Object.assign(document.createElement("script"), { src: MAPTILER_SDK_JS })
+    script.onload = () => {
+      window.maptilersdk.config.apiKey = MAPTILER_KEY
+      resolve()
+    }
     script.onerror = reject
     document.head.appendChild(script)
   })
@@ -33,7 +37,7 @@ function ensureMaplibre() {
 //   points — Array<{ id, lat, lng, title, url? }>
 //
 // Circles are rendered as a GeoJSON source + circle layer (native WebGL),
-// not maplibregl.Marker DOM elements — that scales fine to a thousand+
+// not maptilersdk.Marker DOM elements — that scales fine to a thousand+
 // points where a Marker per point would tank the page.
 export default class extends Controller {
   static values = {
@@ -42,9 +46,9 @@ export default class extends Controller {
   }
 
   async connect() {
-    await ensureMaplibre()
+    await ensureMaptilerSdk()
 
-    this.map = new maplibregl.Map({
+    this.map = new maptilersdk.Map({
       container: this.element,
       style: `https://api.maptiler.com/maps/${this.styleValue}/style.json?key=${MAPTILER_KEY}`,
       center: [0, 20],
@@ -116,7 +120,7 @@ export default class extends Controller {
           <div style="font-size:12px;color:#666">${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}</div>
           <a href="/images/${id}" style="color:#2563eb;font-size:12px">Details →</a>
         </div>`
-      new maplibregl.Popup({ offset: 10, maxWidth: "240px" })
+      new maptilersdk.Popup({ offset: 10, maxWidth: "240px" })
         .setLngLat(f.geometry.coordinates)
         .setHTML(html)
         .addTo(this.map)
@@ -124,7 +128,7 @@ export default class extends Controller {
 
     // Auto-fit to all points (with sane max zoom so a single point doesn't
     // slam to street level).
-    const bounds = new maplibregl.LngLatBounds()
+    const bounds = new maptilersdk.LngLatBounds()
     points.forEach((p) => bounds.extend([p.lng, p.lat]))
     this.map.fitBounds(bounds, { padding: 60, maxZoom: 9, duration: 0 })
   }

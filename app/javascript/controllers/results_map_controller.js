@@ -1,7 +1,9 @@
 import { Controller } from "@hotwired/stimulus"
 
-const MAPLIBRE_CSS = "https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.css"
-const MAPLIBRE_JS  = "https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.js"
+// See guess_map_controller.js for why we use MapTiler SDK over raw MapLibre.
+const MAPTILER_SDK_CSS = "https://cdn.maptiler.com/maptiler-sdk-js/v4.0.2/maptiler-sdk.css"
+const MAPTILER_SDK_JS  = "https://cdn.maptiler.com/maptiler-sdk-js/v4.0.2/maptiler-sdk.umd.min.js"
+const MAPTILER_KEY     = "biJMFiy9HEvnGGS540u4"
 
 const COLORS = [
   "#3b82f6", "#ef4444", "#22c55e", "#f59e0b", "#a855f7",
@@ -16,17 +18,20 @@ function hideOutdoorTrails(map) {
   }
 }
 
-function ensureMaplibre() {
-  if (window.maplibregl) return Promise.resolve()
+function ensureMaptilerSdk() {
+  if (window.maptilersdk) return Promise.resolve()
 
-  if (!document.querySelector(`link[href="${MAPLIBRE_CSS}"]`)) {
-    const link = Object.assign(document.createElement("link"), { rel: "stylesheet", href: MAPLIBRE_CSS })
+  if (!document.querySelector(`link[href="${MAPTILER_SDK_CSS}"]`)) {
+    const link = Object.assign(document.createElement("link"), { rel: "stylesheet", href: MAPTILER_SDK_CSS })
     document.head.appendChild(link)
   }
 
   return new Promise((resolve, reject) => {
-    const script = Object.assign(document.createElement("script"), { src: MAPLIBRE_JS })
-    script.onload = resolve
+    const script = Object.assign(document.createElement("script"), { src: MAPTILER_SDK_JS })
+    script.onload = () => {
+      window.maptilersdk.config.apiKey = MAPTILER_KEY
+      resolve()
+    }
     script.onerror = reject
     document.head.appendChild(script)
   })
@@ -40,11 +45,11 @@ export default class extends Controller {
   }
 
   async connect() {
-    await ensureMaplibre()
+    await ensureMaptilerSdk()
 
-    this.map = new maplibregl.Map({
+    this.map = new maptilersdk.Map({
       container: this.containerTarget,
-      style: `https://api.maptiler.com/maps/${this.styleValue}/style.json?key=RWz2xTwJMGVfRP9y6hhf`,
+      style: `https://api.maptiler.com/maps/${this.styleValue}/style.json?key=${MAPTILER_KEY}`,
       center: [0, 20],
       zoom: 1.5
     })
@@ -59,16 +64,16 @@ export default class extends Controller {
     const rounds = this.roundsValue
     if (!rounds.length) return
 
-    const bounds = new maplibregl.LngLatBounds()
+    const bounds = new maptilersdk.LngLatBounds()
 
     rounds.forEach((r, i) => {
       const color = COLORS[i % COLORS.length]
       const label = `Round ${r.round}`
 
       // Guess marker (hollow circle style via red)
-      new maplibregl.Marker({ color: "#ef4444" })
+      new maptilersdk.Marker({ color: "#ef4444" })
         .setLngLat([r.guess_lng, r.guess_lat])
-        .setPopup(new maplibregl.Popup({ offset: 8 }).setHTML(
+        .setPopup(new maptilersdk.Popup({ offset: 8 }).setHTML(
           `<div class="text-xs font-medium">${label} — your guess</div>` +
           `<div class="text-xs text-gray-500">${r.guess_lat.toFixed(4)}, ${r.guess_lng.toFixed(4)}</div>` +
           `<div class="text-xs text-gray-500">${r.distance_label} off</div>`
@@ -76,9 +81,9 @@ export default class extends Controller {
         .addTo(this.map)
 
       // Answer marker (green)
-      new maplibregl.Marker({ color: "#22c55e" })
+      new maptilersdk.Marker({ color: "#22c55e" })
         .setLngLat([r.answer_lng, r.answer_lat])
-        .setPopup(new maplibregl.Popup({ offset: 8 }).setHTML(
+        .setPopup(new maptilersdk.Popup({ offset: 8 }).setHTML(
           `<div class="text-xs font-medium">${label} — ${r.title}</div>` +
           `<div class="text-xs text-gray-500">${r.answer_lat.toFixed(4)}, ${r.answer_lng.toFixed(4)}</div>`
         ))
@@ -127,7 +132,7 @@ export default class extends Controller {
     const r = this.roundsValue.find((x) => x.round === round)
     if (!r || !this.map) return
 
-    const bounds = new maplibregl.LngLatBounds()
+    const bounds = new maptilersdk.LngLatBounds()
     bounds.extend([r.guess_lng, r.guess_lat])
     bounds.extend([r.answer_lng, r.answer_lat])
     this.map.fitBounds(bounds, { padding: 80, maxZoom: 14, duration: 700 })
