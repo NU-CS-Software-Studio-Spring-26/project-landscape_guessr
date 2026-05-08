@@ -16,7 +16,18 @@ class PracticeController < ApplicationController
   end
 
   def check
-    image = Image.find_by(id: params[:image_id])
+    # allow_unauthenticated_access (above) skips require_authentication,
+    # which is also the hook that calls resume_session to populate
+    # Current.user from the session cookie. Call it explicitly here so
+    # signed-in users still see their own private-set images while
+    # anonymous callers fall through to the system_default + public sets.
+    resume_session
+
+    # Gate by visibility — without this, /practice/check?image_id=N is
+    # an unauthenticated read of any image's coordinates by enumerating
+    # sequential IDs. That leaks lat/lng for images in private sets
+    # (especially user uploads with EXIF GPS).
+    image = Image.visible_to(Current.user).find_by(id: params[:image_id])
     return render json: { error: "image_not_found" }, status: :not_found unless image
 
     ans_lat = image.latitude.to_f
