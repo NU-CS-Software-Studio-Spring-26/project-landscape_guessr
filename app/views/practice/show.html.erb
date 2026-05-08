@@ -1,5 +1,13 @@
 <% content_for :title, "Practice" %>
 
+<%# "Next image" reloads the same /practice URL via Turbo.visit, so without
+    this Turbo would render the previous round's cached snapshot briefly
+    and the player sees the old photo flash. no-preview keeps the snapshot
+    cached (back nav stays snappy) but skips the stale-preview render. %>
+<% content_for :head do %>
+  <meta name="turbo-cache-control" content="no-preview">
+<% end %>
+
 <div data-controller="practice"
      data-action="guess-map:pinned->practice#pinChanged"
      data-practice-image-id-value="<%= @image.id %>"
@@ -10,9 +18,10 @@
 
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
     <%# Same scroll-zoom + inline-replace-with-original as /games/:id. %>
-    <div class="space-y-1">
-      <div data-controller="zoomable"
-           data-zoomable-cap-width-value="3840"
+    <div data-controller="zoomable"
+         data-zoomable-cap-width-value="3840"
+         class="space-y-1">
+      <div data-zoomable-target="viewport"
            class="max-h-[60vh] rounded-md border border-gray-200 overflow-hidden select-none">
         <img src="<%= image_src(@image, width: 3840) %>"
              alt="Guess this location"

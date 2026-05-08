@@ -1,5 +1,14 @@
 <% content_for :title, "Game ##{@game.id}" %>
 
+<%# "Next round" calls Turbo.visit on the same /games/:id URL, so without
+    this Turbo would render the previous round's cached snapshot for an
+    instant before the live response arrives — and the player sees the
+    old photo flash. no-preview keeps the snapshot cached (back nav stays
+    snappy) but skips the stale-preview render. %>
+<% content_for :head do %>
+  <meta name="turbo-cache-control" content="no-preview">
+<% end %>
+
 <div class="w-full space-y-4">
   <div class="flex justify-between items-center">
     <h1 class="heading-page">
@@ -22,7 +31,9 @@
           the map is column 2. (Earlier the hint <p> sat as a sibling
           and broke the 2-column layout, pushing the map to the next
           row.) %>
-      <div class="space-y-1">
+      <div data-controller="zoomable"
+           data-zoomable-cap-width-value="3840"
+           class="space-y-1">
         <%# In-place scroll-zoom: wheel zooms centered on the cursor
             (Google-Maps style), drag pans when zoomed in, double-click
             resets. Source is 3840 px (4K-cached on Wikimedia) so ~8×
@@ -32,8 +43,7 @@
             object-contain (not -cover): show the entire photo,
             letterboxed if it doesn't match 60vh — cropping the edges
             of a clue photo is confusing in a guesser game. %>
-        <div data-controller="zoomable"
-             data-zoomable-cap-width-value="3840"
+        <div data-zoomable-target="viewport"
              class="h-[60vh] flex items-center justify-center bg-gray-100 rounded-md border border-gray-200 select-none">
           <img src="<%= image_src(@image, width: 3840) %>" alt="Guess this location"
                class="max-w-full max-h-full object-contain">

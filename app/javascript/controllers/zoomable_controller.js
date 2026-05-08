@@ -7,9 +7,21 @@ import { Controller } from "@hotwired/stimulus"
 // station signage / route numbers without a new-tab roundtrip.
 //
 // HTML wiring:
-//   <div data-controller="zoomable" class="... overflow-hidden">
-//     <img src="..." class="...">  <!-- only direct child that matters -->
+//   <div data-controller="zoomable" data-zoomable-cap-width-value="3840">
+//     <div data-zoomable-target="viewport" class="... overflow-hidden">
+//       <img src="..." class="...">  <!-- only direct child that matters -->
+//     </div>
+//     <button data-zoomable-target="originalButton"
+//             data-action="zoomable#loadOriginal" class="hidden">
+//       load full quality
+//     </button>
 //   </div>
+//
+// The controller's element is the outer wrapper so target lookups (button)
+// resolve, but wheel/mouse listeners and geometry stay scoped to the
+// `viewport` target — otherwise scrolling over a sibling row (hint text,
+// the button) would trigger a no-op zoom. If `viewport` isn't declared
+// (zoom-only callers), this falls back to `this.element`.
 //
 // Notes:
 // - Wheel events are intercepted only when zooming would actually do
@@ -25,7 +37,7 @@ const MAX_SCALE  = 8
 const ZOOM_SPEED = 0.0015  // wheel-delta multiplier feeding Math.exp()
 
 export default class extends Controller {
-  static targets = ["originalButton"]
+  static targets = ["originalButton", "viewport"]
   static values  = { capWidth: { type: Number, default: 0 } }
 
   connect() {
@@ -33,30 +45,32 @@ export default class extends Controller {
     this.tx    = 0
     this.ty    = 0
     this.dragging = false
-    this.img = this.element.querySelector("img")
+    this.viewport = this.hasViewportTarget ? this.viewportTarget : this.element
+    this.img = this.viewport.querySelector("img")
     if (!this.img) return
 
-    this.element.style.overflow = "hidden"
+    this.viewport.style.overflow = "hidden"
     this.img.style.transformOrigin = "0 0"
     this.img.style.willChange      = "transform"
     this.img.style.cursor          = "zoom-in"
     this.img.draggable             = false  // suppress browser ghost-drag
 
-    this.element.addEventListener("wheel",     this.onWheel,      { passive: false })
-    this.element.addEventListener("mousedown", this.onMouseDown)
-    this.element.addEventListener("dblclick",  this.onDoubleClick)
-    window.addEventListener("mousemove",       this.onMouseMove)
-    window.addEventListener("mouseup",         this.onMouseUp)
+    this.viewport.addEventListener("wheel",     this.onWheel,      { passive: false })
+    this.viewport.addEventListener("mousedown", this.onMouseDown)
+    this.viewport.addEventListener("dblclick",  this.onDoubleClick)
+    window.addEventListener("mousemove",        this.onMouseMove)
+    window.addEventListener("mouseup",          this.onMouseUp)
 
     this.#maybeRevealOriginalButton()
   }
 
   disconnect() {
-    this.element.removeEventListener("wheel",     this.onWheel)
-    this.element.removeEventListener("mousedown", this.onMouseDown)
-    this.element.removeEventListener("dblclick",  this.onDoubleClick)
-    window.removeEventListener("mousemove",       this.onMouseMove)
-    window.removeEventListener("mouseup",         this.onMouseUp)
+    if (!this.viewport) return
+    this.viewport.removeEventListener("wheel",     this.onWheel)
+    this.viewport.removeEventListener("mousedown", this.onMouseDown)
+    this.viewport.removeEventListener("dblclick",  this.onDoubleClick)
+    window.removeEventListener("mousemove",        this.onMouseMove)
+    window.removeEventListener("mouseup",          this.onMouseUp)
   }
 
   onWheel = (e) => {
@@ -65,7 +79,7 @@ export default class extends Controller {
     if (this.scale <= MIN_SCALE && e.deltaY > 0) return
     e.preventDefault()
 
-    const rect = this.element.getBoundingClientRect()
+    const rect = this.viewport.getBoundingClientRect()
     const cx   = e.clientX - rect.left
     const cy   = e.clientY - rect.top
 
@@ -118,8 +132,8 @@ export default class extends Controller {
   // Keep the image edges flush with the container — at scale s,
   // tx is in [w*(1-s), 0] and ty in [h*(1-s), 0].
   clampPan() {
-    const w = this.element.clientWidth
-    const h = this.element.clientHeight
+    const w = this.viewport.clientWidth
+    const h = this.viewport.clientHeight
     this.tx = Math.min(0, Math.max(w * (1 - this.scale), this.tx))
     this.ty = Math.min(0, Math.max(h * (1 - this.scale), this.ty))
   }
