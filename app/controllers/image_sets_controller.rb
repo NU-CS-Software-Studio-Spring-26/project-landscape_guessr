@@ -14,8 +14,22 @@ class ImageSetsController < ApplicationController
   end
 
   # GET /image_sets/1
+  #
+  # Paginated mainly to keep the DOM bounded; `loading="lazy"` on the
+  # <img> tags below already defers the thumbnail GETs until each card
+  # scrolls into view, so 500/page renders comfortably even on large
+  # sets. URL-only images (Wikimedia) make this cheap; an Active Storage
+  # set of this size would be heavier per item (signed URL generation).
   def show
-    @items = @image_set.image_set_items.includes(:image).order("images.title")
+    # Eager-load photo+blob: every row calls image_src(item.image), which
+    # hits photo.attached? and would otherwise fire one ActiveStorage
+    # ::Attachment Load per item (500 N+1 queries on a full page).
+    @items = paginate(
+      @image_set.image_set_items
+                .includes(image: { photo_attachment: :blob })
+                .order("images.title"),
+      per_page: 500
+    )
   end
 
   # GET /image_sets/new
@@ -59,7 +73,14 @@ class ImageSetsController < ApplicationController
     # Stable order by item id — title-ordering would re-shuffle rows after
     # the user edits a title or saves, making them think their edits got
     # lost. Newest items always appear at the end.
-    @items = @image_set.image_set_items.includes(image: { photo_attachment: :blob }).order(:id)
+    @items = paginate(
+      @image_set.image_set_items.includes(image: { photo_attachment: :blob }).order(:id),
+      per_page: 100
+    ).load
+    # Banner reflects only items on the current page; for huge sets this
+    # avoids loading every blob's metadata. Real upload batches almost
+    # always fit on one page anyway, so the banner is still accurate
+    # where it matters.
     @processing_count = @items.count { |i| !i.image.processed? }
   end
 
@@ -84,8 +105,18 @@ class ImageSetsController < ApplicationController
         end
 
         if attrs.key?(:title) && (new_title = attrs[:title].to_s.strip).present? && new_title != item.image.title
-          unless item.image.update(title: new_title)
-            errors << "#{item.title}: #{item.image.errors.full_messages.join(', ')}"
+          # Mirror Image#editable_by? — set-owner CAN edit Image#title
+          # in the general case, but NOT for default-set images, since
+          # the canonical title propagates to the default set everyone
+          # plays. require_owner alone isn't enough here; without this
+          # guard, any user could vandalize default-set titles by
+          # adding the same URL to their own set first.
+          if item.image.editable_by?(Current.user)
+            unless item.image.update(title: new_title)
+              errors << "#{item.title}: #{item.image.errors.full_messages.join(', ')}"
+            end
+          else
+            errors << "#{item.title}: title is locked because this image is in the default set"
           end
         end
       end
@@ -93,11 +124,20 @@ class ImageSetsController < ApplicationController
     end
 
     if errors.any?
-      @items = @image_set.image_set_items.includes(:image).order(:id)
+      # Re-render with the SAME per_page as locations#GET so the user
+      # sees the page they were editing. (Previous code used 25, which
+      # silently shuffled them to a different slice on validation error.)
+      @items = paginate(
+        @image_set.image_set_items.includes(image: { photo_attachment: :blob }).order(:id),
+        per_page: 100
+      ).load
+      @processing_count = @items.count { |i| !i.image.processed? }
       flash.now[:alert] = errors.join("; ")
       render :locations, status: :unprocessable_entity
     else
-      redirect_to locations_image_set_path(@image_set), notice: "Changes saved."
+      # Preserve the page the user was on so they don't get bounced back to
+      # page 1 after every save.
+      redirect_to locations_image_set_path(@image_set, page: params[:page]), notice: "Changes saved."
     end
   end
 
@@ -235,6 +275,6 @@ class ImageSetsController < ApplicationController
   end
 
   def image_set_params
-    params.expect(image_set: [ :name, :visibility ])
+    params.expect(image_set: [ :name, :visibility, :map_style ])
   end
 end

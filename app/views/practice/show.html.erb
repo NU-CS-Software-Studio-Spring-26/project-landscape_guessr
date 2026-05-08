@@ -1,6 +1,11 @@
 <% content_for :title, "Practice" %>
+
+<%# "Next image" reloads the same /practice URL via Turbo.visit, so without
+    this Turbo would render the previous round's cached snapshot briefly
+    and the player sees the old photo flash. no-preview keeps the snapshot
+    cached (back nav stays snappy) but skips the stale-preview render. %>
 <% content_for :head do %>
-  <%= render "shared/maplibre_assets" %>
+  <meta name="turbo-cache-control" content="no-preview">
 <% end %>
 
 <div data-controller="practice"
@@ -12,11 +17,31 @@
   <h1 class="heading-page">Where is this?</h1>
 
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <%# Image %>
-    <div class="flex items-center justify-center">
-      <img src="<%= image_src(@image, width: 800) %>"
-           alt="Guess this location"
-           class="max-w-full max-h-[60vh] rounded-md border border-gray-200" />
+    <%# Same scroll-zoom + inline-replace-with-original as /games/:id. %>
+    <div data-controller="zoomable"
+         data-zoomable-cap-width-value="<%= Image::ZOOM_CAP_WIDTH %>"
+         class="space-y-1">
+      <div data-zoomable-target="viewport"
+           class="max-h-[60vh] rounded-md border border-gray-200 overflow-hidden select-none">
+        <img src="<%= image_src(@image, width: Image::ZOOM_CAP_WIDTH) %>"
+             alt="Guess this location"
+             class="max-w-full max-h-[60vh] block mx-auto" />
+      </div>
+      <div class="flex items-center justify-between gap-2 text-xs text-gray-400">
+        <span>scroll to zoom · drag to pan · double-click to reset</span>
+        <%# Hidden by default; revealed by zoomable controller only when
+            the loaded image was actually downsized (naturalWidth ≥ cap),
+            so it never shows up as a no-op. %>
+        <% unless @image.photo.attached? %>
+          <button type="button"
+                  data-zoomable-target="originalButton"
+                  data-action="zoomable#loadOriginal"
+                  data-zoomable-url-param="<%= image_src(@image) %>"
+                  class="hidden text-gray-500 hover:text-blue-600 underline-offset-2 hover:underline cursor-pointer">
+            load full quality
+          </button>
+        <% end %>
+      </div>
     </div>
 
     <%# Map %>

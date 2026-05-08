@@ -21,6 +21,34 @@ class Image < ApplicationRecord
     image_sets.any? { |s| s.is_system_default? || s.visibility == "public" || s.user_id == user&.id }
   end
 
+  # An image is editable by anyone who owns at least one set containing
+  # it (admins included), EXCEPT once it lives in the system-default set
+  # — at which point only admins can change it. Otherwise any logged-in
+  # user could add a default-set image to their own private set (via
+  # `add_image`'s find_or_create_by!(url:)), gaining edit rights, and
+  # rename it to something offensive. The renamed title would propagate
+  # back to every game played on the default set.
+  #
+  # Edits otherwise propagate across every set the image is in — by
+  # design, since Image is the canonical record and ImageSetItem is
+  # just a join row. Per-set title overrides aren't implemented yet;
+  # if/when they are, this rule loosens.
+  def editable_by?(user)
+    return false unless user
+    return true if user.admin?
+    return false if image_sets.exists?(is_system_default: true)
+    image_sets.exists?(user_id: user.id)
+  end
+
+  # Convenience: a Google Maps URL pointing at this image's coordinates.
+  # Nil if either coord is missing. Used by the detail and results pages
+  # for "Open in Maps ↗" — works for every image (Wikimedia, uploads,
+  # arbitrary URL) since lat/lng is the only requirement.
+  def google_maps_url
+    return nil unless latitude && longitude
+    "https://www.google.com/maps?q=#{latitude},#{longitude}"
+  end
+
   # Destroy this image (and its S3 blob via has_one_attached purge_later)
   # if no record still references it. Called from ImageSetItem and
   # GameImage after_destroy hooks so removing an image's last set
@@ -49,6 +77,15 @@ class Image < ApplicationRecord
   # indistinguishable from source on landscape photos.
   PROCESSED_MAX_DIMENSION = 2560
   PROCESSED_QUALITY       = 75
+
+  # Display target for the zoomable game/practice/detail viewer.
+  # Wikimedia serves a 3840-wide thumbnail when ?width=3840 is appended,
+  # and the zoomable Stimulus controller reveals "load full quality"
+  # only when the loaded img.naturalWidth ≥ this value (so the button
+  # only shows up when there's a higher-res original to fetch). The
+  # Ruby `image_src(image, width: …)` call and the JS
+  # data-zoomable-cap-width-value have to agree — both read this.
+  ZOOM_CAP_WIDTH = 3840
 
   # Read GPS coords from an upload's EXIF, or nil if absent/unreadable.
   # Accepts ActionDispatch::Http::UploadedFile or anything with #path.

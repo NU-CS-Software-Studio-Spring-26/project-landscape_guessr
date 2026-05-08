@@ -1,0 +1,27 @@
+<%# Local args: page_url — proc/lambda taking a page number and returning
+                the URL for that page. Lets the caller decide which route
+                to link to (image_set_path vs locations_image_set_path).
+                page, total_pages, total_items, per_page — pagination state.
+    Renders nothing when the set fits on a single page. %>
+<% if total_pages > 1 %>
+  <% first_index = (page - 1) * per_page + 1 %>
+  <% last_index  = [ page * per_page, total_items ].min %>
+  <nav class="flex items-center justify-between gap-3 pt-2 text-sm">
+    <p class="muted">
+      Showing <%= first_index %>–<%= last_index %> of <%= total_items %>
+    </p>
+    <div class="flex items-center gap-2">
+      <% if page > 1 %>
+        <%= link_to "← Prev", page_url.call(page - 1), class: "btn-secondary text-sm py-1.5" %>
+      <% else %>
+        <span class="btn-secondary text-sm py-1.5 opacity-40 pointer-events-none" aria-disabled="true">← Prev</span>
+      <% end %>
+      <span class="text-gray-500">Page <%= page %> / <%= total_pages %></span>
+      <% if page < total_pages %>
+        <%= link_to "Next →", page_url.call(page + 1), class: "btn-secondary text-sm py-1.5" %>
+      <% else %>
+        <span class="btn-secondary text-sm py-1.5 opacity-40 pointer-events-none" aria-disabled="true">Next →</span>
+      <% end %>
+    </div>
+  </nav>
+<% end %>

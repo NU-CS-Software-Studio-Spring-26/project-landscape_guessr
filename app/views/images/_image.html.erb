@@ -1,12 +1,18 @@
-<div id="<%= dom_id image %>" class="w-full sm:w-auto my-5 space-y-3">
-  <%= image_tag image_src(image, width: 400), loading: "lazy", class: "w-64 h-40 object-cover rounded-md bg-gray-100", alt: image.title %>
-  <div class="text-sm">
-    <div><strong>Title:</strong> <%= image.title %></div>
-    <div><strong>Lat:</strong> <%= image.latitude %>, <strong>Lng:</strong> <%= image.longitude %></div>
-    <% if image.url.present? %>
-      <div class="truncate max-w-xs"><strong>Url:</strong> <%= link_to image.url, image.url, target: "_blank", class: "text-blue-600 hover:underline" %></div>
-    <% else %>
-      <div class="text-gray-400 text-xs">Uploaded file</div>
-    <% end %>
+<%# Compact gallery card — used by /images and similar grids. Click
+    anywhere on the card to dive into the image's detail page. %>
+<%= link_to image, id: dom_id(image),
+      class: "block rounded-md overflow-hidden border border-gray-200 hover:border-blue-300 transition" do %>
+  <img src="<%= image_src(image, width: 400) %>" alt="<%= image.title %>"
+       loading="lazy" decoding="async"
+       class="w-full h-32 object-cover">
+  <div class="px-2 py-1.5 bg-white">
+    <p class="text-xs font-medium text-gray-800 truncate"><%= image.title %></p>
+    <p class="text-xs text-gray-400">
+      <% if image.latitude && image.longitude %>
+        <%= image.latitude.to_f.round(3) %>, <%= image.longitude.to_f.round(3) %>
+      <% else %>
+        <span class="text-amber-500">No coordinates</span>
+      <% end %>
+    </p>
   </div>
-</div>
+<% end %>

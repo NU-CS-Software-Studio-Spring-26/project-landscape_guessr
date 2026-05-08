@@ -1,47 +1,24 @@
 import { Controller } from "@hotwired/stimulus"
-
-const MAPLIBRE_CSS = "https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.css"
-const MAPLIBRE_JS  = "https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.js"
+import { MAPTILER_KEY, ensureMaptilerSdk, hideOutdoorTrails, escapeText } from "lib/maptiler"
 
 const COLORS = [
   "#3b82f6", "#ef4444", "#22c55e", "#f59e0b", "#a855f7",
   "#14b8a6", "#f97316", "#ec4899", "#6366f1", "#84cc16"
 ]
 
-function hideOutdoorTrails(map) {
-  for (const layer of map.getStyle()?.layers || []) {
-    if (layer.source === "outdoor" && layer["source-layer"] === "trail") {
-      map.setLayoutProperty(layer.id, "visibility", "none")
-    }
-  }
-}
-
-function ensureMaplibre() {
-  if (window.maplibregl) return Promise.resolve()
-
-  if (!document.querySelector(`link[href="${MAPLIBRE_CSS}"]`)) {
-    const link = Object.assign(document.createElement("link"), { rel: "stylesheet", href: MAPLIBRE_CSS })
-    document.head.appendChild(link)
-  }
-
-  return new Promise((resolve, reject) => {
-    const script = Object.assign(document.createElement("script"), { src: MAPLIBRE_JS })
-    script.onload = resolve
-    script.onerror = reject
-    document.head.appendChild(script)
-  })
-}
-
 export default class extends Controller {
   static targets = ["container"]
-  static values  = { rounds: { type: Array, default: [] } }
+  static values  = {
+    rounds: { type: Array,  default: [] },
+    style:  { type: String, default: "outdoor-v2" }
+  }
 
   async connect() {
-    await ensureMaplibre()
+    await ensureMaptilerSdk()
 
-    this.map = new maplibregl.Map({
+    this.map = new maptilersdk.Map({
       container: this.containerTarget,
-      style: "https://api.maptiler.com/maps/outdoor-v2/style.json?key=RWz2xTwJMGVfRP9y6hhf",
+      style: `https://api.maptiler.com/maps/${this.styleValue}/style.json?key=${MAPTILER_KEY}`,
       center: [0, 20],
       zoom: 1.5
     })
@@ -56,27 +33,32 @@ export default class extends Controller {
     const rounds = this.roundsValue
     if (!rounds.length) return
 
-    const bounds = new maplibregl.LngLatBounds()
+    const bounds = new maptilersdk.LngLatBounds()
 
     rounds.forEach((r, i) => {
       const color = COLORS[i % COLORS.length]
       const label = `Round ${r.round}`
 
       // Guess marker (hollow circle style via red)
-      new maplibregl.Marker({ color: "#ef4444" })
+      new maptilersdk.Marker({ color: "#ef4444" })
         .setLngLat([r.guess_lng, r.guess_lat])
-        .setPopup(new maplibregl.Popup({ offset: 8 }).setHTML(
+        .setPopup(new maptilersdk.Popup({ offset: 8 }).setHTML(
           `<div class="text-xs font-medium">${label} — your guess</div>` +
           `<div class="text-xs text-gray-500">${r.guess_lat.toFixed(4)}, ${r.guess_lng.toFixed(4)}</div>` +
           `<div class="text-xs text-gray-500">${r.distance_label} off</div>`
         ))
         .addTo(this.map)
 
-      // Answer marker (green)
-      new maplibregl.Marker({ color: "#22c55e" })
+      // Answer marker (green). Escape r.title — it comes from
+      // Image#title, which is editable by anyone owning a set the
+      // image is in. Without escaping, a crafted title containing
+      // `<img src=x onerror=...>` would execute on every viewer's
+      // results page.
+      const safeTitle = escapeText(r.title)
+      new maptilersdk.Marker({ color: "#22c55e" })
         .setLngLat([r.answer_lng, r.answer_lat])
-        .setPopup(new maplibregl.Popup({ offset: 8 }).setHTML(
-          `<div class="text-xs font-medium">${label} — ${r.title}</div>` +
+        .setPopup(new maptilersdk.Popup({ offset: 8 }).setHTML(
+          `<div class="text-xs font-medium">${label} — ${safeTitle}</div>` +
           `<div class="text-xs text-gray-500">${r.answer_lat.toFixed(4)}, ${r.answer_lng.toFixed(4)}</div>`
         ))
         .addTo(this.map)
@@ -112,6 +94,32 @@ export default class extends Controller {
     })
 
     this.map.fitBounds(bounds, { padding: 60, maxZoom: 8 })
+  }
+
+  // Smooth-pan to a single round's guess+answer pair. Wired up from
+  // the per-round thumbnails on /games/:id/results — clicking a round
+  // thumbnail dives the map onto that round so the player can see how
+  // far off they were. Also scrolls the map element into view since
+  // it's typically scrolled past on a results page.
+  focus(event) {
+    // Bail when the click landed on a real link/button inside the row —
+    // we don't want clicking "Details ↗" to also pan the map. Earlier
+    // versions used a stopPropagation() handler on the link instead, but
+    // that swallowed the click before Turbo Drive's document-level
+    // interceptor saw it, forcing a full page reload (and a fresh
+    // MapTiler session) on every Details click.
+    if (event.target.closest("a, button")) return
+
+    const round = parseInt(event.params?.round, 10)
+    const r = this.roundsValue.find((x) => x.round === round)
+    if (!r || !this.map) return
+
+    const bounds = new maptilersdk.LngLatBounds()
+    bounds.extend([r.guess_lng, r.guess_lat])
+    bounds.extend([r.answer_lng, r.answer_lat])
+    this.map.fitBounds(bounds, { padding: 80, maxZoom: 14, duration: 700 })
+
+    this.containerTarget.scrollIntoView({ behavior: "smooth", block: "center" })
   }
 
   disconnect() {

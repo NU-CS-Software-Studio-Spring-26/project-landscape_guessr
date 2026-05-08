@@ -34,6 +34,13 @@ alice_private_one:
   latitude: 1.0
   longitude: 2.0
 
+# alice_only image — lives ONLY here, not in the default set
+alice_private_alice_only:
+  image_set: alice_private
+  image: alice_only
+  latitude: 5.0
+  longitude: 6.0
+
 alice_public_one:
   image_set: alice_public
   image: one

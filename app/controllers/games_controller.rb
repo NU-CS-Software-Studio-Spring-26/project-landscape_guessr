@@ -100,7 +100,9 @@ class GamesController < ApplicationController
     end
 
     respond_to do |format|
-      format.html { redirect_to @game }
+      # 303 (not 302) so Turbo follows the redirect after a button_to POST.
+      # Without :see_other, Turbo drops the redirect and the request hangs.
+      format.html { redirect_to @game, status: :see_other }
       format.json { render :show, status: :created, location: @game }
     end
   rescue ActiveRecord::RecordInvalid

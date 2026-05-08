@@ -1,7 +1,4 @@
 <% content_for :title, "#{@image_set.name} — Map" %>
-<% content_for :head do %>
-  <%= render "shared/maplibre_assets" %>
-<% end %>
 
 <div class="w-full max-w-5xl mx-auto space-y-4 py-6">
   <div class="flex justify-between items-center gap-4">
@@ -15,6 +12,6 @@
   <% if @image_data.empty? %>
     <p class="text-gray-500 text-sm">None of the images in this set have coordinates yet.</p>
   <% else %>
-    <%= render "shared/image_map", points: @image_data, element_id: "image-set-map" %>
+    <%= render "shared/image_map", points: @image_data, element_id: "image-set-map", style: @image_set.map_style %>
   <% end %>
 </div>

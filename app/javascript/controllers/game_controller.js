@@ -92,7 +92,10 @@ export default class extends Controller {
   }
 
   nextRound() {
-    window.location.href = this.gamePathValue
+    // Turbo.visit (not window.location.href) so the JS context survives
+    // and the MapTiler session stays the same across rounds — a hard nav
+    // would mint a new mtsid per round and burn 5× the session quota.
+    Turbo.visit(this.gamePathValue)
   }
 
   #boundKeydown

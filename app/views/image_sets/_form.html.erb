@@ -12,5 +12,18 @@
           {}, class: field_class(image_set, :visibility) %>
   </div>
 
+  <div class="space-y-1">
+    <%= f.label :map_style, "Map style", class: "block text-sm font-medium text-gray-700" %>
+    <%= f.select :map_style, [
+          ["Outdoor (terrain, peaks, POIs)",     "outdoor-v2"],
+          ["Streets (urban detail)",             "streets-v2"],
+          ["Bright (light, label-heavy)",        "bright-v2"],
+          ["Topographic (contour-emphasis)",     "topo-v2"],
+          ["Satellite (aerial imagery)",         "satellite"],
+          ["Hybrid (satellite + labels)",        "hybrid"]
+        ], {}, class: field_class(image_set, :map_style) %>
+    <p class="text-xs text-gray-500">Used by the guess map while playing this set and the set's map view.</p>
+  </div>
+
   <%= f.submit image_set.persisted? ? "Save changes" : "Create set", class: "btn-primary" %>
 <% end %>

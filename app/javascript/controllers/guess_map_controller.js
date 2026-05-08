@@ -1,43 +1,18 @@
 import { Controller } from "@hotwired/stimulus"
-
-const MAPLIBRE_CSS = "https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.css"
-const MAPLIBRE_JS  = "https://unpkg.com/maplibre-gl@5.5.0/dist/maplibre-gl.js"
-
-function hideOutdoorTrails(map) {
-  for (const layer of map.getStyle()?.layers || []) {
-    if (layer.source === "outdoor" && layer["source-layer"] === "trail") {
-      map.setLayoutProperty(layer.id, "visibility", "none")
-    }
-  }
-}
-
-function ensureMaplibre() {
-  if (window.maplibregl) return Promise.resolve()
-
-  if (!document.querySelector(`link[href="${MAPLIBRE_CSS}"]`)) {
-    const link = Object.assign(document.createElement("link"), { rel: "stylesheet", href: MAPLIBRE_CSS })
-    document.head.appendChild(link)
-  }
-
-  return new Promise((resolve, reject) => {
-    const script = Object.assign(document.createElement("script"), { src: MAPLIBRE_JS })
-    script.onload = resolve
-    script.onerror = reject
-    document.head.appendChild(script)
-  })
-}
+import { MAPTILER_KEY, ensureMaptilerSdk, hideOutdoorTrails } from "lib/maptiler"
 
 export default class extends Controller {
   static targets = ["container"]
   static values = {
-    answer: { type: Array, default: [] }
+    answer: { type: Array,  default: [] },
+    style:  { type: String, default: "outdoor-v2" }
   }
 
   async connect() {
-    await ensureMaplibre()
-    this.map = new maplibregl.Map({
+    await ensureMaptilerSdk()
+    this.map = new maptilersdk.Map({
       container: this.containerTarget,
-      style: "https://api.maptiler.com/maps/outdoor-v2/style.json?key=RWz2xTwJMGVfRP9y6hhf",
+      style: `https://api.maptiler.com/maps/${this.styleValue}/style.json?key=${MAPTILER_KEY}`,
       center: [0, 20],
       zoom: 1.5
     })
@@ -58,7 +33,7 @@ export default class extends Controller {
       if (this.marker) {
         this.marker.setLngLat([lng, lat])
       } else {
-        this.marker = new maplibregl.Marker({ color: "#ef4444" })
+        this.marker = new maptilersdk.Marker({ color: "#ef4444" })
           .setLngLat([lng, lat])
           .addTo(this.map)
       }
@@ -74,7 +49,7 @@ export default class extends Controller {
   showAnswer(lat, lng) {
     this.lock()
 
-    new maplibregl.Marker({ color: "#22c55e" })
+    new maptilersdk.Marker({ color: "#22c55e" })
       .setLngLat([lng, lat])
       .addTo(this.map)
 
@@ -104,7 +79,7 @@ export default class extends Controller {
         }
       })
 
-      const bounds = new maplibregl.LngLatBounds()
+      const bounds = new maptilersdk.LngLatBounds()
         .extend([guessLngLat.lng, guessLngLat.lat])
         .extend([lng, lat])
       this.map.fitBounds(bounds, { padding: 80 })

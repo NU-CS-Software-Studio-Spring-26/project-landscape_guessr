@@ -1,13 +1,145 @@
-<% content_for :title, "Showing image" %>
+<% content_for :title, @image.title %>
 
-<div class="md:w-2/3 w-full">
-  <h1 class="heading-page">Showing image</h1>
+<%# Canonical image detail page. Consolidates per-image actions —
+    edit title/coords, view set memberships, remove from any set the
+    current user owns, and Open in Maps — so galleries (image_sets#show,
+    images#index) can stay clutter-free. There's no "Delete image"
+    button: removing an image's last set membership triggers
+    purge_if_orphan! which cleans up the underlying record + S3 blob. %>
 
-  <%= render @image %>
+<div class="w-full max-w-5xl mx-auto space-y-6 py-6">
 
-  <%= link_to "Back to images", images_path, class: "btn-secondary w-full sm:w-auto" %>
-  <% if admin? %>
-    <%= link_to "Edit this image", edit_image_path(@image), class: "btn-secondary w-full sm:w-auto mt-2 sm:mt-0 sm:ml-2" %>
-    <%= button_to "Destroy this image", @image, method: :delete, form_class: "sm:inline-block mt-2 sm:mt-0 sm:ml-2", class: "btn-danger w-full", data: { turbo_confirm: "Are you sure?" } %>
-  <% end %>
+  <div class="flex items-start justify-between gap-4">
+    <div class="min-w-0">
+      <h1 class="heading-page truncate"><%= @image.title %></h1>
+      <% if @image.latitude && @image.longitude %>
+        <p class="muted mt-0.5 text-sm">
+          <%= @image.latitude.to_f.round(4) %>, <%= @image.longitude.to_f.round(4) %>
+        </p>
+      <% else %>
+        <p class="text-sm text-amber-600 mt-0.5">No coordinates set.</p>
+      <% end %>
+    </div>
+    <%= link_to "← Images", images_path, class: "btn-ghost shrink-0 text-sm" %>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+    <%# Photo column (2 of 3). Same scroll-zoom + load-original logic
+        as the game/practice screens. %>
+    <div data-controller="zoomable"
+         data-zoomable-cap-width-value="<%= Image::ZOOM_CAP_WIDTH %>"
+         class="lg:col-span-2 space-y-1">
+      <div data-zoomable-target="viewport"
+           class="h-[60vh] flex items-center justify-center bg-gray-100 rounded-md border border-gray-200 select-none">
+        <img src="<%= image_src(@image, width: Image::ZOOM_CAP_WIDTH) %>" alt="<%= @image.title %>"
+             class="max-w-full max-h-full object-contain">
+      </div>
+      <div class="flex items-center justify-between gap-2 text-xs text-gray-400">
+        <span>scroll to zoom · drag to pan · double-click to reset</span>
+        <% unless @image.photo.attached? %>
+          <button type="button"
+                  data-zoomable-target="originalButton"
+                  data-action="zoomable#loadOriginal"
+                  data-zoomable-url-param="<%= image_src(@image) %>"
+                  class="hidden text-gray-500 hover:text-blue-600 underline-offset-2 hover:underline cursor-pointer">
+            load full quality
+          </button>
+        <% end %>
+      </div>
+    </div>
+
+    <%# Sidebar (1 of 3). Maps link, source URL, edit form, set memberships. %>
+    <aside class="space-y-5">
+
+      <%# Open in Maps — works for every image with coords, regardless
+          of source. Streetview / satellite context that our tile style
+          doesn't show. %>
+      <% if (gmap = @image.google_maps_url) %>
+        <%= link_to "Open in Google Maps ↗", gmap, target: "_blank", rel: "noopener",
+              class: "btn-secondary w-full text-center" %>
+      <% end %>
+
+      <%# Source URL — only present for URL-sourced images (Wikimedia
+          etc.). Active Storage uploads have no public source page. The
+          scheme regex blocks a `javascript:` URL from sneaking in via
+          a compromised admin or corrupted seed (defense-in-depth on
+          top of admin-only :url editing). %>
+      <% if @image.url.present? && @image.url.match?(%r{\Ahttps?://}i) %>
+        <div class="text-xs">
+          <p class="text-gray-500 mb-0.5">Source</p>
+          <%= link_to @image.url, @image.url, target: "_blank", rel: "noopener",
+                class: "text-blue-600 hover:underline break-all" %>
+        </div>
+      <% end %>
+
+      <%# Inline edit — open to anyone who owns at least one set
+          containing this image. See Image#editable_by? for the rule. %>
+      <% if @image.editable_by?(Current.user) %>
+        <div class="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
+          <h2 class="font-semibold text-sm text-gray-700">Edit</h2>
+          <%= form_with model: @image, local: true, class: "space-y-2" do |f| %>
+            <div class="space-y-0.5">
+              <%= f.label :title, class: "block text-xs text-gray-500" %>
+              <%= f.text_field :title, class: field_class(@image, :title) + " text-sm" %>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div class="space-y-0.5">
+                <%= f.label :latitude, class: "block text-xs text-gray-500" %>
+                <%= f.number_field :latitude, step: "any",
+                      class: field_class(@image, :latitude) + " text-sm" %>
+              </div>
+              <div class="space-y-0.5">
+                <%= f.label :longitude, class: "block text-xs text-gray-500" %>
+                <%= f.number_field :longitude, step: "any",
+                      class: field_class(@image, :longitude) + " text-sm" %>
+              </div>
+            </div>
+            <p class="text-[11px] text-gray-400 leading-snug">
+              Edits propagate to every set this image is in. Per-set coordinate
+              overrides live in each set's Manage page.
+            </p>
+            <%= f.submit "Save", class: "btn-primary w-full text-sm" %>
+          <% end %>
+        </div>
+      <% end %>
+
+      <%# Set memberships — every set the viewer can see this image in.
+          For sets the user owns, surface a per-set "Remove" so they
+          can prune from here without bouncing to the locations page. %>
+      <div class="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
+        <h2 class="font-semibold text-sm text-gray-700">
+          In sets <span class="text-gray-400 font-normal">(<%= @memberships.size %>)</span>
+        </h2>
+        <% if @memberships.any? %>
+          <ul class="space-y-1.5">
+            <% @memberships.each do |set| %>
+              <% item = @items_by_set_id[set.id] %>
+              <li class="flex items-center justify-between gap-2 text-sm">
+                <%= link_to set.name, set, class: "text-blue-600 hover:underline truncate" %>
+                <% if set.owned_by?(Current.user) && item %>
+                  <%= button_to "Remove",
+                        image_set_remove_item_path(set, item_id: item.id),
+                        method: :delete,
+                        form: {
+                          class: "shrink-0 m-0",
+                          data: { turbo_confirm: "Remove “#{@image.title}” from “#{set.name}”?" }
+                        },
+                        class: "rounded border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700 cursor-pointer" %>
+                <% else %>
+                  <span class="text-xs text-gray-400 shrink-0">
+                    <%= set.is_system_default? ? "system" : (set.visibility == "public" ? "public" : "private") %>
+                  </span>
+                <% end %>
+              </li>
+            <% end %>
+          </ul>
+        <% else %>
+          <p class="text-xs text-gray-500">
+            This image isn't in any set you can see.
+          </p>
+        <% end %>
+      </div>
+    </aside>
+  </div>
 </div>
