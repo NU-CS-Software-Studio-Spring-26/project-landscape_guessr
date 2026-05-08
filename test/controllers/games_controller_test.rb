@@ -20,6 +20,29 @@ class GamesControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
+  test "index honors valid ?per_page=" do
+    sign_in_as @alice
+    get games_url(per_page: 25)
+    assert_response :success
+    # Picker reflects the override; both the dropdown's selected option
+    # and the prev/next URLs should carry per_page=25 through.
+    assert_select "select option[selected='selected'][value*='per_page=25']"
+  end
+
+  test "index falls back to default for out-of-allowlist ?per_page=" do
+    sign_in_as @alice
+    get games_url(per_page: 999)
+    assert_response :success
+    assert_select "select option[selected='selected'][value*='per_page=100']"
+  end
+
+  test "index filter chips preserve per_page" do
+    sign_in_as @alice
+    get games_url(per_page: 50)
+    assert_response :success
+    assert_select "a.rounded-full[href*='per_page=50']"
+  end
+
   test "non-admin redirected from /games/new" do
     sign_in_as @alice
     get new_game_url
