@@ -29,3 +29,12 @@ five:
   latitude: 9.99
   longitude: 9.99
   title: Test Lake
+
+# Image that lives ONLY in alice_private — used by tests that exercise
+# the set-owner edit path. Images one..five are all in the system
+# default set, where editable_by? blocks non-admin edits.
+alice_only:
+  url: https://example.com/alice-only.jpg
+  latitude: 9.99
+  longitude: 9.99
+  title: Alice Only Image
