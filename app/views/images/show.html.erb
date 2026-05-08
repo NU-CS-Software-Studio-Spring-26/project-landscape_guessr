@@ -61,8 +61,11 @@
       <% end %>
 
       <%# Source URL — only present for URL-sourced images (Wikimedia
-          etc.). Active Storage uploads have no public source page. %>
-      <% if @image.url.present? %>
+          etc.). Active Storage uploads have no public source page. The
+          scheme regex blocks a `javascript:` URL from sneaking in via
+          a compromised admin or corrupted seed (defense-in-depth on
+          top of admin-only :url editing). %>
+      <% if @image.url.present? && @image.url.match?(%r{\Ahttps?://}i) %>
         <div class="text-xs">
           <p class="text-gray-500 mb-0.5">Source</p>
           <%= link_to @image.url, @image.url, target: "_blank", rel: "noopener",
