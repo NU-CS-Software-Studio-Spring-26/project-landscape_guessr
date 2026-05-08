@@ -1,34 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
-
-// See guess_map_controller.js for why we use MapTiler SDK over raw MapLibre.
-const MAPTILER_SDK_CSS = "https://cdn.maptiler.com/maptiler-sdk-js/v4.0.2/maptiler-sdk.css"
-const MAPTILER_SDK_JS  = "https://cdn.maptiler.com/maptiler-sdk-js/v4.0.2/maptiler-sdk.umd.min.js"
-const MAPTILER_KEY     = "biJMFiy9HEvnGGS540u4"
-
-function hideOutdoorTrails(map) {
-  for (const layer of map.getStyle()?.layers || []) {
-    if (layer.source === "outdoor" && layer["source-layer"] === "trail") {
-      map.setLayoutProperty(layer.id, "visibility", "none")
-    }
-  }
-}
-
-function ensureMaptilerSdk() {
-  if (window.maptilersdk) return Promise.resolve()
-  if (!document.querySelector(`link[href="${MAPTILER_SDK_CSS}"]`)) {
-    const link = Object.assign(document.createElement("link"), { rel: "stylesheet", href: MAPTILER_SDK_CSS })
-    document.head.appendChild(link)
-  }
-  return new Promise((resolve, reject) => {
-    const script = Object.assign(document.createElement("script"), { src: MAPTILER_SDK_JS })
-    script.onload = () => {
-      window.maptilersdk.config.apiKey = MAPTILER_KEY
-      resolve()
-    }
-    script.onerror = reject
-    document.head.appendChild(script)
-  })
-}
+import { MAPTILER_KEY, ensureMaptilerSdk, hideOutdoorTrails, escapeText } from "lib/maptiler"
 
 // Renders a world map with one circle per point. Used by /images/map and
 // /image_sets/:id/map. Wired up via shared/_image_map.html.erb.
@@ -107,7 +78,7 @@ export default class extends Controller {
       const f = e.features?.[0]
       if (!f) return
       const { id, title, url, lat, lng } = f.properties
-      const safeTitle = String(title).replace(/</g, "&lt;")
+      const safeTitle = escapeText(title)
       // 600 source for the 240×120 popup so retina displays render
       // crisp; 300 looked soft on >1x DPR.
       const imgHtml = url
