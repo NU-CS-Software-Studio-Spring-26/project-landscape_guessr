@@ -29,4 +29,23 @@ class ApplicationController < ActionController::Base
         format.json { head :not_found }
       end
     end
+
+    # Slice a relation into a page based on params[:page]. Used by image
+    # galleries (image_sets#show, image_sets#locations, images#index) to
+    # cap DOM/blob load on big sets. Returns the windowed relation; sets
+    # @page / @total_pages / @total_items / @per_page on the controller
+    # for the view to render the shared _pagination partial.
+    #
+    # ?page= is clamped to [1, total_pages] so users fiddling the URL
+    # never land on an empty page or a negative offset.
+    def paginate(scope, per_page:)
+      total = scope.size
+      pages = [ (total.to_f / per_page).ceil, 1 ].max
+      page  = params[:page].to_i.clamp(1, pages)
+      @page        = page
+      @total_pages = pages
+      @total_items = total
+      @per_page    = per_page
+      scope.offset((page - 1) * per_page).limit(per_page)
+    end
 end
