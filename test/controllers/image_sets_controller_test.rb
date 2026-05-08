@@ -81,7 +81,11 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "update_locations saves a new title (delegating to Image)" do
-    item = image_set_items(:alice_private_one)
+    # alice_only image is NOT in the default set, so the editable_by?
+    # guard lets the title propagate. (The previous version of this
+    # test used alice_private_one — image_one — which is in the
+    # default set and is now correctly locked from non-admin edits.)
+    item = image_set_items(:alice_private_alice_only)
     original = item.image.title
     put locations_image_set_path(image_sets(:alice_private)),
         params: { image_set_items: { item.id.to_s => { title: "Renamed", latitude: item.latitude.to_s, longitude: item.longitude.to_s } } }
@@ -89,5 +93,20 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "Renamed", item.image.reload.title
   ensure
     item&.image&.update(title: original) if original
+  end
+
+  test "update_locations rejects title change on default-set image" do
+    # Vandalism guard: image_one is in the default set AND in alice's
+    # private set. Without the editable_by? check on the bulk-edit
+    # path, alice could rename it here and propagate the change to
+    # every default-set game. Coords still update (those are per-set
+    # overrides on ImageSetItem, not on the canonical Image).
+    item = image_set_items(:alice_private_one)
+    original_title = item.image.title
+    put locations_image_set_path(image_sets(:alice_private)),
+        params: { image_set_items: { item.id.to_s => { title: "Vandalized", latitude: "1.5", longitude: "2.5" } } }
+    assert_response :unprocessable_entity
+    assert_match(/locked.*default set/i, flash.now[:alert].to_s)
+    assert_equal original_title, item.image.reload.title
   end
 end

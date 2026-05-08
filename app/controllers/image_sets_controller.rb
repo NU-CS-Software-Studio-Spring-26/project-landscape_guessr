@@ -105,8 +105,18 @@ class ImageSetsController < ApplicationController
         end
 
         if attrs.key?(:title) && (new_title = attrs[:title].to_s.strip).present? && new_title != item.image.title
-          unless item.image.update(title: new_title)
-            errors << "#{item.title}: #{item.image.errors.full_messages.join(', ')}"
+          # Mirror Image#editable_by? — set-owner CAN edit Image#title
+          # in the general case, but NOT for default-set images, since
+          # the canonical title propagates to the default set everyone
+          # plays. require_owner alone isn't enough here; without this
+          # guard, any user could vandalize default-set titles by
+          # adding the same URL to their own set first.
+          if item.image.editable_by?(Current.user)
+            unless item.image.update(title: new_title)
+              errors << "#{item.title}: #{item.image.errors.full_messages.join(', ')}"
+            end
+          else
+            errors << "#{item.title}: title is locked because this image is in the default set"
           end
         end
       end

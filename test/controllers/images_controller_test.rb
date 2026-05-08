@@ -2,14 +2,15 @@ require "test_helper"
 
 class ImagesControllerTest < ActionDispatch::IntegrationTest
   setup do
-    @image      = images(:one)
-    # alice owns alice_private + alice_public, both of which contain
-    # @image — so alice is a set-owner of the image (non-admin but
-    # editable_by? returns true). bob owns no sets, so he's the
-    # non-admin / non-owner case.
-    @owner      = users(:alice)
-    @nonowner   = users(:bob)
-    @admin      = users(:admin)
+    # @image is in the default set + alice's sets. Used as the "default-
+    # set image" subject — even alice (set-owner) can't edit it.
+    @image          = images(:one)
+    # @image_alice_only lives ONLY in alice_private. Alice is a set-
+    # owner who CAN edit it (no default-set membership blocking her).
+    @image_alice_only = images(:alice_only)
+    @owner          = users(:alice)
+    @nonowner       = users(:bob)
+    @admin          = users(:admin)
   end
 
   test "should get index without auth" do
@@ -65,22 +66,22 @@ class ImagesControllerTest < ActionDispatch::IntegrationTest
     assert_not_equal "Hacked", @image.reload.title
   end
 
-  test "set-owner can edit" do
-    # alice owns alice_private which contains @image → editable_by?
-    # returns true even though she's not admin.
+  test "set-owner can edit image only in their own set" do
+    # alice_only image is only in alice_private (not in the default
+    # set), so editable_by? returns true for alice.
     sign_in_as @owner
-    get edit_image_url(@image)
+    get edit_image_url(@image_alice_only)
     assert_response :success
   end
 
-  test "set-owner can update title and coords" do
+  test "set-owner can update title and coords on their-only image" do
     sign_in_as @owner
-    patch image_url(@image), params: { image: { title: "Renamed by owner", latitude: 1.23, longitude: 4.56 } }
-    assert_redirected_to image_url(@image)
-    @image.reload
-    assert_equal "Renamed by owner", @image.title
-    assert_equal 1.23.to_d, @image.latitude
-    assert_equal 4.56.to_d, @image.longitude
+    patch image_url(@image_alice_only), params: { image: { title: "Renamed by owner", latitude: 1.23, longitude: 4.56 } }
+    assert_redirected_to image_url(@image_alice_only)
+    @image_alice_only.reload
+    assert_equal "Renamed by owner", @image_alice_only.title
+    assert_equal 1.23.to_d, @image_alice_only.latitude
+    assert_equal 4.56.to_d, @image_alice_only.longitude
   end
 
   test "set-owner cannot change url (admin-only field)" do
@@ -88,12 +89,31 @@ class ImagesControllerTest < ActionDispatch::IntegrationTest
     # silently swap the underlying source out from under other set
     # members. Other fields still update.
     sign_in_as @owner
-    original_url = @image.url
-    patch image_url(@image), params: { image: { title: "Title change", url: "https://evil.example.com/x.jpg" } }
+    original_url = @image_alice_only.url
+    patch image_url(@image_alice_only), params: { image: { title: "Title change", url: "https://evil.example.com/x.jpg" } }
+    assert_redirected_to image_url(@image_alice_only)
+    @image_alice_only.reload
+    assert_equal "Title change", @image_alice_only.title
+    assert_equal original_url, @image_alice_only.url
+  end
+
+  test "set-owner cannot edit a default-set image" do
+    # The vandalism vector: alice owns alice_private which contains
+    # @image, but @image is also in the system-default set, so
+    # editable_by? must return false. Without this guard, alice could
+    # rename "Mount Everest" to anything she wants and have it
+    # propagate to the default set every player uses.
+    sign_in_as @owner
+    get edit_image_url(@image)
     assert_redirected_to image_url(@image)
-    @image.reload
-    assert_equal "Title change", @image.title
-    assert_equal original_url, @image.url
+  end
+
+  test "set-owner cannot update a default-set image" do
+    sign_in_as @owner
+    original_title = @image.title
+    patch image_url(@image), params: { image: { title: "Vandalized" } }
+    assert_redirected_to image_url(@image)
+    assert_equal original_title, @image.reload.title
   end
 
   test "non-admin cannot destroy" do
