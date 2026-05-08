@@ -8,7 +8,7 @@
   </div>
   <div class="flex items-center gap-2 shrink-0">
     <%= button_to "Play", games_path, method: :post,
-          params: { image_set_id: set.id }, data: { turbo: false },
+          params: { image_set_id: set.id },
           class: "btn-primary text-sm py-1.5" %>
     <%= link_to "Leaderboard", leaderboard_games_path(image_set_id: set.id),
           class: "btn-secondary text-sm py-1.5" %>
