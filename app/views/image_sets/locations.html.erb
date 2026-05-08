@@ -24,7 +24,7 @@
                     controller: "direct-upload",
                     direct_upload_attach_url_value:        attach_blob_image_set_path(@image_set),
                     direct_upload_direct_upload_url_value: rails_direct_uploads_path,
-                    direct_upload_redirect_url_value:      locations_image_set_path(@image_set)
+                    direct_upload_redirect_url_value:      locations_image_set_path(@image_set, page: @page, per_page: @per_page)
                   },
                   class: "flex flex-col sm:flex-row items-start sm:items-end gap-3" do %>
       <div class="flex-1 space-y-1 w-full">

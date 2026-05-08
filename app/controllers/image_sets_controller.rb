@@ -151,7 +151,7 @@ class ImageSetsController < ApplicationController
   def add_image
     url = params[:url].to_s.strip
     if url.empty?
-      redirect_to locations_image_set_path(@image_set), alert: "Please enter an image URL." and return
+      redirect_back fallback_location: locations_image_set_path(@image_set), alert: "Please enter an image URL." and return
     end
 
     title = params[:title].to_s.strip.presence || "Untitled"
@@ -169,9 +169,9 @@ class ImageSetsController < ApplicationController
       item.latitude  = lat || image.latitude
       item.longitude = lng || image.longitude
       item.save!
-      redirect_to locations_image_set_path(@image_set), notice: "Image added to set."
+      redirect_back fallback_location: locations_image_set_path(@image_set), notice: "Image added to set."
     else
-      redirect_to locations_image_set_path(@image_set), alert: "That image is already in this set."
+      redirect_back fallback_location: locations_image_set_path(@image_set), alert: "That image is already in this set."
     end
   end
 
