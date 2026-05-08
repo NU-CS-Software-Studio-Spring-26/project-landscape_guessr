@@ -13,7 +13,7 @@
 
   <div class="flex flex-wrap items-center gap-2 mt-6 mb-4 text-sm">
     <% [["All", "all"], ["In progress", "in_progress"], ["Completed", "completed"]].each do |label, value| %>
-      <%= link_to label, games_path(status: value, sort: @sort, direction: @direction),
+      <%= link_to label, games_path(status: value, sort: @sort, direction: @direction, per_page: @per_page),
             class: "rounded-full px-3 py-1 text-xs font-medium #{@status == value ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}" %>
     <% end %>
 
@@ -22,17 +22,22 @@
       <%= select_tag :sort_dir,
             options_for_select(
               [
-                ["Newest first",  games_path(status: @status, sort: "created_at", direction: "desc")],
-                ["Oldest first",  games_path(status: @status, sort: "created_at", direction: "asc")],
-                ["Highest score", games_path(status: @status, sort: "score",      direction: "desc")],
-                ["Lowest score",  games_path(status: @status, sort: "score",      direction: "asc")]
+                ["Newest first",  games_path(status: @status, sort: "created_at", direction: "desc", per_page: @per_page)],
+                ["Oldest first",  games_path(status: @status, sort: "created_at", direction: "asc",  per_page: @per_page)],
+                ["Highest score", games_path(status: @status, sort: "score",      direction: "desc", per_page: @per_page)],
+                ["Lowest score",  games_path(status: @status, sort: "score",      direction: "asc",  per_page: @per_page)]
               ],
-              games_path(status: @status, sort: @sort, direction: @direction)
+              games_path(status: @status, sort: @sort, direction: @direction, per_page: @per_page)
             ),
             onchange: "Turbo.visit(this.value)",
             class: "select-with-arrow rounded-md border border-gray-300 pl-3 pr-8 py-1.5 text-sm cursor-pointer bg-white" %>
     </div>
   </div>
+
+  <%= render "shared/pagination",
+            page_url: ->(opts) { games_path({ status: @status, sort: @sort, direction: @direction }.merge(opts)) },
+            page: @page, total_pages: @total_pages,
+            total_items: @total_items, per_page: @per_page %>
 
   <div id="games" class="min-w-full divide-y divide-gray-200 space-y-5">
     <% if @games.any? %>
@@ -54,6 +59,11 @@
           </div>
         </div>
       <% end %>
+
+      <%= render "shared/pagination",
+                page_url: ->(opts) { games_path({ status: @status, sort: @sort, direction: @direction }.merge(opts)) },
+                page: @page, total_pages: @total_pages,
+                total_items: @total_items, per_page: @per_page %>
     <% else %>
       <p class="text-center my-10 text-gray-500">
         <% case @status %>

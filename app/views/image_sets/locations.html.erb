@@ -93,9 +93,10 @@
     <%= form_with url: locations_image_set_path(@image_set), method: :put, local: true,
                   class: "space-y-4",
                   data: {
-                    controller:                          "processing-poll",
+                    controller:                          "processing-poll dirty-form",
                     processing_poll_url_value:           processing_status_image_set_path(@image_set),
                     processing_poll_banner_id_value:     "processing-banner",
+                    dirty_form_message_value:            "You have unsaved edits on this page. Leave anyway? (Save first to keep them.)",
                   } do %>
 
       <% missing_count = @items.count { |i| (i.latitude || i.image.latitude).blank? || (i.longitude || i.image.longitude).blank? } %>
@@ -109,8 +110,8 @@
         <% end %>
       </div>
 
-      <%= render "pagination",
-                page_url: ->(n) { locations_image_set_path(@image_set, page: n) },
+      <%= render "shared/pagination",
+                page_url: ->(opts) { locations_image_set_path(@image_set, opts) },
                 page: @page, total_pages: @total_pages,
                 total_items: @total_items, per_page: @per_page %>
 
@@ -177,8 +178,8 @@
         <% end %>
       </div>
 
-      <%= render "pagination",
-                page_url: ->(n) { locations_image_set_path(@image_set, page: n) },
+      <%= render "shared/pagination",
+                page_url: ->(opts) { locations_image_set_path(@image_set, opts) },
                 page: @page, total_pages: @total_pages,
                 total_items: @total_items, per_page: @per_page %>
 

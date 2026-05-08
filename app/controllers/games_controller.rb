@@ -17,7 +17,7 @@ class GamesController < ApplicationController
     games = games.where(status: "in_progress") if @status == "in_progress"
     games = games.where.not(completed_at: nil) if @status == "completed"
 
-    @games = games.order(@sort => @direction)
+    @games = paginate(games.order(@sort => @direction), per_page: 100)
     @total_rounds = TOTAL_ROUNDS
   end
 

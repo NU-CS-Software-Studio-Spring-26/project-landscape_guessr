@@ -1,0 +1,51 @@
+<%# Local args:
+      page_url     — proc taking a hash like { page:, per_page: } and
+                     returning the URL for that page. The lambda lets the
+                     caller pin the route (images_path / image_set_path /
+                     locations_image_set_path / games_path) and tack on
+                     any persistent filters (sort, status, ...).
+      page         — current page number
+      total_pages  — total number of pages
+      total_items  — total count across all pages
+      per_page     — current per-page size
+      options      — optional whitelist of per-page sizes; defaults to
+                     ApplicationController::PER_PAGE_OPTIONS.
+%>
+<% options ||= ApplicationController::PER_PAGE_OPTIONS %>
+<% if total_items.to_i > 0 %>
+  <% first_index = (page - 1) * per_page + 1 %>
+  <% last_index  = [ page * per_page, total_items ].min %>
+  <nav class="flex flex-wrap items-center justify-between gap-3 pt-2 text-sm">
+    <p class="muted">
+      Showing <%= first_index %>–<%= last_index %> of <%= total_items %>
+    </p>
+    <div class="flex flex-wrap items-center justify-end gap-2 ml-auto">
+      <span class="muted text-xs">Per page</span>
+      <%# Per-page change resets to page 1 — landing on a page that no
+          longer exists at the new size would be confusing. The clamp in
+          ApplicationController#paginate would silently move them anyway.
+          id: nil because this partial often renders twice on a page (top
+          and bottom); select_tag's default id="per_page" would duplicate. %>
+      <%= select_tag :per_page,
+            options_for_select(
+              options.map { |n| [ n, page_url.call(page: 1, per_page: n) ] },
+              page_url.call(page: 1, per_page: per_page)
+            ),
+            onchange: "Turbo.visit(this.value)",
+            id: nil,
+            aria: { label: "Items per page" },
+            class: "select-with-arrow rounded-md border border-gray-300 pl-2 pr-7 py-1 text-xs cursor-pointer bg-white" %>
+      <% if page > 1 %>
+        <%= link_to "← Prev", page_url.call(page: page - 1, per_page: per_page), class: "btn-secondary text-sm py-1.5" %>
+      <% else %>
+        <span class="btn-secondary text-sm py-1.5 opacity-40 pointer-events-none" aria-disabled="true">← Prev</span>
+      <% end %>
+      <span class="text-gray-500">Page <%= page %> / <%= total_pages %></span>
+      <% if page < total_pages %>
+        <%= link_to "Next →", page_url.call(page: page + 1, per_page: per_page), class: "btn-secondary text-sm py-1.5" %>
+      <% else %>
+        <span class="btn-secondary text-sm py-1.5 opacity-40 pointer-events-none" aria-disabled="true">Next →</span>
+      <% end %>
+    </div>
+  </nav>
+<% end %>
