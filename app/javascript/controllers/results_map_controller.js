@@ -80,11 +80,16 @@ export default class extends Controller {
         ))
         .addTo(this.map)
 
-      // Answer marker (green)
+      // Answer marker (green). Escape r.title — it comes from
+      // Image#title, which is editable by anyone owning a set the
+      // image is in. Without escaping, a crafted title containing
+      // `<img src=x onerror=...>` would execute on every viewer's
+      // results page. Mirrors the same escape in image_map_controller.
+      const safeTitle = String(r.title).replace(/</g, "&lt;")
       new maptilersdk.Marker({ color: "#22c55e" })
         .setLngLat([r.answer_lng, r.answer_lat])
         .setPopup(new maptilersdk.Popup({ offset: 8 }).setHTML(
-          `<div class="text-xs font-medium">${label} — ${r.title}</div>` +
+          `<div class="text-xs font-medium">${label} — ${safeTitle}</div>` +
           `<div class="text-xs text-gray-500">${r.answer_lat.toFixed(4)}, ${r.answer_lng.toFixed(4)}</div>`
         ))
         .addTo(this.map)
