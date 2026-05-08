@@ -66,7 +66,11 @@ export default class extends Controller {
   }
 
   next() {
-    window.location.reload()
+    // Turbo.visit (not window.location.reload) so the JS context survives
+    // and the MapTiler session stays the same across practice rounds.
+    // `replace` keeps the back button sane — successive random images
+    // shouldn't pile into history.
+    Turbo.visit(window.location.href, { action: "replace" })
   }
 
   #handleKeydown(event) {
