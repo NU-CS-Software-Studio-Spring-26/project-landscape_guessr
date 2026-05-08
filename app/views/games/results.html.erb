@@ -93,7 +93,7 @@
   <%# Action buttons %>
   <div class="flex gap-3 pt-2">
     <%= button_to "Play Again", games_path, method: :post,
-          params: { image_set_id: @game.image_set_id }, data: { turbo: false },
+          params: { image_set_id: @game.image_set_id },
           class: "btn-primary flex-1" %>
     <%= link_to "Leaderboard", leaderboard_games_path(image_set_id: @game.image_set_id),
           class: "btn-secondary flex-1" %>

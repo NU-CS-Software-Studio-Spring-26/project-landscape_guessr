@@ -9,7 +9,7 @@
   <% if authenticated? %>
     <div class="flex flex-col gap-3 items-center">
       <div class="flex flex-col items-center gap-1">
-        <%= button_to "Start new game", games_path, method: :post, data: { turbo: false },
+        <%= button_to "Start new game", games_path, method: :post,
               class: "btn-primary w-56" %>
         <% if @default_set %>
           <p class="text-xs text-gray-500">

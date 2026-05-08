@@ -12,7 +12,7 @@
     </div>
     <div class="flex gap-2 shrink-0">
       <%= button_to "Play this set", games_path, method: :post,
-            params: { image_set_id: @image_set.id }, data: { turbo: false },
+            params: { image_set_id: @image_set.id },
             class: "btn-primary" %>
       <%= link_to "Leaderboard", leaderboard_games_path(image_set_id: @image_set.id),
             class: "btn-secondary" %>
