@@ -1,41 +1,10 @@
 import { Controller } from "@hotwired/stimulus"
-
-// See guess_map_controller.js for why we use MapTiler SDK over raw MapLibre.
-const MAPTILER_SDK_CSS = "https://cdn.maptiler.com/maptiler-sdk-js/v4.0.2/maptiler-sdk.css"
-const MAPTILER_SDK_JS  = "https://cdn.maptiler.com/maptiler-sdk-js/v4.0.2/maptiler-sdk.umd.min.js"
-const MAPTILER_KEY     = "biJMFiy9HEvnGGS540u4"
+import { MAPTILER_KEY, ensureMaptilerSdk, hideOutdoorTrails, escapeText } from "lib/maptiler"
 
 const COLORS = [
   "#3b82f6", "#ef4444", "#22c55e", "#f59e0b", "#a855f7",
   "#14b8a6", "#f97316", "#ec4899", "#6366f1", "#84cc16"
 ]
-
-function hideOutdoorTrails(map) {
-  for (const layer of map.getStyle()?.layers || []) {
-    if (layer.source === "outdoor" && layer["source-layer"] === "trail") {
-      map.setLayoutProperty(layer.id, "visibility", "none")
-    }
-  }
-}
-
-function ensureMaptilerSdk() {
-  if (window.maptilersdk) return Promise.resolve()
-
-  if (!document.querySelector(`link[href="${MAPTILER_SDK_CSS}"]`)) {
-    const link = Object.assign(document.createElement("link"), { rel: "stylesheet", href: MAPTILER_SDK_CSS })
-    document.head.appendChild(link)
-  }
-
-  return new Promise((resolve, reject) => {
-    const script = Object.assign(document.createElement("script"), { src: MAPTILER_SDK_JS })
-    script.onload = () => {
-      window.maptilersdk.config.apiKey = MAPTILER_KEY
-      resolve()
-    }
-    script.onerror = reject
-    document.head.appendChild(script)
-  })
-}
 
 export default class extends Controller {
   static targets = ["container"]
@@ -84,8 +53,8 @@ export default class extends Controller {
       // Image#title, which is editable by anyone owning a set the
       // image is in. Without escaping, a crafted title containing
       // `<img src=x onerror=...>` would execute on every viewer's
-      // results page. Mirrors the same escape in image_map_controller.
-      const safeTitle = String(r.title).replace(/</g, "&lt;")
+      // results page.
+      const safeTitle = escapeText(r.title)
       new maptilersdk.Marker({ color: "#22c55e" })
         .setLngLat([r.answer_lng, r.answer_lat])
         .setPopup(new maptilersdk.Popup({ offset: 8 }).setHTML(

@@ -1,41 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
-
-// We render with MapTiler SDK (a thin wrapper around MapLibre GL) instead of
-// raw MapLibre so that tile traffic is billed as *sessions* rather than
-// per-tile requests — the SDK appends an `mtsid` to each request, and one
-// session covers up to 6h or 10k tiles per browser context. With Turbo Drive
-// keeping the JS bundle warm across page navs, a single visitor playing
-// multiple rounds + viewing results = one session.
-const MAPTILER_SDK_CSS = "https://cdn.maptiler.com/maptiler-sdk-js/v4.0.2/maptiler-sdk.css"
-const MAPTILER_SDK_JS  = "https://cdn.maptiler.com/maptiler-sdk-js/v4.0.2/maptiler-sdk.umd.min.js"
-const MAPTILER_KEY     = "biJMFiy9HEvnGGS540u4"
-
-function hideOutdoorTrails(map) {
-  for (const layer of map.getStyle()?.layers || []) {
-    if (layer.source === "outdoor" && layer["source-layer"] === "trail") {
-      map.setLayoutProperty(layer.id, "visibility", "none")
-    }
-  }
-}
-
-function ensureMaptilerSdk() {
-  if (window.maptilersdk) return Promise.resolve()
-
-  if (!document.querySelector(`link[href="${MAPTILER_SDK_CSS}"]`)) {
-    const link = Object.assign(document.createElement("link"), { rel: "stylesheet", href: MAPTILER_SDK_CSS })
-    document.head.appendChild(link)
-  }
-
-  return new Promise((resolve, reject) => {
-    const script = Object.assign(document.createElement("script"), { src: MAPTILER_SDK_JS })
-    script.onload = () => {
-      window.maptilersdk.config.apiKey = MAPTILER_KEY
-      resolve()
-    }
-    script.onerror = reject
-    document.head.appendChild(script)
-  })
-}
+import { MAPTILER_KEY, ensureMaptilerSdk, hideOutdoorTrails } from "lib/maptiler"
 
 export default class extends Controller {
   static targets = ["container"]
