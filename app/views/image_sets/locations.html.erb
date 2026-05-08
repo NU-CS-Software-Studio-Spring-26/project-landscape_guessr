@@ -99,6 +99,15 @@
                     dirty_form_message_value:            "You have unsaved edits on this page. Leave anyway? (Save first to keep them.)",
                   } do %>
 
+      <%# Carry the current page + per_page through the submit so
+          update_locations can redirect the user back to the same slice
+          they were editing. Without these, params[:page] / [:per_page]
+          would be nil and the redirect would silently land them on
+          page 1 / default per_page — which feels like a reload that
+          "lost" their per-page choice. %>
+      <%= hidden_field_tag :page,     @page %>
+      <%= hidden_field_tag :per_page, @per_page %>
+
       <% missing_count = @items.count { |i| (i.latitude || i.image.latitude).blank? || (i.longitude || i.image.longitude).blank? } %>
 
       <div class="flex items-center justify-between flex-wrap gap-2">
