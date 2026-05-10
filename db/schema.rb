@@ -59,7 +59,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_06_044001) do
     t.datetime "completed_at"
     t.datetime "created_at", null: false
     t.bigint "image_set_id"
-    t.integer "score"
+    t.float "score"
     t.string "status"
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
