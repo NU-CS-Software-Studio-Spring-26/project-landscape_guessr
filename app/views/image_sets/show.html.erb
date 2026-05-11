@@ -7,7 +7,7 @@
       <h1 class="heading-page"><%= @image_set.name %></h1>
       <p class="muted mt-1">
         <%= @total_items %> images &middot;
-        <span class="<%= @image_set.visibility == 'public' ? 'text-green-600' : 'text-gray-400' %>"><%= @image_set.visibility %></span>
+        <span class="<%= @image_set.visibility == 'public' ? 'text-green-600' : 'text-gray-500' %>"><%= @image_set.visibility %></span>
       </p>
     </div>
     <div class="flex gap-2 shrink-0">
@@ -50,7 +50,7 @@
                class="w-full h-32 object-cover">
           <div class="px-2 py-1.5 bg-white">
             <p class="text-xs font-medium text-gray-800 truncate"><%= item.title %></p>
-            <p class="text-xs text-gray-400">
+            <p class="text-xs text-gray-500">
               <% if item.latitude && item.longitude %>
                 <%= item.latitude.to_f.round(3) %>, <%= item.longitude.to_f.round(3) %>
               <% else %>
