@@ -45,3 +45,6 @@
 
 # Local-only rake tasks (personal scripts, never pushed)
 /lib/tasks/local_*.rake
+
+# Ignore Kamal secrets
+/.kamal/secrets
