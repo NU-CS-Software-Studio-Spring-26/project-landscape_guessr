@@ -24,7 +24,7 @@
   </head>
 
   <body>
-    <nav class="container mx-auto px-5 pt-5 flex justify-between items-center text-sm">
+    <nav aria-label="Primary" class="container mx-auto px-5 pt-5 flex justify-between items-center text-sm">
       <div class="flex items-center gap-5">
         <%= link_to "Landscape Guessr", root_path, class: "font-bold" %>
         <% if authenticated? %>
@@ -43,7 +43,7 @@
       </div>
     </nav>
 
-    <main class="container mx-auto mt-20 px-5">
+    <main aria-label="Main content" class="container mx-auto mt-20 px-5">
       <% if notice = flash[:notice] %>
         <p class="py-2 px-3 mb-5 bg-green-50 text-green-600 font-medium rounded-md mx-auto md:w-2/3 w-full" id="notice"><%= notice %></p>
       <% end %>
@@ -53,7 +53,7 @@
       <%= yield %>
     </main>
 
-    <footer class="container mx-auto px-5 py-8 mt-12 border-t border-gray-200 text-xs text-gray-500 flex flex-wrap items-center justify-between gap-2">
+    <footer aria-label="Site" class="container mx-auto px-5 py-8 mt-12 border-t border-gray-200 text-xs text-gray-500 flex flex-wrap items-center justify-between gap-2">
       <span>Landscape Guessr &middot; <%= Date.current.year %></span>
       <span>
         <%= link_to "GitHub", "https://github.com/NU-CS-Software-Studio-Spring-26/project-landscape_guessr", class: "underline hover:text-blue-600" %>
