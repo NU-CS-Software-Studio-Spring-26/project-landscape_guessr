@@ -3,10 +3,12 @@
 
   <%= form_with url: session_url, class: "contents" do |form| %>
     <div class="my-5">
+      <%= form.label :login, "Email or username", class: "block text-sm font-medium text-gray-700" %>
       <%= form.text_field :login, required: true, autofocus: true, autocomplete: "username", placeholder: "Email or username", value: params[:login], class: "form-input" %>
     </div>
 
     <div class="my-5">
+      <%= form.label :password, class: "block text-sm font-medium text-gray-700" %>
       <%= form.password_field :password, required: true, autocomplete: "current-password", placeholder: "Enter your password", maxlength: 72, class: "form-input" %>
     </div>
 
