@@ -5,6 +5,7 @@ class User < ApplicationRecord
   has_many :sessions, dependent: :destroy
   has_many :games, dependent: :destroy
   has_many :image_sets, dependent: :destroy
+  has_many :challenges, foreign_key: :challenger_id, dependent: :destroy
 
   normalizes :email_address, with: ->(e) { e.strip.downcase }
   normalizes :username, with: ->(u) { u.to_s.strip }

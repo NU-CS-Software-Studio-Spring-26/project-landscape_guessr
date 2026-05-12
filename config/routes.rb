@@ -7,6 +7,10 @@ Rails.application.routes.draw do
   resource :registration, only: %i[ new create ]
   resource :profile, only: :show
 
+  resources :challenges, param: :token, only: [:index, :new, :create, :show, :destroy] do
+    member { post :play }
+  end
+
   resources :guesses
   resources :games do
     member { get :results }

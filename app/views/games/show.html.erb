@@ -79,6 +79,7 @@
           <%= hidden_field_tag "guess[longitude]", "", data: { game_target: "longitude" } %>
           <span data-game-target="readout" class="text-sm text-gray-600">Click the map to drop a pin.</span>
           <p data-game-target="result" class="text-lg font-medium"></p>
+          <p data-game-target="otherGuesses" class="hidden text-xs text-gray-500"></p>
           <%= submit_tag "Submit guess", data: { game_target: "submit", action: "game#submitGuess" }, disabled: true,
               class: "btn-primary ml-auto disabled:opacity-40" %>
           <button type="button" data-game-target="next" data-action="game#nextRound"

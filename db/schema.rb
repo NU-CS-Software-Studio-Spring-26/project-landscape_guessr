@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_06_044001) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_12_000005) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -42,6 +42,30 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_06_044001) do
     t.index ["blob_id", "variation_digest"], name: "index_active_storage_variant_records_uniqueness", unique: true
   end
 
+  create_table "challenge_images", force: :cascade do |t|
+    t.decimal "answer_latitude"
+    t.decimal "answer_longitude"
+    t.bigint "challenge_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "image_id", null: false
+    t.integer "position", null: false
+    t.datetime "updated_at", null: false
+    t.index ["challenge_id", "position"], name: "index_challenge_images_on_challenge_id_and_position", unique: true
+    t.index ["challenge_id"], name: "index_challenge_images_on_challenge_id"
+    t.index ["image_id"], name: "index_challenge_images_on_image_id"
+  end
+
+  create_table "challenges", force: :cascade do |t|
+    t.bigint "challenger_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "image_set_id"
+    t.string "token", default: "", null: false
+    t.datetime "updated_at", null: false
+    t.index ["challenger_id"], name: "index_challenges_on_challenger_id"
+    t.index ["image_set_id"], name: "index_challenges_on_image_set_id"
+    t.index ["token"], name: "index_challenges_on_token", unique: true
+  end
+
   create_table "game_images", force: :cascade do |t|
     t.decimal "answer_latitude"
     t.decimal "answer_longitude"
@@ -56,6 +80,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_06_044001) do
   end
 
   create_table "games", force: :cascade do |t|
+    t.bigint "challenge_id"
     t.datetime "completed_at"
     t.datetime "created_at", null: false
     t.bigint "image_set_id"
@@ -63,6 +88,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_06_044001) do
     t.string "status"
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
+    t.index ["challenge_id"], name: "index_games_on_challenge_id"
     t.index ["image_set_id"], name: "index_games_on_image_set_id"
     t.index ["user_id"], name: "index_games_on_user_id"
   end
@@ -133,8 +159,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_06_044001) do
 
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
+  add_foreign_key "challenge_images", "challenges"
+  add_foreign_key "challenge_images", "images"
+  add_foreign_key "challenges", "image_sets"
+  add_foreign_key "challenges", "users", column: "challenger_id"
   add_foreign_key "game_images", "games"
   add_foreign_key "game_images", "images"
+  add_foreign_key "games", "challenges"
   add_foreign_key "games", "image_sets"
   add_foreign_key "games", "users"
   add_foreign_key "guesses", "games"

@@ -6,7 +6,8 @@
 <div class="w-full max-w-2xl mx-auto space-y-6 py-6"
      data-controller="results-map"
      data-results-map-style-value="<%= @game.image_set&.map_style || 'outdoor-v2' %>"
-     data-results-map-rounds-value="<%= @map_rounds.to_json %>">
+     data-results-map-rounds-value="<%= @map_rounds.to_json %>"
+     data-results-map-players-value="<%= (@challenge_players || []).to_json %>">
 
   <%# Header %>
   <div class="text-center space-y-1">
@@ -86,14 +87,38 @@
     <% end %>
   </div>
 
+  <%# Challenge leaderboard %>
+  <% if @challenge_games&.any? %>
+    <section class="space-y-3">
+      <h2 class="heading-section">Challenge leaderboard</h2>
+      <div class="divide-y divide-gray-100 border border-gray-200 rounded-lg overflow-hidden">
+        <% @challenge_games.each_with_index do |g, idx| %>
+          <div class="flex items-center gap-4 px-4 py-3 bg-white <%= g.id == @game.id ? 'bg-blue-50' : '' %>">
+            <span class="text-sm font-medium text-gray-400 w-5 text-right"><%= idx + 1 %></span>
+            <span class="flex-1 font-medium text-gray-800">
+              <%= g.user.username %>
+              <% if g.id == @game.id %><span class="text-xs text-blue-500 ml-1">you</span><% end %>
+            </span>
+            <span class="font-semibold text-blue-600"><%= number_with_delimiter(g.score.to_i) %></span>
+          </div>
+        <% end %>
+      </div>
+      <%= link_to "View challenge", @game.challenge, class: "text-sm text-blue-600 hover:underline" %>
+    </section>
+  <% end %>
+
   <%# Action buttons %>
-  <div class="flex gap-3 pt-2">
+  <div class="flex gap-3 pt-2 flex-wrap">
     <%= button_to "Play Again", games_path, method: :post,
           params: { image_set_id: @game.image_set_id },
           class: "btn-primary flex-1" %>
     <%= link_to "Leaderboard", leaderboard_games_path(image_set_id: @game.image_set_id),
           class: "btn-secondary flex-1" %>
-    <%= link_to "Back to Games", games_path, class: "btn-secondary flex-1" %>
+    <% if @game.challenge %>
+      <%= link_to "View challenge", @game.challenge, class: "btn-secondary flex-1" %>
+    <% else %>
+      <%= link_to "Back to Games", games_path, class: "btn-secondary flex-1" %>
+    <% end %>
   </div>
 
 </div>
