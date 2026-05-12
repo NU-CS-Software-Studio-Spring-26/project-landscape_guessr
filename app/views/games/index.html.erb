@@ -1,36 +1,34 @@
 <% content_for :title, "Games" %>
 
-<div class="w-full">
+<div class="w-full space-y-6">
   <div class="flex justify-between items-center">
-    <h1 class="heading-page">Games</h1>
-    <div class="flex space-x-2">
-      <%= link_to "Leaderboard", leaderboard_games_path, class: "btn-secondary" %>
-      <%# Land on /image_sets so the user picks which set to play. The home
-          page's "Start new game" still kicks straight to the system default. %>
-      <%= link_to "New game", image_sets_path, class: "btn-primary" %>
+    <h1 class="heading-page">My Games</h1>
+    <div class="flex gap-2">
+      <%= link_to "Leaderboard", leaderboard_games_path, class: "btn-secondary text-sm" %>
+      <%= link_to "New game", image_sets_path, class: "btn-primary text-sm" %>
     </div>
   </div>
 
-  <div class="flex flex-wrap items-center gap-2 mt-6 mb-4 text-sm">
-    <% [["All", "all"], ["In progress", "in_progress"], ["Completed", "completed"]].each do |label, value| %>
+  <div class="flex flex-wrap items-center gap-2">
+    <% [ [ "All", "all" ], [ "In progress", "in_progress" ], [ "Completed", "completed" ] ].each do |label, value| %>
       <%= link_to label, games_path(status: value, sort: @sort, direction: @direction, per_page: @per_page),
-            class: "rounded-full px-3 py-1 text-xs font-medium #{@status == value ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}" %>
+            class: "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors #{@status == value ? "bg-forest-600 text-white shadow-sm" : "bg-forest-50 text-forest-700 hover:bg-forest-100 border border-forest-200"}" %>
     <% end %>
 
     <div class="ml-auto flex items-center gap-2">
-      <label for="sort_dir" class="muted">Sort by</label>
+      <label for="sort_dir" class="muted text-xs">Sort</label>
       <%= select_tag :sort_dir,
             options_for_select(
               [
-                ["Newest first",  games_path(status: @status, sort: "created_at", direction: "desc", per_page: @per_page)],
-                ["Oldest first",  games_path(status: @status, sort: "created_at", direction: "asc",  per_page: @per_page)],
-                ["Highest score", games_path(status: @status, sort: "score",      direction: "desc", per_page: @per_page)],
-                ["Lowest score",  games_path(status: @status, sort: "score",      direction: "asc",  per_page: @per_page)]
+                [ "Newest first",  games_path(status: @status, sort: "created_at", direction: "desc", per_page: @per_page) ],
+                [ "Oldest first",  games_path(status: @status, sort: "created_at", direction: "asc",  per_page: @per_page) ],
+                [ "Highest score", games_path(status: @status, sort: "score",      direction: "desc", per_page: @per_page) ],
+                [ "Lowest score",  games_path(status: @status, sort: "score",      direction: "asc",  per_page: @per_page) ]
               ],
               games_path(status: @status, sort: @sort, direction: @direction, per_page: @per_page)
             ),
             onchange: "Turbo.visit(this.value)",
-            class: "select-with-arrow rounded-md border border-gray-300 pl-3 pr-8 py-1.5 text-sm cursor-pointer bg-white" %>
+            class: "select-with-arrow rounded-lg border border-forest-200 pl-3 pr-8 py-1.5 text-sm cursor-pointer bg-white text-forest-800 focus:outline-none" %>
     </div>
   </div>
 
@@ -39,23 +37,23 @@
             page: @page, total_pages: @total_pages,
             total_items: @total_items, per_page: @per_page %>
 
-  <div id="games" class="min-w-full divide-y divide-gray-200 space-y-5">
+  <div class="space-y-3">
     <% if @games.any? %>
       <% @games.each do |game| %>
-        <div class="flex flex-col sm:flex-row justify-between items-center pb-5 sm:pb-0">
+        <div class="card px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-3 hover:border-forest-200 transition-colors">
           <%= render game %>
-          <div class="w-full sm:w-auto flex flex-col sm:flex-row space-x-2 space-y-2">
+          <div class="flex flex-wrap gap-2 shrink-0">
             <% if game.status == "completed" %>
-              <%= link_to "View results", results_game_path(game), class: "btn-secondary w-full sm:w-auto" %>
+              <%= link_to "Results", results_game_path(game), class: "btn-secondary text-sm py-2 px-3" %>
             <% else %>
-              <%= link_to "Continue", game, class: "btn-secondary w-full sm:w-auto" %>
+              <%= link_to "Continue", game, class: "btn-primary text-sm py-2 px-3" %>
             <% end %>
             <% if admin? %>
-              <%= link_to "Edit", edit_game_path(game), class: "btn-secondary w-full sm:w-auto" %>
+              <%= link_to "Edit", edit_game_path(game), class: "btn-secondary text-sm py-2 px-3" %>
             <% end %>
             <%= button_to "Delete", game, method: :delete,
                   data: { turbo_confirm: "Delete this game? This cannot be undone." },
-                  class: "btn-danger w-full sm:w-auto" %>
+                  class: "btn-ghost text-red-500 hover:text-red-700 text-sm py-2 px-3" %>
           </div>
         </div>
       <% end %>
@@ -65,16 +63,16 @@
                 page: @page, total_pages: @total_pages,
                 total_items: @total_items, per_page: @per_page %>
     <% else %>
-      <p class="text-center my-10 text-gray-500">
-        <% case @status %>
-        <% when "completed" %>
-          No completed games yet — click "New game" to play your first.
-        <% when "in_progress" %>
-          No games in progress.
-        <% else %>
-          You haven't started any games yet — click "New game" to play your first.
-        <% end %>
-      </p>
+      <div class="card px-6 py-16 text-center space-y-3">
+        <p class="text-gray-400 text-sm">
+          <% case @status %>
+          <% when "completed" %>No completed games yet.
+          <% when "in_progress" %>No games in progress.
+          <% else %>You haven't started any games yet.
+          <% end %>
+        </p>
+        <%= link_to "Start your first game", image_sets_path, class: "btn-primary" %>
+      </div>
     <% end %>
   </div>
 </div>

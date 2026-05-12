@@ -1,70 +1,86 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <title><%= content_for(:title) || "Project Landscape Guessr" %></title>
+    <title><%= content_for(:title) ? "#{content_for(:title)} — Landscape Guessr" : "Landscape Guessr" %></title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="application-name" content="Project Landscape Guessr">
+    <meta name="application-name" content="Landscape Guessr">
     <meta name="mobile-web-app-capable" content="yes">
     <%= csrf_meta_tags %>
     <%= csp_meta_tag %>
 
     <%= yield :head %>
 
-    <%# Enable PWA manifest for installable apps (make sure to enable in config/routes.rb too!) %>
-    <%#= tag.link rel: "manifest", href: pwa_manifest_path(format: :json) %>
-
     <link rel="icon" href="/icon.png" type="image/png">
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/icon.png">
 
-    <%# Includes all stylesheet files in app/assets/stylesheets %>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,400&display=swap" rel="stylesheet">
+
     <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
     <%= javascript_importmap_tags %>
   </head>
 
-  <body>
-    <nav aria-label="Primary" class="container mx-auto px-5 pt-5 flex justify-between items-center text-sm">
-      <div class="flex items-center gap-5">
-        <%= link_to "Landscape Guessr", root_path, class: "font-bold" %>
-        <% if authenticated? %>
-          <%= link_to "Games", games_path, class: "text-gray-700 hover:text-blue-600 font-medium" %>
-          <%= link_to "Image Sets", image_sets_path, class: "text-gray-700 hover:text-blue-600 font-medium" %>
-          <%= link_to "Challenges", challenges_path, class: "text-gray-700 hover:text-blue-600 font-medium" %>
-        <% end %>
-      </div>
-      <div class="flex items-center gap-3">
-        <% if authenticated? %>
-          <%= link_to Current.user.username, profile_path, class: "text-gray-700 hover:text-blue-600 font-medium hidden sm:inline" %>
-          <%= button_to "Sign out", session_path, method: :delete, class: "btn-secondary text-sm py-1.5" %>
-        <% else %>
-          <%= link_to "Sign in", new_session_path, class: "btn-secondary text-sm py-1.5" %>
-          <%= link_to "Sign up", new_registration_path, class: "btn-primary text-sm py-1.5" %>
-        <% end %>
-      </div>
-    </nav>
+  <body class="font-sans antialiased bg-white text-forest-900 min-h-screen flex flex-col">
 
-    <main aria-label="Main content" class="container mx-auto mt-20 px-5">
+    <header class="sticky top-0 z-20 bg-white/95 backdrop-blur-sm border-b border-forest-100">
+      <nav aria-label="Primary" class="container mx-auto px-5 h-14 flex justify-between items-center">
+        <div class="flex items-center gap-6">
+          <%= link_to "Landscape Guessr", root_path,
+                class: "font-display font-semibold text-forest-800 text-lg tracking-tight hover:text-forest-600 transition-colors" %>
+          <% if authenticated? %>
+            <%= link_to "Games", games_path,
+                  class: "text-sm text-forest-700 hover:text-forest-900 font-medium transition-colors" %>
+            <%= link_to "Image Sets", image_sets_path,
+                  class: "text-sm text-forest-700 hover:text-forest-900 font-medium transition-colors hidden sm:inline" %>
+            <%= link_to "Challenges", challenges_path,
+                  class: "text-sm text-forest-700 hover:text-forest-900 font-medium transition-colors" %>
+          <% end %>
+        </div>
+        <div class="flex items-center gap-3">
+          <% if authenticated? %>
+            <%= link_to Current.user.username, profile_path,
+                  class: "text-sm text-forest-700 hover:text-forest-900 font-medium transition-colors hidden sm:inline" %>
+            <%= button_to "Sign out", session_path, method: :delete,
+                  class: "btn-secondary text-sm py-1.5 px-3" %>
+          <% else %>
+            <%= link_to "Sign in", new_session_path, class: "btn-secondary text-sm py-1.5 px-3" %>
+            <%= link_to "Sign up", new_registration_path, class: "btn-primary text-sm py-1.5 px-3" %>
+          <% end %>
+        </div>
+      </nav>
+    </header>
+
+    <main aria-label="Main content" class="container mx-auto px-5 py-8 flex-1">
       <% if notice = flash[:notice] %>
-        <p class="py-2 px-3 mb-5 bg-green-50 text-green-600 font-medium rounded-md mx-auto md:w-2/3 w-full" id="notice"><%= notice %></p>
+        <div class="mb-6 py-3 px-4 bg-forest-50 text-forest-700 font-medium rounded-xl border border-forest-200 flex items-center gap-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-forest-500 shrink-0"></span>
+          <%= notice %>
+        </div>
       <% end %>
       <% if alert = flash[:alert] %>
-        <p class="py-2 px-3 mb-5 bg-red-50 text-red-600 font-medium rounded-md mx-auto md:w-2/3 w-full" id="alert"><%= alert %></p>
+        <div class="mb-6 py-3 px-4 bg-red-50 text-red-700 font-medium rounded-xl border border-red-200 flex items-center gap-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>
+          <%= alert %>
+        </div>
       <% end %>
       <%= yield %>
     </main>
 
-    <footer aria-label="Site" class="container mx-auto px-5 py-8 mt-12 border-t border-gray-200 text-xs text-gray-500 flex flex-wrap items-center justify-between gap-2">
-      <span>Landscape Guessr &middot; <%= Date.current.year %></span>
-      <span>
-        <%= link_to "About", about_path, class: "underline hover:text-blue-600" %>
-        &middot;
-        <%= link_to "Legal", legal_path, class: "underline hover:text-blue-600" %>
-        &middot;
-        <%= link_to "GitHub", "https://github.com/NU-CS-Software-Studio-Spring-26/project-landscape_guessr", class: "underline hover:text-blue-600" %>
-        &middot;
-        Built for CS-397 with Rails 8
-      </span>
+    <footer class="bg-forest-50 border-t border-forest-100 mt-auto">
+      <div class="container mx-auto px-5 py-6 text-xs text-forest-700 flex flex-wrap items-center justify-between gap-2">
+        <span class="font-medium">Landscape Guessr &middot; <%= Date.current.year %></span>
+        <span class="flex items-center gap-3">
+          <%= link_to "About", about_path, class: "hover:text-forest-900 transition-colors" %>
+          <%= link_to "Legal", legal_path, class: "hover:text-forest-900 transition-colors" %>
+          <%= link_to "GitHub", "https://github.com/NU-CS-Software-Studio-Spring-26/project-landscape_guessr",
+                class: "hover:text-forest-900 transition-colors" %>
+          <span class="text-forest-400">Built for CS-397 with Rails 8</span>
+        </span>
+      </div>
     </footer>
+
   </body>
 </html>

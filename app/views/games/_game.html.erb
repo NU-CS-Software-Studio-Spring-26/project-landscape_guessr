@@ -1,14 +1,20 @@
-<div id="<%= dom_id game %>" class="w-full sm:w-auto my-5">
+<div id="<%= dom_id game %>" class="flex-1 min-w-0">
   <% if game.status == "completed" %>
-    <p class="font-medium">Score: <%= number_with_delimiter(game.score.to_i) %> pts</p>
+    <p class="font-semibold text-forest-900 font-display text-lg">
+      <%= number_with_delimiter(game.score.to_i) %>
+      <span class="text-sm font-sans font-normal text-gray-400">/ 25,000 pts</span>
+    </p>
     <p class="muted">Completed <%= time_ago_in_words(game.completed_at) %> ago</p>
   <% else %>
-    <p class="font-medium">Round <%= [game.guesses.size + 1, @total_rounds].min %> / <%= @total_rounds %></p>
+    <p class="font-semibold text-forest-900">
+      Round <%= [ game.guesses.size + 1, @total_rounds ].min %> / <%= @total_rounds %>
+    </p>
     <p class="muted">In progress</p>
   <% end %>
   <% if game.image_set %>
-    <p class="text-xs text-gray-500 mt-0.5">
-      on <%= link_to game.image_set.name, game.image_set, class: "hover:text-blue-600 hover:underline" %>
+    <p class="text-xs text-gray-400 mt-0.5">
+      <%= link_to game.image_set.name, game.image_set,
+            class: "hover:text-forest-600 hover:underline" %>
     </p>
   <% end %>
 </div>
