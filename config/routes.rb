@@ -1,5 +1,6 @@
 Rails.application.routes.draw do
   root "home#start"
+  get "/about", to: "home#about"
 
   resource :session, only: %i[ new create destroy ]
   resources :passwords, param: :token, only: %i[ new create edit update ]
