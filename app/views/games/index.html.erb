@@ -65,9 +65,8 @@
     <% else %>
       <div class="card px-6 py-16 text-center space-y-3">
         <p class="text-gray-400 text-sm">
-          <% case @status %>
-          <% when "completed" %>No completed games yet.
-          <% when "in_progress" %>No games in progress.
+          <% if @status == "completed" %>No completed games yet.
+          <% elsif @status == "in_progress" %>No games in progress.
           <% else %>You haven't started any games yet.
           <% end %>
         </p>
