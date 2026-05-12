@@ -1,7 +1,7 @@
 class ChallengesController < ApplicationController
   TOTAL_ROUNDS = 5
 
-  before_action :set_challenge, only: [:show, :play, :destroy]
+  before_action :set_challenge, only: [ :show, :play, :destroy ]
 
   def index
     created = Current.user.challenges.includes(:image_set, :games)
