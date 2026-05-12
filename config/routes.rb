@@ -1,6 +1,7 @@
 Rails.application.routes.draw do
   root "home#start"
   get "/about", to: "home#about"
+  get "/legal", to: "home#legal"
 
   resource :session, only: %i[ new create destroy ]
   resources :passwords, param: :token, only: %i[ new create edit update ]

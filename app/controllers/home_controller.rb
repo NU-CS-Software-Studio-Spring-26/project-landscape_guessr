@@ -1,5 +1,5 @@
 class HomeController < ApplicationController
-  allow_unauthenticated_access only: %i[ start about ]
+  allow_unauthenticated_access only: %i[ start about legal ]
 
   def start
     if authenticated?
@@ -11,5 +11,8 @@ class HomeController < ApplicationController
   end
 
   def about
+  end
+
+  def legal
   end
 end
