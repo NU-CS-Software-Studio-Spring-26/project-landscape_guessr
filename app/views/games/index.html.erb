@@ -15,20 +15,24 @@
             class: "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors #{@status == value ? "bg-forest-600 text-white shadow-sm" : "bg-forest-50 text-forest-700 hover:bg-forest-100 border border-forest-200"}" %>
     <% end %>
 
-    <div class="ml-auto flex items-center gap-2">
-      <label for="sort_dir" class="muted text-xs">Sort</label>
-      <%= select_tag :sort_dir,
-            options_for_select(
-              [
-                [ "Newest first",  games_path(status: @status, sort: "created_at", direction: "desc", per_page: @per_page) ],
-                [ "Oldest first",  games_path(status: @status, sort: "created_at", direction: "asc",  per_page: @per_page) ],
-                [ "Highest score", games_path(status: @status, sort: "score",      direction: "desc", per_page: @per_page) ],
-                [ "Lowest score",  games_path(status: @status, sort: "score",      direction: "asc",  per_page: @per_page) ]
-              ],
-              games_path(status: @status, sort: @sort, direction: @direction, per_page: @per_page)
-            ),
-            onchange: "Turbo.visit(this.value)",
-            class: "select-with-arrow rounded-lg border border-forest-200 pl-3 pr-8 py-1.5 text-sm cursor-pointer bg-white text-forest-800 focus:outline-none focus:ring-2 focus:ring-forest-200 focus:border-forest-600" %>
+    <div class="ml-auto">
+      <% sort_label = { ["created_at","desc"] => "Newest first", ["created_at","asc"] => "Oldest first", ["score","desc"] => "Highest score", ["score","asc"] => "Lowest score" }[[@sort, @direction]] || "Sort" %>
+      <% sort_opts = [ ["Newest first", games_path(status: @status, sort: "created_at", direction: "desc", per_page: @per_page)], ["Oldest first", games_path(status: @status, sort: "created_at", direction: "asc", per_page: @per_page)], ["Highest score", games_path(status: @status, sort: "score", direction: "desc", per_page: @per_page)], ["Lowest score", games_path(status: @status, sort: "score", direction: "asc", per_page: @per_page)] ] %>
+      <div data-controller="dropdown" class="relative">
+        <button type="button" data-action="dropdown#toggle"
+                class="flex items-center gap-2 rounded-lg border border-forest-200 pl-3 pr-3 py-1.5 text-sm bg-white text-forest-800 hover:bg-forest-50 transition-colors">
+          <span data-dropdown-target="label"><%= sort_label %></span>
+          <svg class="w-4 h-4 text-forest-500 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+        </button>
+        <div data-dropdown-target="menu" class="hidden absolute right-0 top-full mt-1 z-30 bg-white rounded-xl border border-forest-200 shadow-lg overflow-hidden min-w-[11rem]">
+          <% sort_opts.each do |lbl, url| %>
+            <button type="button" data-action="dropdown#pick" data-url="<%= url %>" data-label="<%= lbl %>"
+                    class="w-full text-left px-4 py-2.5 text-sm hover:bg-forest-50 transition-colors <%= sort_label == lbl ? "font-semibold text-forest-600" : "text-forest-800" %>">
+              <%= lbl %>
+            </button>
+          <% end %>
+        </div>
+      </div>
     </div>
   </div>
 

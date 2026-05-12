@@ -21,31 +21,23 @@
     </p>
     <div class="flex flex-wrap items-center justify-end gap-2 ml-auto">
       <span class="muted text-xs">Per page</span>
-      <%# Per-page change resets to page 1 — landing on a page that no
-          longer exists at the new size would be confusing. The clamp in
-          ApplicationController#paginate would silently move them anyway.
-          id: nil because this partial often renders twice on a page (top
-          and bottom); select_tag's default id="per_page" would duplicate.
-          name: nil because the partial may render inside an unrelated
-          form (locations bulk-edit); without this, the select's value
-          (a URL) submits as ?per_page=, colliding with the real hidden
-          fields and producing garbage redirect URLs.
-          autocomplete: "off" because Firefox restores <select> values
-          on reload AND fires onchange during that restore — without
-          this, reloading /games?per_page=50 would silently navigate to
-          /games?per_page=100 (whatever was selected before) the moment
-          the form-restore tripped the onchange. Chrome doesn't do this. %>
-      <%= select_tag :per_page,
-            options_for_select(
-              options.map { |n| [ n, page_url.call(page: 1, per_page: n) ] },
-              page_url.call(page: 1, per_page: per_page)
-            ),
-            onchange: "Turbo.visit(this.value)",
-            id: nil,
-            name: nil,
-            autocomplete: "off",
-            aria: { label: "Items per page" },
-            class: "select-with-arrow rounded-lg border border-forest-200 pl-2 pr-7 py-1 text-xs cursor-pointer bg-white text-forest-800 focus:outline-none focus:ring-2 focus:ring-forest-200 focus:border-forest-600" %>
+      <div data-controller="dropdown" class="relative">
+        <button type="button" data-action="dropdown#toggle"
+                class="flex items-center gap-1.5 rounded-lg border border-forest-200 pl-2.5 pr-2.5 py-1 text-xs bg-white text-forest-800 hover:bg-forest-50 transition-colors">
+          <span data-dropdown-target="label"><%= per_page %></span>
+          <svg class="w-3.5 h-3.5 text-forest-500 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+        </button>
+        <div data-dropdown-target="menu" class="hidden absolute right-0 top-full mt-1 z-30 bg-white rounded-xl border border-forest-200 shadow-lg overflow-hidden min-w-[5rem]">
+          <% options.each do |n| %>
+            <button type="button" data-action="dropdown#pick"
+                    data-url="<%= page_url.call(page: 1, per_page: n) %>"
+                    data-label="<%= n %>"
+                    class="w-full text-left px-3.5 py-2 text-xs hover:bg-forest-50 transition-colors <%= n == per_page ? "font-semibold text-forest-600" : "text-forest-800" %>">
+              <%= n %>
+            </button>
+          <% end %>
+        </div>
+      </div>
       <% if page > 1 %>
         <%= link_to "← Prev", page_url.call(page: page - 1, per_page: per_page), class: "btn-secondary text-sm py-1.5" %>
       <% else %>

@@ -25,43 +25,88 @@
 
   <body class="font-sans antialiased bg-white text-forest-900 min-h-screen flex flex-col">
 
-    <header class="sticky top-0 z-20 bg-white/95 backdrop-blur-sm border-b border-forest-100">
+    <header class="sticky top-0 z-20 bg-white/95 backdrop-blur-sm border-b border-forest-100"
+            data-controller="mobile-menu">
+      <%# Desktop + mobile top bar %>
       <nav aria-label="Primary" class="container mx-auto px-5 h-14 flex justify-between items-center">
         <div class="flex items-center gap-6">
           <%= link_to "Landscape Guessr", root_path,
                 class: "font-display font-semibold text-forest-800 text-lg tracking-tight hover:text-forest-600 transition-colors" %>
-          <% if authenticated? %>
-            <%= link_to "Games", games_path,
-                  class: "text-sm text-forest-700 hover:text-forest-900 font-medium transition-colors" %>
-            <%= link_to "Image Sets", image_sets_path,
-                  class: "text-sm text-forest-700 hover:text-forest-900 font-medium transition-colors hidden sm:inline" %>
-            <%= link_to "Challenges", challenges_path,
-                  class: "text-sm text-forest-700 hover:text-forest-900 font-medium transition-colors" %>
-          <% end %>
+          <%# Desktop nav links %>
+          <div class="hidden sm:flex items-center gap-5">
+            <% if authenticated? %>
+              <%= link_to "Games",       games_path,      class: "text-sm text-forest-700 hover:text-forest-900 font-medium transition-colors" %>
+              <%= link_to "Image Sets",  image_sets_path, class: "text-sm text-forest-700 hover:text-forest-900 font-medium transition-colors" %>
+              <%= link_to "Challenges",  challenges_path, class: "text-sm text-forest-700 hover:text-forest-900 font-medium transition-colors" %>
+            <% end %>
+          </div>
         </div>
+
         <div class="flex items-center gap-3">
-          <% if authenticated? %>
-            <%= link_to Current.user.username, profile_path,
-                  class: "text-sm text-forest-700 hover:text-forest-900 font-medium transition-colors hidden sm:inline" %>
-            <%= button_to "Sign out", session_path, method: :delete,
-                  class: "btn-secondary text-sm py-1.5 px-3" %>
-          <% else %>
-            <%= link_to "Sign in", new_session_path, class: "btn-secondary text-sm py-1.5 px-3" %>
-            <%= link_to "Sign up", new_registration_path, class: "btn-primary text-sm py-1.5 px-3" %>
-          <% end %>
+          <%# Desktop auth %>
+          <div class="hidden sm:flex items-center gap-3">
+            <% if authenticated? %>
+              <%= link_to Current.user.username, profile_path,
+                    class: "text-sm text-forest-700 hover:text-forest-900 font-medium transition-colors" %>
+              <%= button_to "Sign out", session_path, method: :delete,
+                    class: "btn-secondary text-sm py-1.5 px-3" %>
+            <% else %>
+              <%= link_to "Sign in",  new_session_path,      class: "btn-secondary text-sm py-1.5 px-3" %>
+              <%= link_to "Sign up",  new_registration_path, class: "btn-primary  text-sm py-1.5 px-3" %>
+            <% end %>
+          </div>
+
+          <%# Mobile hamburger %>
+          <button type="button" data-action="mobile-menu#toggle"
+                  class="sm:hidden p-2 rounded-lg text-forest-700 hover:bg-forest-50 transition-colors"
+                  aria-label="Toggle menu">
+            <%# Hamburger icon %>
+            <svg data-mobile-menu-target="hamburger" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
+            </svg>
+            <%# Close icon (hidden by default) %>
+            <svg data-mobile-menu-target="close" class="w-5 h-5 hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
         </div>
       </nav>
+
+      <%# Mobile dropdown menu %>
+      <div data-mobile-menu-target="menu" class="hidden sm:hidden border-t border-forest-100 bg-white">
+        <div class="container mx-auto px-5 py-4 space-y-1">
+          <% if authenticated? %>
+            <%= link_to "Games",      games_path,      data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
+            <%= link_to "Image Sets", image_sets_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
+            <%= link_to "Challenges", challenges_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
+            <%= link_to "Practice",   practice_path,   data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
+            <div class="pt-3 border-t border-forest-100 flex items-center justify-between">
+              <%= link_to Current.user.username, profile_path,
+                    data: { action: "mobile-menu#close" },
+                    class: "text-sm text-forest-600 font-medium" %>
+              <%= button_to "Sign out", session_path, method: :delete,
+                    class: "btn-secondary text-sm py-1.5 px-3" %>
+            </div>
+          <% else %>
+            <%= link_to "Sign in",  new_session_path,      data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
+            <%= link_to "About",    about_path,            data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
+            <div class="pt-3">
+              <%= link_to "Sign up free", new_registration_path, class: "btn-primary w-full text-center block" %>
+            </div>
+          <% end %>
+        </div>
+      </div>
     </header>
 
-    <main aria-label="Main content" class="container mx-auto px-5 py-8 flex-1">
+    <main aria-label="Main content" class="container mx-auto px-4 sm:px-5 py-6 sm:py-8 flex-1">
       <% if notice = flash[:notice] %>
-        <div class="mb-6 py-3 px-4 bg-forest-50 text-forest-700 font-medium rounded-xl border border-forest-200 flex items-center gap-2">
+        <div class="mb-6 py-3 px-4 bg-forest-50 text-forest-700 font-medium rounded-xl border border-forest-200 flex items-center gap-2 text-sm">
           <span class="w-1.5 h-1.5 rounded-full bg-forest-500 shrink-0"></span>
           <%= notice %>
         </div>
       <% end %>
       <% if alert = flash[:alert] %>
-        <div class="mb-6 py-3 px-4 bg-red-50 text-red-700 font-medium rounded-xl border border-red-200 flex items-center gap-2">
+        <div class="mb-6 py-3 px-4 bg-red-50 text-red-700 font-medium rounded-xl border border-red-200 flex items-center gap-2 text-sm">
           <span class="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>
           <%= alert %>
         </div>
@@ -70,14 +115,14 @@
     </main>
 
     <footer class="bg-forest-50 border-t border-forest-100 mt-auto">
-      <div class="container mx-auto px-5 py-6 text-xs text-forest-700 flex flex-wrap items-center justify-between gap-2">
+      <div class="container mx-auto px-4 sm:px-5 py-6 text-xs text-forest-700 flex flex-wrap items-center justify-between gap-3">
         <span class="font-medium">Landscape Guessr &middot; <%= Date.current.year %></span>
-        <span class="flex items-center gap-3">
-          <%= link_to "About", about_path, class: "hover:text-forest-900 transition-colors" %>
-          <%= link_to "Legal", legal_path, class: "hover:text-forest-900 transition-colors" %>
+        <span class="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <%= link_to "About",  about_path, class: "hover:text-forest-900 transition-colors" %>
+          <%= link_to "Legal",  legal_path, class: "hover:text-forest-900 transition-colors" %>
           <%= link_to "GitHub", "https://github.com/NU-CS-Software-Studio-Spring-26/project-landscape_guessr",
                 class: "hover:text-forest-900 transition-colors" %>
-          <span class="text-forest-400">Built for CS-397 with Rails 8</span>
+          <span class="text-forest-400 hidden sm:inline">Built for CS-397 with Rails 8</span>
         </span>
       </div>
     </footer>

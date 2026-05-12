@@ -15,18 +15,18 @@
   <% if @games.any? %>
     <div class="card overflow-hidden">
       <div class="divide-y divide-forest-50">
-        <div class="grid grid-cols-[2rem_1fr_6rem_8rem] gap-4 px-5 py-3 bg-forest-50">
+        <div class="grid grid-cols-[2rem_1fr_6rem] sm:grid-cols-[2rem_1fr_6rem_8rem] gap-4 px-5 py-3 bg-forest-50">
           <span class="eyebrow text-left">#</span>
           <span class="eyebrow">Player</span>
           <span class="eyebrow text-right">Score</span>
-          <span class="eyebrow text-right">Date</span>
+          <span class="eyebrow text-right hidden sm:block">Date</span>
         </div>
         <% @games.each_with_index do |game, i| %>
-          <div class="grid grid-cols-[2rem_1fr_6rem_8rem] gap-4 px-5 py-3.5 items-center hover:bg-forest-50 transition-colors">
+          <div class="grid grid-cols-[2rem_1fr_6rem] sm:grid-cols-[2rem_1fr_6rem_8rem] gap-4 px-5 py-3.5 items-center hover:bg-forest-50 transition-colors">
             <span class="text-sm font-semibold text-gray-400"><%= i + 1 %></span>
             <span class="font-medium text-forest-900 truncate"><%= game.user.username %></span>
             <span class="text-right font-bold text-amber-500 font-display"><%= number_with_delimiter(game.score.to_i) %></span>
-            <span class="text-right text-sm text-gray-400"><%= local_date_tag(game.completed_at) %></span>
+            <span class="text-right text-sm text-gray-400 hidden sm:block"><%= local_date_tag(game.completed_at) %></span>
           </div>
         <% end %>
       </div>

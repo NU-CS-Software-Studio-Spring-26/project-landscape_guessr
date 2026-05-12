@@ -12,10 +12,26 @@
       <%= form_with url: challenges_path, method: :post do |f| %>
         <div>
           <%= f.label :image_set_id, "Image set", class: "block text-sm font-medium text-forest-800" %>
-          <%= f.select :image_set_id,
-                @image_sets.map { |s| [ s.name + (s.is_system_default? ? " (default)" : ""), s.id ] },
-                { include_blank: false },
-                class: "form-input select-with-arrow pr-8" %>
+          <% default_set = @image_sets.first %>
+          <% default_label = default_set ? default_set.name + (default_set.is_system_default? ? " (default)" : "") : "Select…" %>
+          <%= f.hidden_field :image_set_id, value: default_set&.id, data: { dropdown_target: "input" } %>
+          <div data-controller="dropdown" class="relative mt-2">
+            <button type="button" data-action="dropdown#toggle"
+                    class="flex items-center justify-between w-full gap-2 rounded-lg border border-forest-200 px-3.5 py-2.5 text-sm bg-white text-forest-800 hover:bg-forest-50 transition-colors">
+              <span data-dropdown-target="label"><%= default_label %></span>
+              <svg class="w-4 h-4 text-forest-500 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+            </button>
+            <div data-dropdown-target="menu" class="hidden absolute left-0 right-0 top-full mt-1 z-30 bg-white rounded-xl border border-forest-200 shadow-lg overflow-hidden max-h-56 overflow-y-auto">
+              <% @image_sets.each do |s| %>
+                <% lbl = s.name + (s.is_system_default? ? " (default)" : "") %>
+                <button type="button" data-action="dropdown#pick"
+                        data-value="<%= s.id %>" data-label="<%= lbl %>"
+                        class="w-full text-left px-4 py-2.5 text-sm text-forest-800 hover:bg-forest-50 transition-colors">
+                  <%= lbl %>
+                </button>
+              <% end %>
+            </div>
+          </div>
           <p class="muted text-xs mt-1.5">Everyone who joins draws randomly from this set.</p>
         </div>
         <%= f.submit "Create challenge", class: "btn-primary w-full" %>

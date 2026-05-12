@@ -8,7 +8,7 @@
 
   <section class="space-y-3">
     <h2 class="heading-section">Stats</h2>
-    <div class="grid grid-cols-3 gap-3">
+    <div class="grid grid-cols-3 gap-2 sm:gap-3">
       <%= render "shared/stat_card", label: "Games played", value: @games_played %>
       <%= render "shared/stat_card", label: "Best score",
             value: (@best_score ? number_with_delimiter(@best_score.to_i) : "—"), accent: :blue %>
