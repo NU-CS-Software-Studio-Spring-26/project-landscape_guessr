@@ -136,7 +136,7 @@
             <%# Thumbnail (or a "processing" placeholder while ProcessImageJob
                 converts the freshly-uploaded HEIC) %>
             <% if item.image.processed? %>
-              <img src="<%= image_src(item.image, width: 200) %>" alt="<%= item.title %>"
+              <img src="<%= image_src(item.image, width: 200) %>" alt="<%= item.title.presence || 'Landscape image' %>"
                    loading="lazy" decoding="async"
                    class="w-full sm:w-24 h-20 sm:h-16 object-cover rounded-md border border-gray-100 shrink-0">
             <% else %>

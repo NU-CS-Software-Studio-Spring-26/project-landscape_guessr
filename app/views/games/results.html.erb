@@ -59,7 +59,7 @@
            class="rounded-lg border border-gray-200 hover:border-blue-300 transition cursor-pointer px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
         <% thumb = image_src(row[:guess].image, width: 200) %>
         <% if thumb %>
-          <img src="<%= thumb %>" alt="<%= row[:guess].image.title %>"
+          <img src="<%= thumb %>" alt="<%= row[:guess].image.title.presence || 'Landscape image' %>"
                loading="lazy"
                class="shrink-0 w-full sm:w-24 h-20 sm:h-16 object-cover rounded-md border border-gray-100">
         <% end %>
