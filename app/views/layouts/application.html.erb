@@ -30,6 +30,7 @@
         <% if authenticated? %>
           <%= link_to "Games", games_path, class: "text-gray-700 hover:text-blue-600 font-medium" %>
           <%= link_to "Image Sets", image_sets_path, class: "text-gray-700 hover:text-blue-600 font-medium" %>
+          <%= link_to "Challenges", challenges_path, class: "text-gray-700 hover:text-blue-600 font-medium" %>
         <% end %>
       </div>
       <div class="flex items-center gap-3">
@@ -56,6 +57,10 @@
     <footer aria-label="Site" class="container mx-auto px-5 py-8 mt-12 border-t border-gray-200 text-xs text-gray-500 flex flex-wrap items-center justify-between gap-2">
       <span>Landscape Guessr &middot; <%= Date.current.year %></span>
       <span>
+        <%= link_to "About", about_path, class: "underline hover:text-blue-600" %>
+        &middot;
+        <%= link_to "Legal", legal_path, class: "underline hover:text-blue-600" %>
+        &middot;
         <%= link_to "GitHub", "https://github.com/NU-CS-Software-Studio-Spring-26/project-landscape_guessr", class: "underline hover:text-blue-600" %>
         &middot;
         Built for CS-397 with Rails 8

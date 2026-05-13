@@ -32,7 +32,7 @@
          class="lg:col-span-2 space-y-1">
       <div data-zoomable-target="viewport"
            class="h-[60vh] flex items-center justify-center bg-gray-100 rounded-md border border-gray-200 select-none">
-        <img src="<%= image_src(@image, width: Image::ZOOM_CAP_WIDTH) %>" alt="<%= @image.title %>"
+        <img src="<%= image_src(@image, width: Image::ZOOM_CAP_WIDTH) %>" alt="<%= @image.title.presence || 'Landscape image' %>"
              class="max-w-full max-h-full object-contain">
       </div>
       <div class="flex items-center justify-between gap-2 text-xs text-gray-500">
@@ -42,6 +42,7 @@
                   data-zoomable-target="originalButton"
                   data-action="zoomable#loadOriginal"
                   data-zoomable-url-param="<%= image_src(@image) %>"
+                  aria-label="Load full quality version of the current image"
                   class="hidden text-gray-500 hover:text-blue-600 underline-offset-2 hover:underline cursor-pointer">
             load full quality
           </button>
@@ -57,6 +58,7 @@
           doesn't show. %>
       <% if (gmap = @image.google_maps_url) %>
         <%= link_to "Open in Google Maps ↗", gmap, target: "_blank", rel: "noopener",
+              aria: { label: "Open in Google Maps (opens in a new tab)" },
               class: "btn-secondary w-full text-center" %>
       <% end %>
 
@@ -69,6 +71,7 @@
         <div class="text-xs">
           <p class="text-gray-500 mb-0.5">Source</p>
           <%= link_to @image.url, @image.url, target: "_blank", rel: "noopener",
+                aria: { label: "Source URL (opens in a new tab)" },
                 class: "text-blue-600 hover:underline break-all" %>
         </div>
       <% end %>

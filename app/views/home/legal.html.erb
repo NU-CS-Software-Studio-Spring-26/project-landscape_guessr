@@ -1,0 +1,133 @@
+<% content_for :title, "Legal" %>
+
+<div class="page-container">
+  <h1 class="heading-page">Legal</h1>
+  <p class="muted">Last updated: <%= Date.new(2026, 5, 12).strftime("%B %d, %Y") %></p>
+
+  <%# Privacy Policy %>
+  <section class="space-y-3">
+    <h2 class="heading-section">Privacy Policy</h2>
+
+    <p class="text-sm text-gray-700 leading-relaxed">
+      Landscape Guessr is a student project built for CS-397 at Northwestern University.
+      We take your privacy seriously and want to be transparent about what data we collect and how it is used.
+    </p>
+
+    <h3 class="text-sm font-semibold text-gray-700">What we collect</h3>
+    <ul class="list-disc list-inside text-sm text-gray-700 space-y-1 leading-relaxed">
+      <li><strong>Account information:</strong> your username and email address when you register.</li>
+      <li><strong>Game data:</strong> your guesses, scores, and game history so you can review your progress.</li>
+      <li><strong>Session data:</strong> your IP address and browser user agent when you sign in, used to manage your login session.</li>
+      <li><strong>Uploaded images:</strong> if you upload photos to a custom image set, those files are stored on Amazon S3.</li>
+    </ul>
+
+    <h3 class="text-sm font-semibold text-gray-700">What we do not do</h3>
+    <ul class="list-disc list-inside text-sm text-gray-700 space-y-1 leading-relaxed">
+      <li>We do not sell or share your personal data with third parties.</li>
+      <li>We do not use your data for advertising.</li>
+      <li>We do not track you across other websites.</li>
+    </ul>
+
+    <h3 class="text-sm font-semibold text-gray-700">Data retention</h3>
+    <p class="text-sm text-gray-700 leading-relaxed">
+      Your data is retained for as long as your account exists. To request deletion of your account and associated data,
+      contact the team via the GitHub repository linked in the footer.
+      We will process your request within 30 days.
+    </p>
+
+    <h3 class="text-sm font-semibold text-gray-700">Third-party services</h3>
+    <p class="text-sm text-gray-700 leading-relaxed">
+      We use the following third-party services which may process data in connection with your use of the app:
+    </p>
+    <ul class="list-disc list-inside text-sm text-gray-700 space-y-1 leading-relaxed">
+      <li><strong>MapTiler</strong> &mdash; provides map tiles. Your map interactions may be subject to
+        <%= link_to "MapTiler's privacy policy", "https://www.maptiler.com/privacy-policy/", class: "text-blue-600 hover:underline", target: "_blank" %>.</li>
+      <li><strong>Amazon S3</strong> &mdash; stores uploaded images.
+        Subject to <%= link_to "AWS's privacy policy", "https://aws.amazon.com/privacy/", class: "text-blue-600 hover:underline", target: "_blank" %>.</li>
+      <li><strong>Heroku</strong> &mdash; hosts the application.
+        Subject to <%= link_to "Heroku's privacy policy", "https://www.salesforce.com/company/privacy/", class: "text-blue-600 hover:underline", target: "_blank" %>.</li>
+    </ul>
+  </section>
+
+  <%# Terms of Service %>
+  <section class="space-y-3 pt-4 border-t border-gray-100">
+    <h2 class="heading-section">Terms of Service</h2>
+
+    <p class="text-sm text-gray-700 leading-relaxed">
+      By using Landscape Guessr you agree to these terms. If you do not agree, please do not use the service.
+    </p>
+
+    <h3 class="text-sm font-semibold text-gray-700">Use of the service</h3>
+    <ul class="list-disc list-inside text-sm text-gray-700 space-y-1 leading-relaxed">
+      <li>You must be at least 13 years old to create an account.</li>
+      <li>You are responsible for maintaining the security of your account credentials.</li>
+      <li>You may not use the service for any unlawful purpose or in violation of any applicable laws.</li>
+      <li>You may not attempt to disrupt, overload, or gain unauthorized access to the service or its infrastructure.</li>
+      <li>You may not upload content that is illegal, offensive, or infringes the intellectual property rights of others.</li>
+    </ul>
+
+    <h3 class="text-sm font-semibold text-gray-700">User-generated content</h3>
+    <p class="text-sm text-gray-700 leading-relaxed">
+      By uploading images to Landscape Guessr you confirm that you have the right to share that content and grant
+      us a non-exclusive license to store and display it within the application.
+    </p>
+
+    <h3 class="text-sm font-semibold text-gray-700">Account termination</h3>
+    <p class="text-sm text-gray-700 leading-relaxed">
+      We reserve the right to suspend or terminate accounts that violate these terms, at our sole discretion and without notice.
+    </p>
+
+    <h3 class="text-sm font-semibold text-gray-700">Disclaimer of warranties</h3>
+    <p class="text-sm text-gray-700 leading-relaxed">
+      Landscape Guessr is provided &ldquo;as is&rdquo; without warranties of any kind. We do not guarantee uninterrupted
+      access, accuracy of content, or fitness for any particular purpose. Use the service at your own risk.
+    </p>
+
+    <h3 class="text-sm font-semibold text-gray-700">Limitation of liability</h3>
+    <p class="text-sm text-gray-700 leading-relaxed">
+      To the fullest extent permitted by law, the Landscape Guessr team shall not be liable for any indirect,
+      incidental, or consequential damages arising from your use of the service.
+    </p>
+
+    <h3 class="text-sm font-semibold text-gray-700">Changes to these terms</h3>
+    <p class="text-sm text-gray-700 leading-relaxed">
+      We may update these terms from time to time. Continued use of the service after changes are posted
+      constitutes your acceptance of the revised terms.
+    </p>
+  </section>
+
+  <%# Cookie Notice %>
+  <section class="space-y-3 pt-4 border-t border-gray-100">
+    <h2 class="heading-section">Cookie Notice</h2>
+
+    <p class="text-sm text-gray-700 leading-relaxed">
+      Landscape Guessr uses a single session cookie (<code class="text-xs bg-gray-100 px-1 py-0.5 rounded">session_id</code>)
+      to keep you logged in between page visits. This cookie is:
+    </p>
+    <ul class="list-disc list-inside text-sm text-gray-700 space-y-1 leading-relaxed">
+      <li><strong>Essential</strong> &mdash; the service cannot function without it while you are signed in.</li>
+      <li><strong>HttpOnly</strong> &mdash; it cannot be read by JavaScript, reducing the risk of theft.</li>
+      <li><strong>SameSite: Lax</strong> &mdash; it is not sent on cross-site requests, reducing CSRF risk.</li>
+      <li><strong>Not used for tracking or advertising</strong> &mdash; it exists solely to identify your session.</li>
+    </ul>
+    <p class="text-sm text-gray-700 leading-relaxed">
+      Signing out clears this cookie immediately. If you do not sign in, no cookie is set.
+    </p>
+  </section>
+
+  <%# Attribution %>
+  <section class="space-y-3 pt-4 border-t border-gray-100">
+    <h2 class="heading-section">Content Attribution</h2>
+    <p class="text-sm text-gray-700 leading-relaxed">
+      Landscape photographs used in the default image set are sourced from
+      <%= link_to "Wikimedia Commons", "https://commons.wikimedia.org", class: "text-blue-600 hover:underline", target: "_blank" %>
+      under public domain or Creative Commons licenses.
+      Map tiles are &copy; <%= link_to "MapTiler", "https://www.maptiler.com", class: "text-blue-600 hover:underline", target: "_blank" %>
+      &copy; <%= link_to "OpenStreetMap contributors", "https://www.openstreetmap.org/copyright", class: "text-blue-600 hover:underline", target: "_blank" %>.
+    </p>
+  </section>
+
+  <p class="muted pt-4 border-t border-gray-100">
+    Questions? Reach us via the <%= link_to "GitHub repository", "https://github.com/NU-CS-Software-Studio-Spring-26/project-landscape_guessr", class: "text-blue-600 hover:underline", target: "_blank" %>.
+  </p>
+</div>

@@ -6,6 +6,7 @@ class Game < ApplicationRecord
 
   belongs_to :user
   belongs_to :image_set, optional: true
+  belongs_to :challenge, optional: true
   has_many :guesses, dependent: :destroy
   has_many :game_images, -> { order(:position) }, dependent: :destroy
   has_many :images, through: :game_images
