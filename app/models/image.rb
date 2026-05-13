@@ -5,6 +5,9 @@ class Image < ApplicationRecord
   has_many :image_set_items, dependent: :destroy
   has_many :image_sets, through: :image_set_items
 
+  validates :latitude, numericality: { greater_than_or_equal_to: -90, less_than_or_equal_to: 90 }, allow_nil: true
+  validates :longitude, numericality: { greater_than_or_equal_to: -180, less_than_or_equal_to: 180 }, allow_nil: true
+
   # Images visible to a given user: only those that live in at least one
   # set the user is allowed to see (system_default, public, or owned).
   # Pass nil for the unauthenticated case — they see only system_default

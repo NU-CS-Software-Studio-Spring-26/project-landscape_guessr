@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_06_044001) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_13_014000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -90,6 +90,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_06_044001) do
     t.index ["image_set_id"], name: "index_image_set_items_on_image_set_id"
   end
 
+  add_check_constraint "image_set_items", "latitude IS NULL OR latitude >= '-90'::integer::numeric AND latitude <= 90::numeric", name: "chk_image_set_items_latitude_range", validate: false
+  add_check_constraint "image_set_items", "longitude IS NULL OR longitude >= '-180'::integer::numeric AND longitude <= 180::numeric", name: "chk_image_set_items_longitude_range", validate: false
+
   create_table "image_sets", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.boolean "is_system_default", default: false, null: false
@@ -110,6 +113,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_06_044001) do
     t.datetime "updated_at", null: false
     t.string "url"
   end
+
+  add_check_constraint "images", "latitude IS NULL OR latitude >= '-90'::integer::numeric AND latitude <= 90::numeric", name: "chk_images_latitude_range", validate: false
+  add_check_constraint "images", "longitude IS NULL OR longitude >= '-180'::integer::numeric AND longitude <= 180::numeric", name: "chk_images_longitude_range", validate: false
 
   create_table "sessions", force: :cascade do |t|
     t.datetime "created_at", null: false

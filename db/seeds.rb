@@ -50,12 +50,18 @@ bindings = JSON.parse(response.body).dig("results", "bindings") || []
 puts "Received #{bindings.size} records in #{(Time.now - start).round(1)}s, inserting..."
 
 skipped_non_photo = 0
+skipped_invalid_coords = 0
 before = Image.count
 bindings.each do |b|
   coord = b.dig("coord", "value")
   match = coord && coord.match(/Point\(([-\d.]+)\s+([-\d.]+)\)/)
   next unless match
   lng, lat = match[1].to_f, match[2].to_f
+
+  unless lat.between?(-90, 90) && lng.between?(-180, 180)
+    skipped_invalid_coords += 1
+    next
+  end
 
   url = b.dig("image", "value")&.sub(/\Ahttp:/, "https:")
   next if url.blank? || url.length > 500
@@ -73,7 +79,7 @@ bindings.each do |b|
   end
 end
 
-puts "Created #{Image.count - before} new images (#{Image.count} total); skipped #{skipped_non_photo} non-photos"
+puts "Created #{Image.count - before} new images (#{Image.count} total); skipped #{skipped_non_photo} non-photos and #{skipped_invalid_coords} invalid coordinates"
 
 # Ensure every Image is linked into the default set
 default_set = ImageSet.find_or_create_by!(is_system_default: true) do |s|
@@ -82,7 +88,16 @@ default_set = ImageSet.find_or_create_by!(is_system_default: true) do |s|
 end
 
 linked = 0
+skipped_unlinkable_coords = 0
 Image.find_each do |img|
+  lat_valid = img.latitude.nil? || img.latitude.to_f.between?(-90, 90)
+  lng_valid = img.longitude.nil? || img.longitude.to_f.between?(-180, 180)
+
+  unless lat_valid && lng_valid
+    skipped_unlinkable_coords += 1
+    next
+  end
+
   item = default_set.image_set_items.find_or_initialize_by(image: img)
   if item.new_record?
     item.latitude  = img.latitude
@@ -92,6 +107,7 @@ Image.find_each do |img|
   end
 end
 puts "Linked #{linked} new images into default set (#{default_set.image_set_items.count} total)"
+puts "Skipped #{skipped_unlinkable_coords} existing images with invalid coordinates" if skipped_unlinkable_coords.positive?
 
 # Demo users + sample games so the local dev leaderboard isn't empty.
 #
