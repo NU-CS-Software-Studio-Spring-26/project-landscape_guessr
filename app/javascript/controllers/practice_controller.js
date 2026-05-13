@@ -148,10 +148,11 @@ export default class extends Controller {
     if (!this.hasTimerTarget) return
 
     const safeSeconds = Math.max(0, this.remainingSeconds)
+    const urgent = safeSeconds <= 10
     this.timerTarget.textContent = `${Math.ceil(safeSeconds)}s`
-    this.timerTarget.classList.toggle("text-red-700", safeSeconds <= 10)
-    this.timerTarget.classList.toggle("border-red-300", safeSeconds <= 10)
-    this.timerTarget.classList.toggle("bg-red-50", safeSeconds <= 10)
+    this.timerTarget.classList.toggle("text-red-700", urgent)
+    this.timerTarget.classList.toggle("border-red-300", urgent)
+    this.timerTarget.classList.toggle("bg-red-50", urgent)
 
     if (this.hasTimerBarTarget) {
       const pct = this.#totalSeconds > 0 ? (safeSeconds / this.#totalSeconds) * 100 : 0
@@ -159,7 +160,15 @@ export default class extends Controller {
       // Hue 120 -> 0 yields green -> orange -> red continuously.
       const clampedRatio = Math.max(0, Math.min(1, pct / 100))
       const hue = clampedRatio * 120
-      this.timerBarTarget.style.backgroundColor = `hsl(${hue} 85% 45%)`
+      const liveColor = `hsl(${hue} 85% 45%)`
+      if (urgent) {
+        // Hard blink (no smooth interpolation): alternate between
+        // the live timer color and the default track color.
+        const blinkOn = Math.floor(performance.now() / 320) % 2 === 0
+        this.timerBarTarget.style.backgroundColor = blinkOn ? liveColor : "#fef3c7"
+      } else {
+        this.timerBarTarget.style.backgroundColor = liveColor
+      }
     }
   }
 
@@ -207,6 +216,9 @@ export default class extends Controller {
     if (this.#timerRaf) {
       window.cancelAnimationFrame(this.#timerRaf)
       this.#timerRaf = null
+    }
+    if (this.hasTimerBarTarget) {
+      this.timerBarTarget.style.backgroundColor = "hsl(120 85% 45%)"
     }
   }
 
