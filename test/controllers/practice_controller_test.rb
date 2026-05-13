@@ -36,6 +36,14 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
     assert_includes response.body, 'data-practice-time-limit-value="60"'
   end
 
+  test "practice reuses provided image when changing timer options" do
+    get practice_path(seconds: 30, image_id: @public_image.id)
+    assert_response :success
+    assert_includes response.body, "data-practice-image-id-value=\"#{@public_image.id}\""
+    assert_includes response.body, 'data-action="practice#setTimer"'
+    assert_includes response.body, 'data-practice-seconds-param="60"'
+  end
+
   test "check returns coords for system-default image when unauthenticated" do
     get practice_check_path, params: { image_id: @public_image.id, lat: 0, lng: 0 }, as: :json
     assert_response :success

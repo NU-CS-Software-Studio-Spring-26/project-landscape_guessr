@@ -39,6 +39,9 @@ class PracticeController < ApplicationController
 
   def load_random_located_image
     default_set = ImageSet.default
+    @image = current_image_from_params(default_set)
+    return if @image.present?
+
     # Practice mode shows a random image and asks for a guess, so the image
     # must have lat/lng — otherwise the "answer" is (0, 0) and every guess
     # scores arbitrarily. Filter at the DB level.
@@ -56,5 +59,15 @@ class PracticeController < ApplicationController
     return nil if seconds <= 0
 
     PRACTICE_TIMER_SECONDS.include?(seconds) ? seconds : 60
+  end
+
+  def current_image_from_params(default_set)
+    image_id = params[:image_id].to_i
+    return nil if image_id <= 0 || default_set.blank?
+
+    default_set.images
+               .where(id: image_id)
+               .where.not(latitude: nil, longitude: nil)
+               .first
   end
 end

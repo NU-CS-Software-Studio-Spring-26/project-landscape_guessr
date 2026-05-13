@@ -1,7 +1,7 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
-  static targets = ["guessBtn", "nextBtn", "result", "imageLink", "timer"]
+  static targets = ["guessBtn", "nextBtn", "result", "imageLink", "timer", "timerBar", "timerPanel", "timerOption"]
   static values = {
     imageId: Number,
     checkUrl: String,
@@ -9,7 +9,9 @@ export default class extends Controller {
   }
 
   #boundKeydown
-  #timerInterval
+  #timerRaf
+  #endsAtMs
+  #totalSeconds
 
   connect() {
     this.guessLat = null
@@ -18,6 +20,7 @@ export default class extends Controller {
     this.#boundKeydown = this.#handleKeydown.bind(this)
     document.addEventListener("keydown", this.#boundKeydown)
 
+    this.#syncTimerUi()
     if (this.timeLimitValue > 0) this.#startTimer()
   }
 
@@ -38,6 +41,15 @@ export default class extends Controller {
     if (this.submitted || this.guessLat === null) return
 
     await this.#resolveGuess({ timedOutWithoutPin: false })
+  }
+
+  setTimer(event) {
+    const seconds = parseInt(event.params.seconds, 10) || 0
+    this.timeLimitValue = seconds
+    this.#clearTimer()
+    this.#syncTimerUi()
+    this.#syncTimerInUrl()
+    if (!this.submitted && this.timeLimitValue > 0) this.#startTimer()
   }
 
   async #resolveGuess({ timedOutWithoutPin }) {
@@ -109,34 +121,92 @@ export default class extends Controller {
     if (!this.hasTimerTarget) return
 
     this.remainingSeconds = this.timeLimitValue > 0 ? this.timeLimitValue : 60
+    this.#totalSeconds = this.remainingSeconds
+    this.#endsAtMs = performance.now() + (this.#totalSeconds * 1000)
     this.#renderTimer()
 
-    this.#timerInterval = window.setInterval(() => {
+    const tick = () => {
       if (this.submitted) {
         this.#clearTimer()
         return
       }
 
-      this.remainingSeconds -= 1
+      const remainingMs = Math.max(0, this.#endsAtMs - performance.now())
+      this.remainingSeconds = remainingMs / 1000
       this.#renderTimer()
-      if (this.remainingSeconds <= 0) this.#handleTimeout()
-    }, 1000)
+      if (remainingMs <= 0) {
+        this.#handleTimeout()
+        return
+      }
+      this.#timerRaf = window.requestAnimationFrame(tick)
+    }
+
+    this.#timerRaf = window.requestAnimationFrame(tick)
   }
 
   #renderTimer() {
     if (!this.hasTimerTarget) return
 
     const safeSeconds = Math.max(0, this.remainingSeconds)
-    this.timerTarget.textContent = `${safeSeconds}s`
+    this.timerTarget.textContent = `${Math.ceil(safeSeconds)}s`
     this.timerTarget.classList.toggle("text-red-700", safeSeconds <= 10)
     this.timerTarget.classList.toggle("border-red-300", safeSeconds <= 10)
     this.timerTarget.classList.toggle("bg-red-50", safeSeconds <= 10)
+
+    if (this.hasTimerBarTarget) {
+      const pct = this.#totalSeconds > 0 ? (safeSeconds / this.#totalSeconds) * 100 : 0
+      this.timerBarTarget.style.width = `${Math.max(0, Math.min(100, pct))}%`
+      // Hue 120 -> 0 yields green -> orange -> red continuously.
+      const clampedRatio = Math.max(0, Math.min(1, pct / 100))
+      const hue = clampedRatio * 120
+      this.timerBarTarget.style.backgroundColor = `hsl(${hue} 85% 45%)`
+    }
+  }
+
+  #syncTimerUi() {
+    const timedOn = this.timeLimitValue > 0
+    if (this.hasTimerPanelTarget) {
+      this.timerPanelTarget.classList.toggle("hidden", !timedOn)
+    }
+
+    if (this.hasTimerTarget) {
+      this.timerTarget.textContent = `${timedOn ? this.timeLimitValue : 0}s`
+    }
+
+    if (this.hasTimerBarTarget) {
+      this.timerBarTarget.style.width = timedOn ? "100%" : "0%"
+      this.timerBarTarget.style.backgroundColor = "hsl(120 85% 45%)"
+    }
+
+    if (this.hasTimerOptionTarget) {
+      this.timerOptionTargets.forEach((option) => {
+        const optionSeconds = parseInt(option.dataset.practiceSecondsParam || "0", 10)
+        const active = optionSeconds === this.timeLimitValue
+        option.setAttribute("aria-pressed", active ? "true" : "false")
+        option.classList.toggle("bg-blue-100", active)
+        option.classList.toggle("text-blue-800", active)
+        option.classList.toggle("border-blue-300", active)
+        option.classList.toggle("shadow-sm", active)
+        option.classList.toggle("bg-white", !active)
+        option.classList.toggle("text-gray-700", !active)
+        option.classList.toggle("border-gray-300", !active)
+        option.classList.toggle("hover:bg-gray-50", !active)
+      })
+    }
+  }
+
+  #syncTimerInUrl() {
+    const url = new URL(window.location.href)
+    if (this.timeLimitValue > 0) url.searchParams.set("seconds", String(this.timeLimitValue))
+    else url.searchParams.delete("seconds")
+    url.searchParams.set("image_id", String(this.imageIdValue))
+    window.history.replaceState({}, "", url.toString())
   }
 
   #clearTimer() {
-    if (this.#timerInterval) {
-      window.clearInterval(this.#timerInterval)
-      this.#timerInterval = null
+    if (this.#timerRaf) {
+      window.cancelAnimationFrame(this.#timerRaf)
+      this.#timerRaf = null
     }
   }
 
@@ -145,7 +215,11 @@ export default class extends Controller {
     // and the MapTiler session stays the same across practice rounds.
     // `replace` keeps the back button sane — successive random images
     // shouldn't pile into history.
-    Turbo.visit(window.location.href, { action: "replace" })
+    const url = new URL(window.location.href)
+    // Keep timer settings but drop image pinning so "Next image" actually
+    // advances to a new random image.
+    url.searchParams.delete("image_id")
+    Turbo.visit(url.toString(), { action: "replace" })
   }
 
   #handleKeydown(event) {
