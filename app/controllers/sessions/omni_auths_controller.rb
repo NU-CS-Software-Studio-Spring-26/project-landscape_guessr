@@ -2,6 +2,7 @@ module Sessions
   class OmniAuthsController < ApplicationController
     allow_unauthenticated_access only: %i[ create failure ]
     skip_before_action :require_username_set, only: %i[ create failure ]
+    skip_before_action :require_email_verified
 
     def create
       auth = request.env["omniauth.auth"]

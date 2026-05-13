@@ -7,6 +7,22 @@ class User < ApplicationRecord
   has_many :image_sets, dependent: :destroy
   has_many :connected_services, dependent: :destroy
 
+  generates_token_for :email_verification, expires_in: 24.hours do
+    email_verified_at
+  end
+
+  def email_verified?
+    email_verified_at.present? || connected_services.any?
+  end
+
+  def email_verification_token
+    generate_token_for(:email_verification)
+  end
+
+  def self.find_by_email_verification_token(token)
+    find_by_token_for(:email_verification, token)
+  end
+
   normalizes :email_address, with: ->(e) { e.strip.downcase }
   normalizes :username, with: ->(u) { u.present? ? u.to_s.strip : nil }
 

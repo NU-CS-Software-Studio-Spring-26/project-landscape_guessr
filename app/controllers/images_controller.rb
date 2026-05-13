@@ -1,5 +1,6 @@
 class ImagesController < ApplicationController
   allow_unauthenticated_access only: %i[ index show map ]
+  skip_before_action :require_email_verified, only: %i[ index show map ]
   before_action :require_admin,    only: %i[ new create destroy ]
   before_action :set_image,        only: %i[ show edit update destroy ]
   before_action :require_editable, only: %i[ edit update ]

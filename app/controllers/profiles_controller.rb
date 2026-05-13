@@ -1,5 +1,6 @@
 class ProfilesController < ApplicationController
   skip_before_action :require_username_set, only: %i[ setup_username update_username ]
+  skip_before_action :require_email_verified
 
   def show
     @user = Current.user
