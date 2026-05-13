@@ -1,11 +1,12 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
-  static targets = ["guessBtn", "nextBtn", "result", "imageLink", "timer", "timerBar", "timerPanel", "timerOption"]
+  static targets = ["guessBtn", "nextBtn", "result", "imageLink", "timer", "timerBar", "timerPanel", "timerOption", "attemptsOption"]
   static values = {
     imageId: Number,
     checkUrl: String,
-    timeLimit: { type: Number, default: 0 }
+    timeLimit: { type: Number, default: 0 },
+    attempts: { type: Number, default: 1 }
   }
 
   #boundKeydown
@@ -16,12 +17,15 @@ export default class extends Controller {
   connect() {
     this.guessLat = null
     this.guessLng = null
-    this.submitted = false
+    this.completed = false
+    this.resolving = false
+    this.attemptIndex = 0
     this.#boundKeydown = this.#handleKeydown.bind(this)
     document.addEventListener("keydown", this.#boundKeydown)
 
     this.#syncTimerUi()
     if (this.timeLimitValue > 0) this.#startTimer()
+    this.#syncAttemptsUi()
   }
 
   disconnect() {
@@ -32,13 +36,13 @@ export default class extends Controller {
   pinChanged(event) {
     this.guessLat = event.detail.lat
     this.guessLng = event.detail.lng
-    if (this.submitted) return
+    if (this.completed || this.resolving) return
     this.guessBtnTarget.disabled = false
   }
 
   async submitGuess(event) {
     if (event?.preventDefault) event.preventDefault()
-    if (this.submitted || this.guessLat === null) return
+    if (this.completed || this.resolving || this.guessLat === null) return
 
     await this.#resolveGuess({ timedOutWithoutPin: false })
   }
@@ -48,13 +52,20 @@ export default class extends Controller {
     this.timeLimitValue = seconds
     this.#clearTimer()
     this.#syncTimerUi()
-    this.#syncTimerInUrl()
-    if (!this.submitted && this.timeLimitValue > 0) this.#startTimer()
+    this.#syncPracticeInUrl()
+    if (!this.completed && this.timeLimitValue > 0) this.#startTimer()
+  }
+
+  setAttempts(event) {
+    const attempts = parseInt(event.params.attempts, 10) || 1
+    this.attemptsValue = attempts === 2 ? 2 : 1
+    this.attemptIndex = 0
+    this.#syncAttemptsUi()
+    this.#syncPracticeInUrl()
   }
 
   async #resolveGuess({ timedOutWithoutPin }) {
-    this.submitted = true
-    this.#clearTimer()
+    this.resolving = true
     this.guessBtnTarget.disabled = true
 
     const url = `${this.checkUrlValue}?image_id=${this.imageIdValue}&lat=${this.guessLat}&lng=${this.guessLng}`
@@ -62,12 +73,30 @@ export default class extends Controller {
     if (!res.ok) {
       this.resultTarget.textContent = "Couldn't check guess. Try again."
       this.resultTarget.className = "text-lg font-medium text-red-600"
-      this.submitted = false
+      this.resolving = false
       this.guessBtnTarget.disabled = false
       if (this.timeLimitValue > 0) this.#startTimer()
       return
     }
     const { answer_lat, answer_lng, distance_km: km } = await res.json()
+
+    // In 2-attempt mode, first submit gives distance feedback only.
+    if (this.attemptsValue === 2 && this.attemptIndex === 0) {
+      let firstText = `Attempt 1: ${Math.round(km).toLocaleString()} km away. Adjust your pin and submit attempt 2.`
+      if (timedOutWithoutPin) firstText = `Attempt 1 timed out with no pin. ${firstText}`
+      this.resultTarget.textContent = firstText
+      this.resultTarget.className = "text-lg font-medium text-amber-700"
+      this.attemptIndex = 1
+      this.resolving = false
+      this.guessBtnTarget.disabled = false
+      this.#syncAttemptsUi()
+      if (this.timeLimitValue > 0) this.#startTimer()
+      return
+    }
+
+    this.completed = true
+    this.resolving = false
+    this.#clearTimer()
 
     const mapCtrl = this.application.getControllerForElementAndIdentifier(
       this.element.querySelector("[data-controller='guess-map']"),
@@ -103,7 +132,7 @@ export default class extends Controller {
   }
 
   async #handleTimeout() {
-    if (this.submitted) return
+    if (this.completed || this.resolving) return
 
     if (this.guessLat === null || this.guessLng === null) {
       // Timer fallback when no pin was placed.
@@ -126,7 +155,7 @@ export default class extends Controller {
     this.#renderTimer()
 
     const tick = () => {
-      if (this.submitted) {
+      if (this.completed || this.resolving) {
         this.#clearTimer()
         return
       }
@@ -204,10 +233,34 @@ export default class extends Controller {
     }
   }
 
-  #syncTimerInUrl() {
+  #syncAttemptsUi() {
+    if (this.hasAttemptsOptionTarget) {
+      this.attemptsOptionTargets.forEach((option) => {
+        const optionAttempts = parseInt(option.dataset.practiceAttemptsParam || "1", 10)
+        const active = optionAttempts === this.attemptsValue
+        option.setAttribute("aria-pressed", active ? "true" : "false")
+        option.classList.toggle("bg-blue-100", active)
+        option.classList.toggle("text-blue-800", active)
+        option.classList.toggle("border-blue-300", active)
+        option.classList.toggle("shadow-sm", active)
+        option.classList.toggle("bg-white", !active)
+        option.classList.toggle("text-gray-700", !active)
+        option.classList.toggle("border-gray-300", !active)
+        option.classList.toggle("hover:bg-gray-50", !active)
+      })
+    }
+
+    if (!this.hasGuessBtnTarget || this.completed) return
+    this.guessBtnTarget.textContent = this.attemptsValue === 2 && this.attemptIndex === 1 ? "Submit final attempt" :
+      (this.attemptsValue === 2 ? "Submit first attempt" : "Submit guess")
+  }
+
+  #syncPracticeInUrl() {
     const url = new URL(window.location.href)
     if (this.timeLimitValue > 0) url.searchParams.set("seconds", String(this.timeLimitValue))
     else url.searchParams.delete("seconds")
+    if (this.attemptsValue > 1) url.searchParams.set("attempts", String(this.attemptsValue))
+    else url.searchParams.delete("attempts")
     url.searchParams.set("image_id", String(this.imageIdValue))
     window.history.replaceState({}, "", url.toString())
   }

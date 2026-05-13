@@ -1,11 +1,13 @@
 class PracticeController < ApplicationController
   PRACTICE_TIMER_SECONDS = [ 30, 60, 120 ].freeze
+  PRACTICE_ATTEMPTS = [ 1, 2 ].freeze
 
   allow_unauthenticated_access only: %i[ show check ]
   skip_before_action :require_email_verified
 
   def show
     @time_limit_seconds = practice_seconds_param
+    @attempts = practice_attempts_param
     load_random_located_image
   end
 
@@ -59,6 +61,11 @@ class PracticeController < ApplicationController
     return nil if seconds <= 0
 
     PRACTICE_TIMER_SECONDS.include?(seconds) ? seconds : 60
+  end
+
+  def practice_attempts_param
+    attempts = params[:attempts].to_i
+    PRACTICE_ATTEMPTS.include?(attempts) ? attempts : 1
   end
 
   def current_image_from_params(default_set)
