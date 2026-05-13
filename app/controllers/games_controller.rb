@@ -158,6 +158,9 @@ class GamesController < ApplicationController
     @total_distance_km = @rounds.sum { |r| r[:distance_km] }
     @score = @rounds.sum { |r| r[:round_score] }
     @total_rounds = TOTAL_ROUNDS
+    @previous_best_score = Current.user.games.where.not(completed_at: nil).where.not(id: @game.id).maximum(:score)
+    @new_personal_best = @previous_best_score.nil? || @score > @previous_best_score
+    @personal_best_delta = @score - (@previous_best_score || 0)
 
     @map_rounds = @rounds.map do |r|
       {
