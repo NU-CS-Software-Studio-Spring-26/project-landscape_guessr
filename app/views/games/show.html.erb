@@ -72,20 +72,35 @@
       </div>
       <div class="space-y-3">
         <%= render "shared/guess_map", style: @game.image_set&.map_style || "outdoor-v2" %>
-        <%= form_with url: guesses_path, local: true, class: "flex items-center gap-2" do |f| %>
+        <%= form_with url: guesses_path, local: true, class: "space-y-2" do |f| %>
           <%= hidden_field_tag "guess[game_id]", @game.id %>
           <%= hidden_field_tag "guess[image_id]", @image.id %>
           <%= hidden_field_tag "guess[latitude]", "", data: { game_target: "latitude" } %>
           <%= hidden_field_tag "guess[longitude]", "", data: { game_target: "longitude" } %>
-          <span data-game-target="readout" class="text-sm text-gray-600">Click the map to drop a pin.</span>
-          <p data-game-target="result" class="text-lg font-medium"></p>
-          <p data-game-target="otherGuesses" class="hidden text-xs text-gray-500"></p>
-          <%= submit_tag "Submit guess", data: { game_target: "submit", action: "game#submitGuess" }, disabled: true,
-              class: "btn-primary ml-auto disabled:opacity-40" %>
-          <button type="button" data-game-target="next" data-action="game#nextRound"
-                  class="btn-primary hidden ml-auto">
-            Next round
-          </button>
+          <div class="flex flex-wrap items-center gap-3">
+            <label class="text-sm text-gray-600">
+              Round timer
+              <select data-game-target="timerSelect"
+                      data-action="change->game#timerChanged"
+                      class="ml-2 rounded-md border border-gray-300 px-2 py-1 text-sm">
+                <option value="0">Off</option>
+                <option value="30">30s</option>
+                <option value="60">60s</option>
+              </select>
+            </label>
+            <span data-game-target="timer" class="text-sm text-gray-500">Timer off</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span data-game-target="readout" class="text-sm text-gray-600">Click the map to drop a pin.</span>
+            <p data-game-target="result" class="text-lg font-medium"></p>
+            <p data-game-target="otherGuesses" class="hidden text-xs text-gray-500"></p>
+            <%= submit_tag "Submit guess", data: { game_target: "submit", action: "game#submitGuess" }, disabled: true,
+                class: "btn-primary ml-auto disabled:opacity-40" %>
+            <button type="button" data-game-target="next" data-action="game#nextRound"
+                    class="btn-primary hidden ml-auto">
+              Next round
+            </button>
+          </div>
         <% end %>
       </div>
 

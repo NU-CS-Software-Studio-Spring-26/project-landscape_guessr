@@ -12,9 +12,34 @@
      data-action="guess-map:pinned->practice#pinChanged"
      data-practice-image-id-value="<%= @image.id %>"
      data-practice-check-url-value="<%= practice_check_path %>"
+     data-practice-time-limit-value="<%= @time_limit_seconds.to_i %>"
      class="w-full space-y-6">
 
-  <h1 class="heading-page">Where is this?</h1>
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <h1 class="heading-page">Where is this?</h1>
+    <div class="flex items-center gap-2 text-xs text-gray-500">
+      <span>Timer:</span>
+      <%= link_to "Off", practice_path,
+            class: (@time_limit_seconds.nil? ? "underline font-semibold text-forest-700" : "underline hover:text-blue-600") %>
+      <% [30, 60, 120].each do |seconds| %>
+        <%= link_to "#{seconds}s", practice_path(seconds: seconds),
+              class: (@time_limit_seconds == seconds ? "underline font-semibold text-forest-700" : "underline hover:text-blue-600") %>
+      <% end %>
+    </div>
+  </div>
+
+  <% if @time_limit_seconds.present? %>
+    <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+      <p class="text-sm text-amber-900">Drop a pin before time runs out. If time expires, your guess auto-submits.</p>
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-amber-800">Time left</span>
+        <span data-practice-target="timer"
+              class="inline-flex min-w-14 justify-center rounded bg-white px-2.5 py-1 text-sm font-semibold text-amber-800 border border-amber-200">
+          <%= @time_limit_seconds %>s
+        </span>
+      </div>
+    </div>
+  <% end %>
 
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
     <%# Same scroll-zoom + inline-replace-with-original as /games/:id. %>
