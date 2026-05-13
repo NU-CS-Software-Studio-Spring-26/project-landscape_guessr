@@ -86,6 +86,7 @@ class ImageSet < ApplicationRecord
       orphan_ids = Image.where(id: chunk)
                         .where.missing(:image_set_items)
                         .where.missing(:game_images)
+                        .where.missing(:challenge_images)
                         .where.missing(:guesses)
                         .pluck(:id)
       next if orphan_ids.empty?

@@ -174,6 +174,24 @@ class ProfilesControllerTest < ActionDispatch::IntegrationTest
            "image shared with another user's set must survive deletion"
   end
 
+  test "destroy preserves images referenced by another user's challenge" do
+    # Bob builds a challenge that snapshots alice_only via challenge_images.
+    # Alice's image_set sweep must not destroy the image while Bob's
+    # challenge still references it.
+    bob_challenge = Challenge.create!(challenger: @bob, image_set: image_sets(:default))
+    ChallengeImage.create!(challenge: bob_challenge, image: images(:alice_only), position: 1)
+    shared_id = images(:alice_only).id
+
+    sign_in_as @alice
+    delete profile_url, params: {
+      confirm_email: @alice.email_address,
+      current_password: "password123"
+    }
+
+    assert Image.exists?(shared_id),
+           "image referenced by another user's challenge must survive deletion"
+  end
+
   test "destroy preserves another user's games on the deleted user's public set, nullifying image_set_id" do
     alice_public = image_sets(:alice_public)
     bob_game = Game.create!(user: @bob, image_set: alice_public, status: "completed",
