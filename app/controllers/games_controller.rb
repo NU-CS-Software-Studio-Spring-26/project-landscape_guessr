@@ -174,28 +174,6 @@ class GamesController < ApplicationController
     if @game.status != "completed"
       @game.update!(status: "completed", score: @score, completed_at: Time.current)
     end
-
-    if @game.challenge
-      @challenge_games = @game.challenge.games
-                              .where.not(completed_at: nil)
-                              .includes(:user)
-                              .order(score: :desc)
-
-      other_games = @game.challenge.games
-                         .where.not(id: @game.id)
-                         .where.not(completed_at: nil)
-                         .includes(:user, :guesses, :game_images)
-
-      @challenge_players = other_games.map do |g|
-        pos_by_img = g.game_images.each_with_object({}) { |gi, h| h[gi.image_id] = gi.position }
-        rounds = g.guesses.order(:created_at).filter_map do |guess|
-          pos = pos_by_img[guess.image_id]
-          next unless pos
-          { round: pos, guess_lat: guess.latitude.to_f, guess_lng: guess.longitude.to_f }
-        end
-        { username: g.user.username, rounds: rounds }
-      end
-    end
   end
 
   private

@@ -1,7 +1,7 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
-  static targets = ["latitude", "longitude", "readout", "submit", "next", "result", "otherGuesses"]
+  static targets = ["latitude", "longitude", "readout", "submit", "next", "result"]
   static values = { gamePath: String }
 
   connect() {
@@ -89,11 +89,6 @@ export default class extends Controller {
     this.resultTarget.textContent = text
     this.resultTarget.className = `text-lg font-medium ${color}`
     this.readoutTarget.classList.add("hidden")
-
-    if (data.other_guesses?.length) {
-      mapCtrl.showOtherGuesses(data.other_guesses, answerLat, answerLng)
-      this.#renderOtherGuesses(data.other_guesses, answerLat, answerLng)
-    }
   }
 
   nextRound() {
@@ -114,16 +109,6 @@ export default class extends Controller {
     } else if (!this.nextTarget.classList.contains("hidden")) {
       this.nextRound()
     }
-  }
-
-  #renderOtherGuesses(guesses, answerLat, answerLng) {
-    if (!this.hasOtherGuessesTarget) return
-    const items = guesses.map(g => {
-      const km = this.#haversine(parseFloat(g.latitude), parseFloat(g.longitude), answerLat, answerLng)
-      return `<span><strong>${g.username}</strong> ${this.#formatDistance(km)}</span>`
-    })
-    this.otherGuessesTarget.innerHTML = items.join(" &middot; ")
-    this.otherGuessesTarget.classList.remove("hidden")
   }
 
   // Mirrors GamesHelper#format_distance_compact so sub-km guesses

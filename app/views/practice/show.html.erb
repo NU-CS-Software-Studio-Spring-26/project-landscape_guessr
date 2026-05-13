@@ -37,7 +37,6 @@
                   data-zoomable-target="originalButton"
                   data-action="zoomable#loadOriginal"
                   data-zoomable-url-param="<%= image_src(@image) %>"
-                  aria-label="Load full quality version of the current image"
                   class="hidden text-gray-500 hover:text-blue-600 underline-offset-2 hover:underline cursor-pointer">
             load full quality
           </button>
@@ -68,7 +67,6 @@
 
     <%= link_to "View image details", @image,
           target: "_blank",
-          aria: { label: "View image details (opens in a new tab)" },
           data: { practice_target: "imageLink" },
           class: "hidden text-blue-600 hover:underline font-medium" %>
   </div>

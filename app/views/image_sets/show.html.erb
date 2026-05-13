@@ -45,7 +45,7 @@
       <% @items.each do |item| %>
         <%= link_to item.image,
               class: "block rounded-md overflow-hidden border border-gray-200 hover:border-blue-300 transition" do %>
-          <img src="<%= image_src(item.image, width: 400) %>" alt="<%= item.title.presence || 'Landscape image' %>"
+          <img src="<%= image_src(item.image, width: 400) %>" alt="<%= item.title %>"
                loading="lazy" decoding="async"
                class="w-full h-32 object-cover">
           <div class="px-2 py-1.5 bg-white">

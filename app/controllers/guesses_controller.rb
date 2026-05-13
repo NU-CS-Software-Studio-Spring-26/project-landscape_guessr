@@ -35,7 +35,7 @@ class GuessesController < ApplicationController
 
     respond_to do |format|
       if @guess.save
-        @guess = @guess.game.guesses.includes(:image, game: [ :game_images, :challenge ]).find(@guess.id)
+        @guess = @guess.game.guesses.includes(:image, game: :game_images).find(@guess.id)
         format.html { redirect_to game_path(@guess.game_id), notice: "Guess recorded." }
         format.json { render :show, status: :created, location: @guess }
       else

@@ -1,5 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
-import { MAPTILER_KEY, ensureMaptilerSdk, hideOutdoorTrails, escapeText } from "lib/maptiler"
+import { MAPTILER_KEY, ensureMaptilerSdk, hideOutdoorTrails } from "lib/maptiler"
 
 export default class extends Controller {
   static targets = ["container"]
@@ -24,7 +24,6 @@ export default class extends Controller {
     this.map.on("load", () => hideOutdoorTrails(this.map))
 
     this.marker = null
-    this.otherGuessLayers = []
 
     this.map.on("click", (e) => {
       if (this.locked) return
@@ -87,50 +86,6 @@ export default class extends Controller {
     }
   }
 
-  showOtherGuesses(guesses, answerLat, answerLng) {
-    if (!guesses.length) return
-
-    const colors = ["#3b82f6", "#f59e0b", "#a855f7", "#14b8a6", "#f97316"]
-    const bounds = new maptilersdk.LngLatBounds()
-      .extend([answerLng, answerLat])
-
-    if (this.marker) {
-      const p = this.marker.getLngLat()
-      bounds.extend([p.lng, p.lat])
-    }
-
-    guesses.forEach((g, i) => {
-      const color = colors[i % colors.length]
-      const lat = parseFloat(g.latitude)
-      const lng = parseFloat(g.longitude)
-
-      new maptilersdk.Marker({ color, scale: 0.8 })
-        .setLngLat([lng, lat])
-        .setPopup(new maptilersdk.Popup({ offset: 8 }).setHTML(
-          `<div class="text-xs font-medium">${escapeText(g.username)}'s guess</div>`
-        ))
-        .addTo(this.map)
-
-      const lineId = `other-guess-${i}`
-      this.map.addSource(lineId, {
-        type: "geojson",
-        data: {
-          type: "Feature",
-          geometry: { type: "LineString", coordinates: [[lng, lat], [answerLng, answerLat]] }
-        }
-      })
-      this.map.addLayer({
-        id: lineId, type: "line", source: lineId,
-        paint: { "line-color": color, "line-width": 2, "line-dasharray": [3, 4] }
-      })
-
-      this.otherGuessLayers.push(lineId)
-      bounds.extend([lng, lat])
-    })
-
-    this.map.fitBounds(bounds, { padding: 80 })
-  }
-
   reset() {
     this.locked = false
     if (this.marker) {
@@ -141,11 +96,6 @@ export default class extends Controller {
       this.map.removeLayer("answer-line")
       this.map.removeSource("answer-line")
     }
-    this.otherGuessLayers.forEach(id => {
-      if (this.map.getLayer(id)) this.map.removeLayer(id)
-      if (this.map.getSource(id)) this.map.removeSource(id)
-    })
-    this.otherGuessLayers = []
     this.map.getCanvasContainer().querySelectorAll(".maplibregl-marker").forEach((el) => {
       if (el !== this.marker?._element) el.remove()
     })

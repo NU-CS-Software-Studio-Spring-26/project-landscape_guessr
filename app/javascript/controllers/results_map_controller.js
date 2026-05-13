@@ -9,9 +9,8 @@ const COLORS = [
 export default class extends Controller {
   static targets = ["container"]
   static values  = {
-    rounds:  { type: Array,  default: [] },
-    style:   { type: String, default: "outdoor-v2" },
-    players: { type: Array,  default: [] }
+    rounds: { type: Array,  default: [] },
+    style:  { type: String, default: "outdoor-v2" }
   }
 
   async connect() {
@@ -94,49 +93,7 @@ export default class extends Controller {
       bounds.extend([r.answer_lng, r.answer_lat])
     })
 
-    this.#renderOtherPlayers(bounds)
     this.map.fitBounds(bounds, { padding: 60, maxZoom: 8 })
-  }
-
-  #renderOtherPlayers(bounds) {
-    const players = this.playersValue
-    if (!players.length) return
-
-    const playerColors = ["#3b82f6", "#f59e0b", "#a855f7", "#14b8a6", "#f97316", "#ec4899"]
-
-    players.forEach((player, pi) => {
-      const color = playerColors[pi % playerColors.length]
-
-      player.rounds.forEach((pr) => {
-        const myRound = this.roundsValue.find(r => r.round === pr.round)
-        if (!myRound) return
-
-        new maptilersdk.Marker({ color, scale: 0.8 })
-          .setLngLat([pr.guess_lng, pr.guess_lat])
-          .setPopup(new maptilersdk.Popup({ offset: 8 }).setHTML(
-            `<div class="text-xs font-medium">${escapeText(player.username)} — Round ${pr.round}</div>`
-          ))
-          .addTo(this.map)
-
-        const lineId = `player-${pi}-r${pr.round}`
-        this.map.addSource(lineId, {
-          type: "geojson",
-          data: {
-            type: "Feature",
-            geometry: {
-              type: "LineString",
-              coordinates: [[pr.guess_lng, pr.guess_lat], [myRound.answer_lng, myRound.answer_lat]]
-            }
-          }
-        })
-        this.map.addLayer({
-          id: lineId, type: "line", source: lineId,
-          paint: { "line-color": color, "line-width": 2, "line-dasharray": [3, 4] }
-        })
-
-        bounds.extend([pr.guess_lng, pr.guess_lat])
-      })
-    })
   }
 
   // Smooth-pan to a single round's guess+answer pair. Wired up from
