@@ -5,7 +5,7 @@ Rails.application.routes.draw do
   resources :passwords, param: :token, only: %i[ new create edit update ]
   resource :registration, only: %i[ new create ]
   resource :email_verification, only: %i[ show create ]
-  resource :profile, only: :show do
+  resource :profile, only: %i[ show destroy ] do
     get   :setup_username
     patch :setup_username, action: :update_username
   end

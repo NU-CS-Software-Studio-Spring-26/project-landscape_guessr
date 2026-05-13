@@ -112,7 +112,7 @@ The `Image.visible_to(user)` scope (in `app/models/image.rb`) is the canonical w
 | `/registration/new`, `/session/new`, `/passwords/new` | Sign up, sign in, password reset |
 | `/auth/google_oauth2`, `/auth/google_oauth2/callback` | OAuth sign-in entry + callback |
 | `/profile/setup_username` | Where OAuth-created users pick a username before they can do anything else |
-| `/profile` | Current user's profile |
+| `/profile` | Current user's profile (also exposes account deletion — `DELETE /profile`) |
 | `/games` | Paginated list of your games (filter by status, sort by date or score) |
 | `/games/:id` | Play the next round of an in-progress game |
 | `/games/:id/results` | Per-round breakdown + summary map after game finishes |

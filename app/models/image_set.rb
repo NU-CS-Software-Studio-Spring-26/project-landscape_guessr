@@ -27,7 +27,11 @@ class ImageSet < ApplicationRecord
   validate :system_default_has_no_user
   validate :only_one_system_default, if: :is_system_default?
 
-  before_destroy :capture_member_image_ids
+  # `prepend: true` so this runs BEFORE the `dependent: :delete_all` on
+  # image_set_items (declared above) — dependent destroy strategies are
+  # before_destroy callbacks added at class-load time in declaration
+  # order, so without prepend our snapshot would see an empty join table.
+  before_destroy :capture_member_image_ids, prepend: true
   after_destroy  :sweep_orphan_images
 
   scope :public_catalog, -> { where(visibility: "public") }
