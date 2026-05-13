@@ -13,10 +13,12 @@ export default class extends Controller {
     this.#boundClick = this.#handleClick.bind(this)
     this.#boundSubmit = this.#handleSubmit.bind(this)
     this.#boundBeforeVisit = this.#handleBeforeVisit.bind(this)
+    this.#boundBeforeUnload = this.#handleBeforeUnload.bind(this)
     document.addEventListener("keydown", this.#boundKeydown)
     document.addEventListener("click", this.#boundClick, true)
     document.addEventListener("submit", this.#boundSubmit, true)
     document.addEventListener("turbo:before-visit", this.#boundBeforeVisit)
+    window.addEventListener("beforeunload", this.#boundBeforeUnload)
   }
 
   disconnect() {
@@ -24,6 +26,7 @@ export default class extends Controller {
     document.removeEventListener("click", this.#boundClick, true)
     document.removeEventListener("submit", this.#boundSubmit, true)
     document.removeEventListener("turbo:before-visit", this.#boundBeforeVisit)
+    window.removeEventListener("beforeunload", this.#boundBeforeUnload)
     document.body.classList.remove("overflow-hidden")
   }
 
@@ -119,6 +122,7 @@ export default class extends Controller {
   #boundClick
   #boundSubmit
   #boundBeforeVisit
+  #boundBeforeUnload
   #pendingNavigation
   #isBypassingGuard
 
@@ -184,6 +188,14 @@ export default class extends Controller {
       this.#isBypassingGuard = true
       Turbo.visit(destinationUrl)
     })
+  }
+
+  #handleBeforeUnload(event) {
+    if (this.#isBypassingGuard) return
+
+    event.preventDefault()
+    // Required for browser-native "Leave site?" warning.
+    event.returnValue = ""
   }
 
   #handleClick(event) {
