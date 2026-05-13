@@ -1,0 +1,49 @@
+<% content_for :title, "How scoring works" %>
+
+<div class="w-full max-w-3xl mx-auto space-y-8 py-6">
+  <header class="space-y-2">
+    <h1 class="heading-page">How scoring works</h1>
+    <p class="muted">
+      Each round is scored from 0 to <%= number_with_delimiter(Game::GEOGUESSR_MAX_ROUND_SCORE) %> points based on
+      how close your guess is to the real location.
+    </p>
+  </header>
+
+  <section class="rounded-xl border border-gray-200 bg-gray-50 px-5 py-4 space-y-2">
+    <h2 class="heading-section">Round score formula</h2>
+    <p class="text-sm text-gray-700">
+      We use this formula per round:
+    </p>
+    <p class="font-mono text-sm bg-white border border-gray-200 rounded-md px-3 py-2">
+      round_score = round(5000 * e^(-distance_km / 1492.7))
+    </p>
+    <p class="text-sm text-gray-600">
+      Your final game score is the sum of all round scores.
+    </p>
+  </section>
+
+  <section class="space-y-3">
+    <h2 class="heading-section">What this means in practice</h2>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <%= render "shared/stat_card", label: "Perfect guess", value: "5,000 pts", accent: :blue %>
+      <%= render "shared/stat_card", label: "Very close", value: "~4,000+ pts" %>
+      <%= render "shared/stat_card", label: "Same region", value: "~1,500-3,500 pts" %>
+      <%= render "shared/stat_card", label: "Far away", value: "< 1,500 pts" %>
+    </div>
+    <p class="text-sm text-gray-600">
+      The closer you are, the faster points increase. Small improvements on close guesses matter a lot.
+    </p>
+  </section>
+
+  <section class="space-y-2">
+    <h2 class="heading-section">Distance calculation</h2>
+    <p class="text-sm text-gray-700">
+      Distance is measured in kilometers using great-circle distance (Haversine formula), which follows the curvature
+      of the Earth.
+    </p>
+  </section>
+
+  <div class="pt-2">
+    <%= link_to "Back to home page", root_path, class: "btn-secondary" %>
+  </div>
+</div>
