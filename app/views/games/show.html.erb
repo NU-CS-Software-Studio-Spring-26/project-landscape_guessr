@@ -48,7 +48,7 @@
           <img src="<%= image_src(@image, width: Image::ZOOM_CAP_WIDTH) %>" alt="Guess this location"
                class="max-w-full max-h-full object-contain">
         </div>
-        <div class="flex items-center justify-between gap-2 text-xs text-gray-400">
+        <div class="flex items-center justify-between gap-2 text-xs text-gray-500">
           <span>scroll to zoom · drag to pan · double-click to reset</span>
           <%# Inline-replace the displayed photo with the unmodified
               original (often 8000+ px). Stays on the page so the player
@@ -63,6 +63,7 @@
                     data-zoomable-target="originalButton"
                     data-action="zoomable#loadOriginal"
                     data-zoomable-url-param="<%= image_src(@image) %>"
+                    aria-label="Load full quality version of the current image"
                     class="hidden text-gray-500 hover:text-blue-600 underline-offset-2 hover:underline cursor-pointer">
               load full quality
             </button>
@@ -78,6 +79,7 @@
           <%= hidden_field_tag "guess[longitude]", "", data: { game_target: "longitude" } %>
           <span data-game-target="readout" class="text-sm text-gray-600">Click the map to drop a pin.</span>
           <p data-game-target="result" class="text-lg font-medium"></p>
+          <p data-game-target="otherGuesses" class="hidden text-xs text-gray-500"></p>
           <%= submit_tag "Submit guess", data: { game_target: "submit", action: "game#submitGuess" }, disabled: true,
               class: "btn-primary ml-auto disabled:opacity-40" %>
           <button type="button" data-game-target="next" data-action="game#nextRound"

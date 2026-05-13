@@ -6,7 +6,8 @@
 <div class="w-full max-w-2xl mx-auto space-y-6 py-6"
      data-controller="results-map"
      data-results-map-style-value="<%= @game.image_set&.map_style || 'outdoor-v2' %>"
-     data-results-map-rounds-value="<%= @map_rounds.to_json %>">
+     data-results-map-rounds-value="<%= @map_rounds.to_json %>"
+     data-results-map-players-value="<%= (@challenge_players || []).to_json %>">
 
   <%# Header %>
   <div class="text-center space-y-1">
@@ -28,12 +29,12 @@
   <div class="rounded-xl border border-gray-200 overflow-hidden">
     <div class="px-4 py-2.5 border-b border-gray-200 bg-gray-50 flex items-center gap-2">
       <span class="eyebrow text-gray-600">Map</span>
-      <span class="text-xs text-gray-400">&mdash;</span>
+      <span class="text-xs text-gray-500">&mdash;</span>
       <span class="flex items-center gap-1 text-xs text-gray-500">
         <span class="inline-block w-2.5 h-2.5 rounded-full bg-red-400"></span> your guess
         <span class="ml-2 inline-block w-2.5 h-2.5 rounded-full bg-green-500"></span> actual location
       </span>
-      <span class="ml-auto text-xs text-gray-400">click any round below to focus</span>
+      <span class="ml-auto text-xs text-gray-500">click any round below to focus</span>
     </div>
     <div data-results-map-target="container" class="w-full h-72"></div>
   </div>
@@ -59,21 +60,21 @@
            class="rounded-lg border border-gray-200 hover:border-blue-300 transition cursor-pointer px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
         <% thumb = image_src(row[:guess].image, width: 200) %>
         <% if thumb %>
-          <img src="<%= thumb %>" alt="<%= row[:guess].image.title %>"
+          <img src="<%= thumb %>" alt="<%= row[:guess].image.title.presence || 'Landscape image' %>"
                loading="lazy"
                class="shrink-0 w-full sm:w-24 h-20 sm:h-16 object-cover rounded-md border border-gray-100">
         <% end %>
         <div class="flex-1 min-w-0">
-          <span class="eyebrow text-gray-400">Round <%= idx + 1 %></span>
+          <span class="eyebrow text-gray-500">Round <%= idx + 1 %></span>
           <p class="font-medium text-gray-800 truncate"><%= row[:guess].image.title %></p>
         </div>
         <div class="flex gap-4 sm:text-right shrink-0">
           <div>
-            <p class="text-xs text-gray-400">Score</p>
+            <p class="text-xs text-gray-500">Score</p>
             <p class="font-semibold text-blue-600"><%= number_with_delimiter(row[:round_score]) %></p>
           </div>
           <div>
-            <p class="text-xs text-gray-400">Distance</p>
+            <p class="text-xs text-gray-500">Distance</p>
             <p class="font-medium text-gray-600"><%= format_distance_compact(row[:distance_km]) %></p>
           </div>
         </div>
@@ -81,19 +82,43 @@
             this page." The row's #focus action ignores clicks on
             <a>/<button> targets, so this link doesn't also trigger pan. %>
         <%= link_to "Details ↗", row[:guess].image,
-              class: "shrink-0 self-end sm:self-auto px-2 py-1.5 text-xs text-gray-400 hover:text-blue-600 hover:underline underline-offset-2" %>
+              class: "shrink-0 self-end sm:self-auto px-2 py-1.5 text-xs text-gray-500 hover:text-blue-600 hover:underline underline-offset-2" %>
       </div>
     <% end %>
   </div>
 
+  <%# Challenge leaderboard %>
+  <% if @challenge_games&.any? %>
+    <section class="space-y-3">
+      <h2 class="heading-section">Challenge leaderboard</h2>
+      <div class="divide-y divide-gray-100 border border-gray-200 rounded-lg overflow-hidden">
+        <% @challenge_games.each_with_index do |g, idx| %>
+          <div class="flex items-center gap-4 px-4 py-3 bg-white <%= g.id == @game.id ? 'bg-blue-50' : '' %>">
+            <span class="text-sm font-medium text-gray-400 w-5 text-right"><%= idx + 1 %></span>
+            <span class="flex-1 font-medium text-gray-800">
+              <%= g.user.username %>
+              <% if g.id == @game.id %><span class="text-xs text-blue-500 ml-1">you</span><% end %>
+            </span>
+            <span class="font-semibold text-blue-600"><%= number_with_delimiter(g.score.to_i) %></span>
+          </div>
+        <% end %>
+      </div>
+      <%= link_to "View challenge", @game.challenge, class: "text-sm text-blue-600 hover:underline" %>
+    </section>
+  <% end %>
+
   <%# Action buttons %>
-  <div class="flex gap-3 pt-2">
+  <div class="flex gap-3 pt-2 flex-wrap">
     <%= button_to "Play Again", games_path, method: :post,
           params: { image_set_id: @game.image_set_id },
           class: "btn-primary flex-1" %>
     <%= link_to "Leaderboard", leaderboard_games_path(image_set_id: @game.image_set_id),
           class: "btn-secondary flex-1" %>
-    <%= link_to "Back to Games", games_path, class: "btn-secondary flex-1" %>
+    <% if @game.challenge %>
+      <%= link_to "View challenge", @game.challenge, class: "btn-secondary flex-1" %>
+    <% else %>
+      <%= link_to "Back to Games", games_path, class: "btn-secondary flex-1" %>
+    <% end %>
   </div>
 
 </div>

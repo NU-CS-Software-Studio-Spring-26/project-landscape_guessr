@@ -2,12 +2,12 @@
     anywhere on the card to dive into the image's detail page. %>
 <%= link_to image, id: dom_id(image),
       class: "block rounded-md overflow-hidden border border-gray-200 hover:border-blue-300 transition" do %>
-  <img src="<%= image_src(image, width: 400) %>" alt="<%= image.title %>"
+  <img src="<%= image_src(image, width: 400) %>" alt="<%= image.title.presence || 'Landscape image' %>"
        loading="lazy" decoding="async"
        class="w-full h-32 object-cover">
   <div class="px-2 py-1.5 bg-white">
     <p class="text-xs font-medium text-gray-800 truncate"><%= image.title %></p>
-    <p class="text-xs text-gray-400">
+    <p class="text-xs text-gray-500">
       <% if image.latitude && image.longitude %>
         <%= image.latitude.to_f.round(3) %>, <%= image.longitude.to_f.round(3) %>
       <% else %>

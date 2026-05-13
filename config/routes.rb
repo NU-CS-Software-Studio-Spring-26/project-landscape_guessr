@@ -1,5 +1,7 @@
 Rails.application.routes.draw do
   root "home#start"
+  get "/about", to: "home#about"
+  get "/legal", to: "home#legal"
 
   resource :session, only: %i[ new create destroy ]
   resources :passwords, param: :token, only: %i[ new create edit update ]
@@ -12,6 +14,10 @@ Rails.application.routes.draw do
 
   get "/auth/:provider/callback", to: "sessions/omni_auths#create", as: :omniauth_callback
   get "/auth/failure",            to: "sessions/omni_auths#failure"
+
+  resources :challenges, param: :token, only: [ :index, :new, :create, :show, :destroy ] do
+    member { post :play }
+  end
 
   resources :guesses
   resources :games do

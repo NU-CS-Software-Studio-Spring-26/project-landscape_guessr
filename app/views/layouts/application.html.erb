@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <title><%= content_for(:title) || "Project Landscape Guessr" %></title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -24,12 +24,13 @@
   </head>
 
   <body>
-    <nav class="container mx-auto px-5 pt-5 flex justify-between items-center text-sm">
+    <nav aria-label="Primary" class="container mx-auto px-5 pt-5 flex justify-between items-center text-sm">
       <div class="flex items-center gap-5">
         <%= link_to "Landscape Guessr", root_path, class: "font-bold" %>
         <% if authenticated? %>
           <%= link_to "Games", games_path, class: "text-gray-700 hover:text-blue-600 font-medium" %>
           <%= link_to "Image Sets", image_sets_path, class: "text-gray-700 hover:text-blue-600 font-medium" %>
+          <%= link_to "Challenges", challenges_path, class: "text-gray-700 hover:text-blue-600 font-medium" %>
         <% end %>
       </div>
       <div class="flex items-center gap-3">
@@ -47,7 +48,7 @@
       </div>
     </nav>
 
-    <main class="container mx-auto mt-20 px-5">
+    <main aria-label="Main content" class="container mx-auto mt-20 px-5">
       <% if notice = flash[:notice] %>
         <p class="py-2 px-3 mb-5 bg-green-50 text-green-600 font-medium rounded-md mx-auto md:w-2/3 w-full" id="notice"><%= notice %></p>
       <% end %>
@@ -70,9 +71,13 @@
       <%= yield %>
     </main>
 
-    <footer class="container mx-auto px-5 py-8 mt-12 border-t border-gray-200 text-xs text-gray-500 flex flex-wrap items-center justify-between gap-2">
+    <footer aria-label="Site" class="container mx-auto px-5 py-8 mt-12 border-t border-gray-200 text-xs text-gray-500 flex flex-wrap items-center justify-between gap-2">
       <span>Landscape Guessr &middot; <%= Date.current.year %></span>
       <span>
+        <%= link_to "About", about_path, class: "underline hover:text-blue-600" %>
+        &middot;
+        <%= link_to "Legal", legal_path, class: "underline hover:text-blue-600" %>
+        &middot;
         <%= link_to "GitHub", "https://github.com/NU-CS-Software-Studio-Spring-26/project-landscape_guessr", class: "underline hover:text-blue-600" %>
         &middot;
         Built for CS-397 with Rails 8

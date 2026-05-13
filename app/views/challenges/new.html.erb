@@ -1,0 +1,21 @@
+<% content_for :title, "New Challenge" %>
+
+<div class="w-full max-w-md mx-auto space-y-6 py-6">
+  <div class="space-y-1">
+    <h1 class="heading-page">Create a challenge</h1>
+    <p class="muted">Pick an image set, then share the link with anyone you want to compete against.</p>
+  </div>
+
+  <%= form_with url: challenges_path, method: :post, class: "space-y-5" do |f| %>
+    <div>
+      <%= f.label :image_set_id, "Image set", class: "block text-sm font-medium text-gray-700" %>
+      <%= f.select :image_set_id,
+            @image_sets.map { |s| [s.name + (s.is_system_default? ? " (default)" : ""), s.id] },
+            { include_blank: false },
+            class: "form-input select-with-arrow pr-8" %>
+      <p class="muted mt-1">Everyone who joins will draw randomly from this set.</p>
+    </div>
+
+    <%= f.submit "Create challenge", class: "btn-primary w-full" %>
+  <% end %>
+</div>

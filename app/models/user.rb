@@ -6,6 +6,7 @@ class User < ApplicationRecord
   has_many :games, dependent: :destroy
   has_many :image_sets, dependent: :destroy
   has_many :connected_services, dependent: :destroy
+  has_many :challenges, foreign_key: :challenger_id, dependent: :destroy
 
   generates_token_for :email_verification, expires_in: 24.hours do
     email_verified_at

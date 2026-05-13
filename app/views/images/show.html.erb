@@ -32,16 +32,17 @@
          class="lg:col-span-2 space-y-1">
       <div data-zoomable-target="viewport"
            class="h-[60vh] flex items-center justify-center bg-gray-100 rounded-md border border-gray-200 select-none">
-        <img src="<%= image_src(@image, width: Image::ZOOM_CAP_WIDTH) %>" alt="<%= @image.title %>"
+        <img src="<%= image_src(@image, width: Image::ZOOM_CAP_WIDTH) %>" alt="<%= @image.title.presence || 'Landscape image' %>"
              class="max-w-full max-h-full object-contain">
       </div>
-      <div class="flex items-center justify-between gap-2 text-xs text-gray-400">
+      <div class="flex items-center justify-between gap-2 text-xs text-gray-500">
         <span>scroll to zoom · drag to pan · double-click to reset</span>
         <% unless @image.photo.attached? %>
           <button type="button"
                   data-zoomable-target="originalButton"
                   data-action="zoomable#loadOriginal"
                   data-zoomable-url-param="<%= image_src(@image) %>"
+                  aria-label="Load full quality version of the current image"
                   class="hidden text-gray-500 hover:text-blue-600 underline-offset-2 hover:underline cursor-pointer">
             load full quality
           </button>
@@ -57,6 +58,7 @@
           doesn't show. %>
       <% if (gmap = @image.google_maps_url) %>
         <%= link_to "Open in Google Maps ↗", gmap, target: "_blank", rel: "noopener",
+              aria: { label: "Open in Google Maps (opens in a new tab)" },
               class: "btn-secondary w-full text-center" %>
       <% end %>
 
@@ -69,6 +71,7 @@
         <div class="text-xs">
           <p class="text-gray-500 mb-0.5">Source</p>
           <%= link_to @image.url, @image.url, target: "_blank", rel: "noopener",
+                aria: { label: "Source URL (opens in a new tab)" },
                 class: "text-blue-600 hover:underline break-all" %>
         </div>
       <% end %>
@@ -95,7 +98,7 @@
                       class: field_class(@image, :longitude) + " text-sm" %>
               </div>
             </div>
-            <p class="text-[11px] text-gray-400 leading-snug">
+            <p class="text-[11px] text-gray-500 leading-snug">
               Edits propagate to every set this image is in. Per-set coordinate
               overrides live in each set's Manage page.
             </p>
@@ -109,7 +112,7 @@
           can prune from here without bouncing to the locations page. %>
       <div class="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
         <h2 class="font-semibold text-sm text-gray-700">
-          In sets <span class="text-gray-400 font-normal">(<%= @memberships.size %>)</span>
+          In sets <span class="text-gray-500 font-normal">(<%= @memberships.size %>)</span>
         </h2>
         <% if @memberships.any? %>
           <ul class="space-y-1.5">
@@ -127,7 +130,7 @@
                         },
                         class: "rounded border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700 cursor-pointer" %>
                 <% else %>
-                  <span class="text-xs text-gray-400 shrink-0">
+                  <span class="text-xs text-gray-500 shrink-0">
                     <%= set.is_system_default? ? "system" : (set.visibility == "public" ? "public" : "private") %>
                   </span>
                 <% end %>

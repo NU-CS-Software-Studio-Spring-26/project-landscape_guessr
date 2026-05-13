@@ -1,8 +1,11 @@
+<% content_for :title, "Forgot Password" %>
+
 <div class="mx-auto md:w-2/3 w-full">
   <h1 class="heading-page">Forgot your password?</h1>
 
   <%= form_with url: passwords_path, class: "contents" do |form| %>
     <div class="my-5">
+      <%= form.label :email_address, "Email address", class: "block text-sm font-medium text-gray-700" %>
       <%= form.email_field :email_address, required: true, autofocus: true, autocomplete: "username", placeholder: "Enter your email address", value: params[:email_address], class: "form-input" %>
     </div>
 
