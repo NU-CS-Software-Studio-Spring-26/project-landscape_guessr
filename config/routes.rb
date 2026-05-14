@@ -28,8 +28,19 @@ Rails.application.routes.draw do
       post :attach_blob
       get  :processing_status
       get  :map
+      get  :new_filtered
+      get  :edit_filter
+      patch :update_filter
     end
     delete "items/:item_id", to: "image_sets#remove_item", as: :remove_item
+  end
+  resources :regions, only: [] do
+    collection do
+      get :search
+      get :boundaries
+      get :tree
+      get :at_point
+    end
   end
   get  "practice",       to: "practice#show"
   get  "practice/check", to: "practice#check", as: :practice_check

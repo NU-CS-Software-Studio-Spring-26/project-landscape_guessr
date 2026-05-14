@@ -1,6 +1,6 @@
 class ImageSetsController < ApplicationController
-  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image attach_blob processing_status remove_item map]
-  before_action :require_owner, only: %i[edit update destroy locations update_locations add_image attach_blob processing_status remove_item]
+  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image attach_blob processing_status remove_item map new_filtered edit_filter update_filter]
+  before_action :require_owner, only: %i[edit update destroy locations update_locations add_image attach_blob processing_status remove_item edit_filter update_filter]
 
   # GET /image_sets
   def index
@@ -21,11 +21,9 @@ class ImageSetsController < ApplicationController
   # `loading="lazy"` on the <img> tags below defers thumbnail GETs until
   # each card scrolls into view.
   def show
-    # Eager-load photo+blob: every row calls image_src(item.image), which
-    # hits photo.attached? and would otherwise fire one ActiveStorage
-    # ::Attachment Load per item (N+1 across the full page).
     @items = paginate(
-      @image_set.image_set_items
+      @image_set.effective_items
+                .joins(:image)
                 .includes(image: { photo_attachment: :blob })
                 .order("images.title"),
       per_page: 100
@@ -40,12 +38,21 @@ class ImageSetsController < ApplicationController
   # POST /image_sets
   def create
     @image_set = Current.user.image_sets.new(image_set_params)
-    if @image_set.save
-      # Drop straight into the manage page — a freshly created set has no
-      # images, so the natural next step is to upload some.
-      redirect_to locations_image_set_path(@image_set), notice: "Set created — add some images to start."
+
+    if @image_set.filtered?
+      if @image_set.save
+        redirect_to @image_set, notice: "Filtered set created."
+      else
+        @parent_set = @image_set.parent_image_set
+        @filtered_set = @image_set
+        render :new_filtered, status: :unprocessable_entity
+      end
     else
-      render :new, status: :unprocessable_entity
+      if @image_set.save
+        redirect_to locations_image_set_path(@image_set), notice: "Set created — add some images to start."
+      else
+        render :new, status: :unprocessable_entity
+      end
     end
   end
 
@@ -188,7 +195,7 @@ class ImageSetsController < ApplicationController
 
   # GET /image_sets/1/map
   def map
-    items = @image_set.image_set_items.includes(image: { photo_attachment: :blob })
+    items = @image_set.effective_items.joins(:image).includes(image: { photo_attachment: :blob })
     @image_data = items.filter_map do |item|
       lat = item.latitude || item.image.latitude
       lng = item.longitude || item.image.longitude
@@ -200,6 +207,11 @@ class ImageSetsController < ApplicationController
         img.url
       end
       { id: img.id, lat: lat.to_f, lng: lng.to_f, title: item.title, url: display_url }
+    end
+
+    respond_to do |format|
+      format.html
+      format.json { render json: @image_data }
     end
   end
 
@@ -220,6 +232,38 @@ class ImageSetsController < ApplicationController
       }
     end
     render json: { items: payload, processing_count: payload.count { |i| !i[:processed] } }
+  end
+
+  # GET /image_sets/1/new_filtered
+  def new_filtered
+    @parent_set = @image_set
+    @filtered_set = ImageSet.new(
+      parent_image_set: @parent_set,
+      visibility: @parent_set.visibility,
+      map_style: @parent_set.map_style
+    )
+  end
+
+  # GET /image_sets/1/edit_filter
+  def edit_filter
+    @parent_set = @image_set.parent_image_set
+    @filtered_set = @image_set
+  end
+
+  # PATCH /image_sets/1/update_filter
+  def update_filter
+    region_ids = Array(params[:region_ids]).map(&:to_i).reject(&:zero?)
+    if @image_set.update(
+      name: params[:name],
+      region_ids: region_ids,
+      visibility: params[:visibility] || @image_set.visibility
+    )
+      redirect_to @image_set, notice: "Filter updated."
+    else
+      @parent_set = @image_set.parent_image_set
+      @filtered_set = @image_set
+      render :edit_filter, status: :unprocessable_entity
+    end
   end
 
   # POST /image_sets/1/attach_blob
@@ -277,6 +321,8 @@ class ImageSetsController < ApplicationController
   end
 
   def image_set_params
-    params.expect(image_set: [ :name, :visibility, :map_style ])
+    permitted = params.expect(image_set: [ :name, :visibility, :map_style, :parent_image_set_id, region_ids: [] ])
+    permitted[:region_ids] = permitted[:region_ids]&.map(&:to_i)&.reject(&:zero?) || []
+    permitted
   end
 end

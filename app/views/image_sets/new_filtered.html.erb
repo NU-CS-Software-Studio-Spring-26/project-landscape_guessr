@@ -1,0 +1,86 @@
+<% content_for :title, "Create filtered set" %>
+
+<div class="w-full max-w-4xl mx-auto space-y-6 py-6"
+     data-controller="region-filter"
+     data-region-filter-parent-set-id-value="<%= @parent_set.id %>"
+     data-region-filter-map-style-value="<%= @parent_set.map_style %>"
+     data-region-filter-images-url-value="<%= map_image_set_path(@parent_set, format: :json) %>">
+
+  <div>
+    <h1 class="heading-page">Create filtered set</h1>
+    <p class="muted mt-1">Based on: <%= link_to @parent_set.name, @parent_set, class: "text-forest-600 hover:underline" %></p>
+  </div>
+
+  <%= form_with url: image_sets_path, method: :post, class: "space-y-5" do |f| %>
+    <input type="hidden" name="image_set[parent_image_set_id]" value="<%= @parent_set.id %>">
+    <input type="hidden" name="image_set[map_style]" value="<%= @parent_set.map_style %>">
+    <div id="region-ids-container" data-region-filter-target="hiddenFields"></div>
+
+    <div>
+      <label for="image_set_name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+      <input type="text" name="image_set[name]" id="image_set_name"
+             value="<%= @filtered_set.name.presence || "#{@parent_set.name} — " %>"
+             class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-forest-500 focus:ring-forest-500"
+             required>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      <%# Left: Region selector %>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Regions</label>
+          <div class="relative">
+            <input type="text"
+                   placeholder="Search countries, states, counties..."
+                   data-region-filter-target="searchInput"
+                   data-action="input->region-filter#onSearchInput"
+                   class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-forest-500 focus:ring-forest-500 pr-8">
+            <svg class="absolute right-2.5 top-2.5 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+          </div>
+        </div>
+
+        <%# Search results / tree %>
+        <div data-region-filter-target="results"
+             class="border border-gray-200 rounded-md max-h-64 overflow-y-auto bg-white">
+          <div class="p-3 text-sm text-gray-500">Type to search, or click the map to find regions</div>
+        </div>
+
+        <%# Selected regions pills %>
+        <div>
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-sm font-medium text-gray-700">Selected</span>
+            <span class="text-xs text-gray-500" data-region-filter-target="matchCount"></span>
+          </div>
+          <div data-region-filter-target="pills" class="flex flex-wrap gap-1.5 min-h-[2rem]">
+            <span class="text-sm text-gray-400 italic">None selected — add regions above</span>
+          </div>
+        </div>
+      </div>
+
+      <%# Right: Map preview %>
+      <div>
+        <div data-region-filter-target="map"
+             class="w-full h-80 lg:h-96 rounded-md border border-gray-200 cursor-crosshair"></div>
+        <p class="text-xs text-gray-500 mt-1">Click on the map to see which regions are at that location</p>
+      </div>
+    </div>
+
+    <div>
+      <label for="image_set_visibility" class="block text-sm font-medium text-gray-700 mb-1">Visibility</label>
+      <select name="image_set[visibility]" id="image_set_visibility"
+              class="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-forest-500 focus:ring-forest-500">
+        <option value="private" <%= "selected" if @filtered_set.visibility == "private" %>>Private</option>
+        <option value="public" <%= "selected" if @filtered_set.visibility == "public" %>>Public</option>
+      </select>
+    </div>
+
+    <div class="flex items-center gap-3">
+      <button type="submit" class="btn-primary" data-region-filter-target="submitBtn">
+        Create filtered set
+      </button>
+      <%= link_to "Cancel", @parent_set, class: "btn-ghost" %>
+    </div>
+  <% end %>
+</div>

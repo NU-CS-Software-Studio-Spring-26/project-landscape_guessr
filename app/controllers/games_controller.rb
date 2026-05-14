@@ -75,7 +75,7 @@ class GamesController < ApplicationController
     # be scored against (0, 0). The COALESCE checks the per-item override
     # *or* the underlying image's coords (item.latitude falls back to
     # item.image.latitude in our model).
-    items = image_set.image_set_items
+    items = image_set.effective_items
               .joins(:image)
               .where("COALESCE(image_set_items.latitude,  images.latitude)  IS NOT NULL")
               .where("COALESCE(image_set_items.longitude, images.longitude) IS NOT NULL")

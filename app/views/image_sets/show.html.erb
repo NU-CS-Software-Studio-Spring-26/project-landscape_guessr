@@ -8,9 +8,24 @@
       <p class="muted mt-1">
         <%= @total_items %> images &middot;
         <span class="<%= @image_set.visibility == 'public' ? 'text-green-600' : 'text-gray-500' %>"><%= @image_set.visibility %></span>
+        <% if @image_set.filtered? %>
+          &middot; <span class="inline-flex items-center text-xs text-forest-600 bg-forest-50 rounded-full px-2 py-0.5">Filtered</span>
+        <% end %>
       </p>
+      <% if @image_set.filtered? %>
+        <p class="text-xs text-gray-500 mt-1">
+          Based on: <%= link_to @image_set.parent_image_set.name, @image_set.parent_image_set, class: "text-forest-600 hover:underline" %>
+        </p>
+        <% if @image_set.selected_regions.any? %>
+          <div class="flex flex-wrap gap-1 mt-2">
+            <% @image_set.selected_regions.each do |region| %>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-forest-50 text-forest-700"><%= region.name %></span>
+            <% end %>
+          </div>
+        <% end %>
+      <% end %>
     </div>
-    <div class="flex gap-2 shrink-0">
+    <div class="flex gap-2 shrink-0 flex-wrap justify-end">
       <%= button_to "Play this set", games_path, method: :post,
             params: { image_set_id: @image_set.id },
             class: "btn-primary" %>
@@ -19,8 +34,13 @@
       <%= link_to "Map", map_image_set_path(@image_set),
             class: "btn-secondary" %>
       <% if @image_set.owned_by?(Current.user) %>
-        <%= link_to "Manage images", locations_image_set_path(@image_set), class: "btn-secondary" %>
-        <%= link_to "Settings",       edit_image_set_path(@image_set),      class: "btn-secondary" %>
+        <% if @image_set.filtered? %>
+          <%= link_to "Edit filter", edit_filter_image_set_path(@image_set), class: "btn-secondary" %>
+        <% else %>
+          <%= link_to "Manage images", locations_image_set_path(@image_set), class: "btn-secondary" %>
+          <%= link_to "Filter", new_filtered_image_set_path(@image_set), class: "btn-secondary" %>
+        <% end %>
+        <%= link_to "Settings", edit_image_set_path(@image_set), class: "btn-secondary" %>
       <% end %>
     </div>
   </div>

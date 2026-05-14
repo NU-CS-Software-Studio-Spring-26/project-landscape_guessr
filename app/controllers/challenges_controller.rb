@@ -121,7 +121,7 @@ class ChallengesController < ApplicationController
   end
 
   def pick_items_for(image_set)
-    image_set.image_set_items
+    image_set.effective_items
              .joins(:image)
              .where("COALESCE(image_set_items.latitude,  images.latitude)  IS NOT NULL")
              .where("COALESCE(image_set_items.longitude, images.longitude) IS NOT NULL")

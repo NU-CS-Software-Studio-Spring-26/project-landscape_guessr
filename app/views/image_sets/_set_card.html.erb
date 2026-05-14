@@ -2,8 +2,11 @@
   <div class="min-w-0">
     <%= link_to set.name, set, class: "font-medium text-gray-900 hover:text-blue-600 truncate block" %>
     <p class="text-xs text-gray-500 mt-0.5">
-      <%= set.respond_to?(:items_count) ? set.items_count : set.image_set_items.count %> images &middot;
+      <%= set.filtered? ? set.effective_items_count : (set.respond_to?(:items_count) ? set.items_count : set.image_set_items.count) %> images &middot;
       <span class="<%= set.visibility == 'public' ? 'text-green-600' : 'text-gray-500' %>"><%= set.visibility %></span>
+      <% if set.filtered? %>
+        &middot; <span class="text-forest-600">Filtered</span>
+      <% end %>
     </p>
   </div>
   <div class="flex items-center gap-2 shrink-0">
@@ -13,8 +16,10 @@
     <%= link_to "Leaderboard", leaderboard_games_path(image_set_id: set.id),
           class: "btn-secondary text-sm py-1.5" %>
     <% if local_assigns[:show_owner_actions] %>
-      <%= link_to "Manage images", locations_image_set_path(set), class: "btn-secondary text-sm py-1.5" %>
-      <%= link_to "Settings",       edit_image_set_path(set),      class: "btn-secondary text-sm py-1.5" %>
+      <% unless set.filtered? %>
+        <%= link_to "Manage images", locations_image_set_path(set), class: "btn-secondary text-sm py-1.5" %>
+      <% end %>
+      <%= link_to "Settings", edit_image_set_path(set), class: "btn-secondary text-sm py-1.5" %>
     <% end %>
   </div>
 </div>

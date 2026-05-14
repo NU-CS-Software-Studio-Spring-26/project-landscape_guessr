@@ -1,5 +1,6 @@
 class ImageSet < ApplicationRecord
   belongs_to :user, optional: true
+  belongs_to :parent_image_set, class_name: "ImageSet", optional: true
   # dependent: :delete_all (NOT :destroy) — destroying a 5000-item set
   # via per-row :destroy loads every row + fires ImageSetItem#after_destroy
   # for each, which runs Image#purge_if_orphan! (3 SQL counts each), which
@@ -12,6 +13,7 @@ class ImageSet < ApplicationRecord
   has_many :image_set_items, dependent: :delete_all
   has_many :images, through: :image_set_items
   has_many :games, dependent: :nullify
+  has_many :filtered_sets, class_name: "ImageSet", foreign_key: :parent_image_set_id, dependent: :destroy
 
   # MapTiler basemap styles available per set. Used by the guess /
   # results / set-map controllers — see app/javascript/controllers/*.js.
@@ -43,6 +45,32 @@ class ImageSet < ApplicationRecord
 
   def playable_by?(user)
     is_system_default? || owned_by?(user) || visibility == "public"
+  end
+
+  def filtered?
+    parent_image_set_id.present?
+  end
+
+  def effective_items
+    if filtered?
+      expanded_ids = Region.descendants_of(region_ids)
+      parent_image_set.image_set_items
+        .where(image_id: ImageRegion.where(region_id: expanded_ids).select(:image_id))
+    else
+      image_set_items
+    end
+  end
+
+  def effective_items_count
+    if filtered?
+      effective_items.count
+    else
+      image_set_items.count
+    end
+  end
+
+  def selected_regions
+    Region.where(id: region_ids)
   end
 
   private
