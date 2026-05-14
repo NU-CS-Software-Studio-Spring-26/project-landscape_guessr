@@ -4,7 +4,7 @@ class Region < ApplicationRecord
   has_many :image_regions, dependent: :destroy
   has_many :images, through: :image_regions
 
-  ADMIN_LEVELS = %w[continent country admin1 admin2].freeze
+  ADMIN_LEVELS = %w[continent country admin1 admin2 city].freeze
 
   validates :admin_level, inclusion: { in: ADMIN_LEVELS }
   validates :name, presence: true
@@ -13,6 +13,7 @@ class Region < ApplicationRecord
   scope :countries, -> { where(admin_level: "country") }
   scope :admin1s, -> { where(admin_level: "admin1") }
   scope :admin2s, -> { where(admin_level: "admin2") }
+  scope :cities, -> { where(admin_level: "city") }
 
   def self.descendants_of(region_ids)
     return [] if region_ids.empty?
@@ -37,6 +38,7 @@ class Region < ApplicationRecord
           WHEN 'country' THEN 1
           WHEN 'admin1' THEN 2
           WHEN 'admin2' THEN 3
+          WHEN 'city' THEN 4
         END, name
       SQL
     scope = scope.limit(limit)
@@ -56,7 +58,14 @@ class Region < ApplicationRecord
 
   def rgeo_boundary
     return nil unless boundary
-    RGeo::GeoJSON.decode(boundary.to_json)
+    geom = RGeo::GeoJSON.decode(boundary.to_json)
+    return nil unless geom
+    geom.make_valid
+  rescue RGeo::Error::InvalidGeometry
+    # buffer(0) is a standard trick to fix self-intersecting polygons
+    geom.buffer(0) rescue geom
+  rescue
+    nil
   end
 
   def contains_point?(lat, lng)

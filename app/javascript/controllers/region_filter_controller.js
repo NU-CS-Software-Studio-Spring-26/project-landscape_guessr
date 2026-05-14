@@ -159,7 +159,7 @@ export default class extends Controller {
       return
     }
 
-    const levelLabels = { continent: "Continent", country: "Country", admin1: "State/Province", admin2: "County/District" }
+    const levelLabels = { continent: "Continent", country: "Country", admin1: "State/Province", admin2: "County/District", city: "City" }
 
     this.resultsTarget.innerHTML = regions.map(r => {
       const isSelected = this.selectedRegions.has(r.id)
@@ -220,7 +220,8 @@ export default class extends Controller {
       continent: "bg-purple-100 text-purple-700",
       country: "bg-blue-100 text-blue-700",
       admin1: "bg-green-100 text-green-700",
-      admin2: "bg-amber-100 text-amber-700"
+      admin2: "bg-amber-100 text-amber-700",
+      city: "bg-rose-100 text-rose-700"
     }
 
     this.pillsTarget.innerHTML = Array.from(this.selectedRegions.values()).map(r => {
