@@ -3,7 +3,7 @@
 <div class="page-container">
   <h1 class="heading-page">About Landscape Guessr</h1>
 
-  <p class="text-gray-600 text-lg">
+  <p class="text-gray-600 leading-relaxed">
     Landscape Guessr is a geography guessing game built for CS-397 at Northwestern University.
     You're shown photographs of natural landmarks from around the world and challenged to place them on a map.
     The closer your guess, the higher your score &mdash; up to 5,000 points per round.
@@ -11,28 +11,29 @@
 
   <section class="space-y-4">
     <h2 class="heading-section">The team</h2>
-    <ul class="divide-y divide-gray-100 border border-gray-100 rounded-lg overflow-hidden">
-      <li class="px-5 py-4 bg-white text-sm font-medium">Jay Rao</li>
-      <li class="px-5 py-4 bg-white text-sm font-medium">Andre Shportko</li>
-      <li class="px-5 py-4 bg-white text-sm font-medium">Mirai Duintjer Tebbens Nishioka</li>
-      <li class="px-5 py-4 bg-white text-sm font-medium">Leyla Latifova</li>
-    </ul>
+    <div class="card overflow-hidden divide-y divide-forest-50">
+      <% [ "Jay Rao", "Andre Shportko", "Mirai Duintjer Tebbens Nishioka", "Leyla Latifova" ].each do |name| %>
+        <div class="px-5 py-3.5 text-sm font-medium text-forest-900"><%= name %></div>
+      <% end %>
+    </div>
   </section>
 
   <section class="space-y-3">
     <h2 class="heading-section">Source code</h2>
     <p class="muted">
-      This project is open source.
-      <%= link_to "View the repository on GitHub",
+      This project is open source. &nbsp;
+      <%= link_to "View the repository on GitHub →",
             "https://github.com/NU-CS-Software-Studio-Spring-26/project-landscape_guessr",
-            class: "text-blue-600 hover:underline font-medium" %>
+            class: "text-forest-600 hover:text-forest-800 font-medium underline-offset-2 hover:underline" %>
     </p>
   </section>
 
   <section class="space-y-3">
     <h2 class="heading-section">Legal</h2>
     <p class="muted">
-      View our full <%= link_to "Privacy Policy, Terms of Service, and Cookie Notice", legal_path, class: "text-blue-600 hover:underline" %>.
+      View our full
+      <%= link_to "Privacy Policy, Terms of Service, and Cookie Notice", legal_path,
+            class: "text-forest-600 hover:text-forest-800 underline-offset-2 hover:underline" %>.
       Landscape photos are sourced from Wikimedia Commons under public domain or Creative Commons licenses.
       This application is a student project and is not affiliated with GeoGuessr or any commercial product.
     </p>

@@ -24,16 +24,20 @@ class GamesControllerTest < ActionDispatch::IntegrationTest
     sign_in_as @alice
     get games_url(per_page: 25)
     assert_response :success
-    # Picker reflects the override; both the dropdown's selected option
-    # and the prev/next URLs should carry per_page=25 through.
-    assert_select "select option[selected='selected'][value*='per_page=25']"
+    # Custom dropdown shows current per_page in the label
+    assert_select "span[data-dropdown-target='label']", text: "25"
+    # Dropdown buttons have per_page=25 in their URLs
+    assert_select "button[data-action='dropdown#pick'][data-url*='per_page=25']"
   end
 
   test "index falls back to default for out-of-allowlist ?per_page=" do
     sign_in_as @alice
     get games_url(per_page: 999)
     assert_response :success
-    assert_select "select option[selected='selected'][value*='per_page=100']"
+    # Should fall back to 100 (default), shown in dropdown label
+    assert_select "span[data-dropdown-target='label']", text: "100"
+    # Dropdown buttons have per_page=100 in their URLs
+    assert_select "button[data-action='dropdown#pick'][data-url*='per_page=100']"
   end
 
   test "index filter chips preserve per_page" do
