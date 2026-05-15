@@ -1,6 +1,6 @@
 class DropImageRegions < ActiveRecord::Migration[8.1]
   def up
-    drop_table :image_regions
+    drop_table :image_regions, if_exists: true
   end
 
   def down

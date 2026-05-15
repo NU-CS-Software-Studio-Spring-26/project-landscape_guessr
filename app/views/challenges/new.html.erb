@@ -14,8 +14,11 @@
           <%= f.label :image_set_id, "Image set", class: "block text-sm font-medium text-forest-800" %>
           <% default_set = @image_sets.first %>
           <% default_label = default_set ? default_set.name + (default_set.is_system_default? ? " (default)" : "") : "Select…" %>
-          <%= f.hidden_field :image_set_id, value: default_set&.id, data: { dropdown_target: "input" } %>
           <div data-controller="dropdown" class="relative mt-2">
+            <%# Hidden field must live INSIDE the dropdown's controller element
+                so Stimulus's `inputTarget` resolves — otherwise dropdown#pick
+                updates the visible label but never the submitted value. %>
+            <%= f.hidden_field :image_set_id, value: default_set&.id, data: { dropdown_target: "input" } %>
             <button type="button" data-action="dropdown#toggle"
                     class="flex items-center justify-between w-full gap-2 rounded-lg border border-forest-200 px-3.5 py-2.5 text-sm bg-white text-forest-800 hover:bg-forest-50 transition-colors">
               <span data-dropdown-target="label"><%= default_label %></span>

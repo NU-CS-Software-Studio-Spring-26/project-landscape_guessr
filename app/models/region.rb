@@ -18,21 +18,6 @@ class Region < ApplicationRecord
   scope :admin2s, -> { where(admin_level: "admin2") }
   scope :cities, -> { where(admin_level: "city") }
 
-  def self.descendants_of(region_ids)
-    return [] if region_ids.empty?
-
-    placeholders = region_ids.map { "?" }.join(",")
-    base_sql = sanitize_sql_array(
-      [ "WITH RECURSIVE tree AS (
-          SELECT id FROM regions WHERE id IN (#{placeholders})
-          UNION ALL
-          SELECT r.id FROM regions r JOIN tree t ON r.parent_id = t.id
-        )
-        SELECT id FROM tree", *region_ids.map(&:to_i) ]
-    )
-    connection.select_values(base_sql).map(&:to_i)
-  end
-
   def self.search(query, map_center: nil, limit: 20, **_opts)
     words = query.split(/\s+/).reject { |w| w.length < 2 }
     return none if words.empty?

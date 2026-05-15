@@ -10,10 +10,18 @@ class RematerializeFilteredSetsJob < ApplicationJob
     parent = ImageSet.find_by(id: parent_image_set_id)
     return unless parent
 
+    # Per-child rescue so one bad filter set (e.g. transient Nominatim
+    # outage on boundary fetch) doesn't abandon the rest. Report to the
+    # configured error subscriber so the failure is visible — bare
+    # logger.error gets buried in the rolling log.
     parent.filtered_sets.find_each do |child|
       child.materialize_filtered_items!
-    rescue => e
-      Rails.logger.error("[RematerializeFilteredSetsJob] child=#{child.id} #{e.class}: #{e.message}")
+    rescue StandardError => e
+      Rails.error.report(
+        e,
+        context: { job: "RematerializeFilteredSetsJob", parent_image_set_id: parent.id, child_id: child.id },
+        handled: true
+      )
     end
   end
 end

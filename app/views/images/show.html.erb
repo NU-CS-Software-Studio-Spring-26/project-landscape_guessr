@@ -120,7 +120,7 @@
               <% item = @items_by_set_id[set.id] %>
               <li class="flex items-center justify-between gap-2 text-sm">
                 <%= link_to set.name, set, class: "text-blue-600 hover:underline truncate" %>
-                <% if set.owned_by?(Current.user) && item %>
+                <% if set.owned_by?(Current.user) && item && !set.filtered? %>
                   <%= button_to "Remove",
                         image_set_remove_item_path(set, item_id: item.id),
                         method: :delete,
@@ -131,7 +131,7 @@
                         class: "rounded border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700 cursor-pointer" %>
                 <% else %>
                   <span class="text-xs text-gray-500 shrink-0">
-                    <%= set.is_system_default? ? "system" : (set.visibility == "public" ? "public" : "private") %>
+                    <% if set.filtered? %>filter<% elsif set.is_system_default? %>system<% else %><%= set.visibility == "public" ? "public" : "private" %><% end %>
                   </span>
                 <% end %>
               </li>

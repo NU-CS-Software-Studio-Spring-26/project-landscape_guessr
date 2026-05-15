@@ -23,27 +23,6 @@ class RegionsController < ApplicationController
     }
   end
 
-  def tree
-    parent_id = params[:parent_id]
-    regions = if parent_id.present?
-      Region.where(parent_id: parent_id).order(:name)
-    else
-      Region.continents.order(:name)
-    end
-
-    region_ids = regions.map(&:id)
-    parents_with_children = Region.where(parent_id: region_ids).distinct.pluck(:parent_id).to_set
-
-    render json: regions.map { |r|
-      {
-        id: r.id,
-        name: r.name,
-        admin_level: r.admin_level,
-        has_children: parents_with_children.include?(r.id)
-      }
-    }
-  end
-
   # Cap the per-request payload — without this an authenticated user can pass
   # `ids[]` with thousands of region IDs and force thousands of Nominatim fetches
   # in one request, both saturating Nominatim's 1/sec limit and holding a web
@@ -87,17 +66,6 @@ class RegionsController < ApplicationController
     end
 
     render json: { type: "FeatureCollection", features: features }
-  end
-
-  def fetch_boundary
-    region = Region.find(params[:id])
-    boundary = region.fetch_real_boundary!
-
-    if boundary
-      render json: { id: region.id, boundary: boundary }
-    else
-      render json: { id: region.id, error: "Could not fetch boundary" }, status: :not_found
-    end
   end
 
   # POST /regions/resolve.json

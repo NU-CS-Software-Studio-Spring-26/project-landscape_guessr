@@ -6,6 +6,12 @@ class PracticeController < ApplicationController
     # Practice mode shows a random image and asks for a guess, so the image
     # must have lat/lng — otherwise the "answer" is (0, 0) and every guess
     # scores arbitrarily. Filter at the DB level.
+    # TODO: the `Image.all` fallback (when default set has no located images)
+    # leaks images from private sets to anonymous visitors. Replace with a
+    # `visible_to(Current.user)` scope, or just drop the fallback and let the
+    # nil-image branch render the friendly message.
+    # TODO: missing `and return` on the redirect below — the show view will
+    # render after the redirect and crash on `@image.id` when @image is nil.
     located = ->(scope) { scope.where.not(latitude: nil).where.not(longitude: nil) }
     @image = located.call(default_set&.images || Image.all).order(Arel.sql("RANDOM()")).first ||
              located.call(Image.all).order(Arel.sql("RANDOM()")).first

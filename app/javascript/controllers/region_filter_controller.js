@@ -210,11 +210,24 @@ export default class extends Controller {
     const ids = this.initialRegionIdsValue
     if (!ids.length) return
 
+    // Seed selectedRegions with placeholder names BEFORE the boundaries fetch
+    // so the saved selection is preserved even if the network fetch fails. If
+    // we waited until after the fetch, a transient 500 on /regions/boundaries
+    // would leave selectedRegions empty — and the next renderHiddenFields()
+    // (triggered by any add or remove) would silently overwrite the
+    // server-rendered hidden inputs, dropping every previously-saved region.
+    for (const id of ids) {
+      this.selectedRegions.set(id, { id, name: `Region ${id}`, admin_level: "" })
+    }
+    this.renderPills()
+    this.renderHiddenFields()
+
     try {
       const params = ids.map(id => `ids[]=${id}`).join("&")
       const resp = await fetch(`/regions/boundaries.json?${params}`)
       const geojson = await resp.json()
 
+      // Enrich placeholders with real names/admin_level from the response.
       for (const feature of geojson.features) {
         this.selectedRegions.set(feature.id, {
           id: feature.id,
@@ -224,7 +237,6 @@ export default class extends Controller {
       }
 
       this.renderPills()
-      this.renderHiddenFields()
       this.updateMapRegions()
       this.updateMatchCount()
     } catch (e) {
@@ -623,6 +635,14 @@ export default class extends Controller {
   }
 
   async onMapClick(e) {
+    // A circle just finished drawing: the browser fires a synthetic `click`
+    // off the same gesture, which would otherwise reverse-geocode the release
+    // point. Consume the flag and bail.
+    if (this._suppressNextClick) {
+      this._suppressNextClick = false
+      return
+    }
+
     const { lng, lat } = e.lngLat
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
       this.showResultsMessage('<div class="p-3 text-sm text-gray-500">No regions found at this location</div>')
@@ -648,7 +668,11 @@ export default class extends Controller {
       // for the same thing was confusing.
       this.renderResults(candidates)
     } catch (err) {
-      this.showResultsMessage('<div class="p-3 text-sm text-red-500">Failed to find regions</div>')
+      if (err?.message === "rate_limited") {
+        this.showResultsMessage('<div class="p-3 text-sm text-amber-700">Geocoder is rate-limited (1 lookup/sec). Wait a few seconds and try again.</div>')
+      } else {
+        this.showResultsMessage('<div class="p-3 text-sm text-red-500">Failed to find regions</div>')
+      }
     }
   }
 
@@ -662,11 +686,13 @@ export default class extends Controller {
       this.circleModeBtnTarget.classList.toggle("bg-forest-100", armed)
       this.circleModeBtnTarget.setAttribute("aria-pressed", armed ? "true" : "false")
     }
-    this.setCircleStatus(armed ? "Click and drag on the map to draw" : null)
+    this.setCircleStatus(armed ? "Drag on the map to draw a circle. Click ✎ again to stop." : null)
     this.mapTarget.style.cursor = armed ? "crosshair" : ""
 
     // Hot-swap the map's interaction model. Disable dragPan while armed so
-    // mousedown+drag is captured for circle-drawing instead of panning.
+    // mouse/touch drag is captured for circle-drawing instead of panning.
+    // Pinch-zoom (touchZoomRotate) stays enabled so users can still zoom in
+    // to pick a precise center.
     if (armed) {
       this.map?.dragPan.disable()
       this.attachCircleDragHandlers()
@@ -674,43 +700,56 @@ export default class extends Controller {
       this.map?.dragPan.enable()
       this.detachCircleDragHandlers()
       this.clearCirclePreview()
+      this._circleDrag = null
     }
   }
 
   attachCircleDragHandlers() {
     if (this._circleHandlers) return
-    this._circleHandlers = {
-      down: (e) => this.onCircleMouseDown(e),
-      move: (e) => this.onCircleMouseMove(e),
-      up:   (e) => this.onCircleMouseUp(e)
-    }
-    this.map.on("mousedown", this._circleHandlers.down)
-    this.map.on("mousemove", this._circleHandlers.move)
-    this.map.on("mouseup",   this._circleHandlers.up)
+    const down = (e) => this.onCircleDragStart(e)
+    const move = (e) => this.onCircleDragMove(e)
+    const up   = (e) => this.onCircleDragEnd(e)
+    // Register both mouse and touch events. MapLibre normalizes `lngLat` for
+    // both, so the same handler bodies work either way. Without the touch
+    // wiring, the entire feature was inert on phones and tablets.
+    this._circleHandlers = { down, move, up }
+    this.map.on("mousedown",  down)
+    this.map.on("mousemove",  move)
+    this.map.on("mouseup",    up)
+    this.map.on("touchstart", down)
+    this.map.on("touchmove",  move)
+    this.map.on("touchend",   up)
   }
 
   detachCircleDragHandlers() {
     if (!this._circleHandlers) return
-    this.map.off("mousedown", this._circleHandlers.down)
-    this.map.off("mousemove", this._circleHandlers.move)
-    this.map.off("mouseup",   this._circleHandlers.up)
+    const { down, move, up } = this._circleHandlers
+    this.map.off("mousedown",  down)
+    this.map.off("mousemove",  move)
+    this.map.off("mouseup",    up)
+    this.map.off("touchstart", down)
+    this.map.off("touchmove",  move)
+    this.map.off("touchend",   up)
     this._circleHandlers = null
   }
 
-  onCircleMouseDown(e) {
-    e.preventDefault()
+  onCircleDragStart(e) {
+    // Ignore multi-touch — that's a pinch-zoom gesture, not a circle draw.
+    if (e.points && e.points.length > 1) return
+    e.preventDefault?.()
     const { lng, lat } = e.lngLat
     this._circleDrag = { center: { lat, lng }, radiusM: 0 }
     this.updateCirclePreview(lat, lng, 0)
   }
 
-  onCircleMouseMove(e) {
+  onCircleDragMove(e) {
     if (!this._circleDrag) return
+    if (e.points && e.points.length > 1) return
     const { lng, lat } = e.lngLat
     const r = this.haversineMeters(this._circleDrag.center.lat, this._circleDrag.center.lng, lat, lng)
     this._circleDrag.radiusM = r
     this.updateCirclePreview(this._circleDrag.center.lat, this._circleDrag.center.lng, r)
-    this.setCircleStatus(`Radius: ${this.formatKm(r)} — release to finish`)
+    this.setCircleStatus(`Radius: ${this.formatKm(r)} — release to finish (click ✎ to stop drawing)`)
   }
 
   // Show the amber status line and hide the default map hint while circle mode
@@ -725,14 +764,33 @@ export default class extends Controller {
     }
   }
 
-  onCircleMouseUp(_e) {
+  onCircleDragEnd(_e) {
     const drag = this._circleDrag
     this._circleDrag = null
-    this.armCircleMode(false)
     if (!drag) return
+
+    // Suppress the synthetic click that follows mouseup/touchend — without
+    // this, onMapClick would reverse-geocode the release point as if the
+    // user had tapped to look up regions there.
+    this._suppressNextClick = true
+
+    // Treat tiny accidental drags as a no-op rather than dropping a
+    // minimum-size circle the user didn't intend.
+    if (drag.radiusM < 100) {
+      this.clearCirclePreview()
+      // Reset the prompt back to the armed-mode hint.
+      this.setCircleStatus("Drag on the map to draw a circle. Click ✎ again to stop.")
+      return
+    }
+
     const r = Math.max(drag.radiusM, this.CIRCLE_MIN_KM * 1000)
     const capped = Math.min(r, this.CIRCLE_MAX_KM * 1000)
     this.addCircle(drag.center.lat, drag.center.lng, capped)
+
+    // Stay armed — drawing multiple circles in succession was forcing users
+    // to re-arm via the toolbar after every release.
+    this.clearCirclePreview()
+    this.setCircleStatus("Drag on the map to draw another circle. Click ✎ to stop.")
   }
 
   updateCirclePreview(lat, lng, radiusM) {
@@ -855,10 +913,14 @@ export default class extends Controller {
   // when the server fetches the boundary — no name-drift between providers.
   // Distributing the call across user IPs also sidesteps the 1 req/sec/IP
   // rate limit that would otherwise be a chokepoint server-side.
+  //
+  // Throws Error("rate_limited") on HTTP 429 so the caller can show a
+  // dedicated "wait a few seconds" message instead of generic failure.
   async nominatimReverse(lat, lng) {
     const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}` +
                 `&format=jsonv2&addressdetails=1&accept-language=en&zoom=12`
     const resp = await fetch(url, { headers: { "Accept": "application/json" } })
+    if (resp.status === 429) throw new Error("rate_limited")
     if (!resp.ok) return []
     const data = await resp.json()
     return this.buildCandidatesFromNominatim(data)

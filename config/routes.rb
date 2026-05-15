@@ -40,11 +40,7 @@ Rails.application.routes.draw do
     collection do
       get :search
       get :boundaries
-      get :tree
       post :resolve
-    end
-    member do
-      post :fetch_boundary
     end
   end
   get  "practice",       to: "practice#show"
