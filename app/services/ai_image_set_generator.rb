@@ -450,17 +450,6 @@ class AiImageSetGenerator
         CATEGORY (i.e. the kind of thing you'd P31-match) after 2-3
         rephrasings. Don't guess.
 
-      TOOL LIMITATIONS (not Wikidata limitations — different beasts):
-      - **One image per item.** The importer dedupes by item Q-ID and
-        URL, so every set has at most one photo per subject. If the
-        user wants multiple photos per item (e.g. "5-30 photos of
-        every US city"), explain this is a tool design choice for the
-        geoguessr-style game and OFFER A WORKAROUND: build a set of
-        the larger subjects (e.g. "I'll make a set with one photo per
-        large US city — you'll get 50+ different cities to guess").
-        Do NOT phrase as "Wikidata can't" — that's misleading; this
-        is our app's choice.
-
       IMAGE SOURCE:
       - Default "wikipedia_pageimages" — fresher, editorially-curated
         infobox photo from the English Wikipedia article.
