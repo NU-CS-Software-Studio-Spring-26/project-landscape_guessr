@@ -15,6 +15,20 @@ NON_PHOTO_PATTERNS = [
   /topographic|schematic|Harper.?s[_\s-]New/i
 ]
 
+def normalize_longitude(value)
+  return nil if value.nil?
+  # Wrap values from [180, 540], etc. into the valid [-180, 180] range.
+  ((value + 180.0) % 360.0) - 180.0
+end
+
+def valid_latitude?(value)
+  !value.nil? && value >= -90.0 && value <= 90.0
+end
+
+def valid_longitude?(value)
+  !value.nil? && value >= -180.0 && value <= 180.0
+end
+
 subqueries = LANDFORM_TYPES.map do |qid|
   <<~SUB.strip
     { SELECT ?item ?image ?coord WHERE {
@@ -50,12 +64,21 @@ bindings = JSON.parse(response.body).dig("results", "bindings") || []
 puts "Received #{bindings.size} records in #{(Time.now - start).round(1)}s, inserting..."
 
 skipped_non_photo = 0
+skipped_bad_coords = 0
 before = Image.count
 bindings.each do |b|
   coord = b.dig("coord", "value")
   match = coord && coord.match(/Point\(([-\d.]+)\s+([-\d.]+)\)/)
-  next unless match
-  lng, lat = match[1].to_f, match[2].to_f
+  unless match
+    skipped_bad_coords += 1
+    next
+  end
+  lng = normalize_longitude(match[1].to_f)
+  lat = match[2].to_f
+  unless valid_latitude?(lat) && valid_longitude?(lng)
+    skipped_bad_coords += 1
+    next
+  end
 
   url = b.dig("image", "value")&.sub(/\Ahttp:/, "https:")
   next if url.blank? || url.length > 500
@@ -73,7 +96,7 @@ bindings.each do |b|
   end
 end
 
-puts "Created #{Image.count - before} new images (#{Image.count} total); skipped #{skipped_non_photo} non-photos"
+puts "Created #{Image.count - before} new images (#{Image.count} total); skipped #{skipped_non_photo} non-photos; rejected #{skipped_bad_coords} for coordinate issues"
 
 # Ensure every Image is linked into the default set
 default_set = ImageSet.find_or_create_by!(is_system_default: true) do |s|
@@ -85,8 +108,10 @@ linked = 0
 Image.find_each do |img|
   item = default_set.image_set_items.find_or_initialize_by(image: img)
   if item.new_record?
-    item.latitude  = img.latitude
-    item.longitude = img.longitude
+    lat = img.latitude&.to_f
+    lng = normalize_longitude(img.longitude&.to_f)
+    item.latitude  = valid_latitude?(lat) ? lat : nil
+    item.longitude = valid_longitude?(lng) ? lng : nil
     item.save!
     linked += 1
   end
