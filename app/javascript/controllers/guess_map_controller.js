@@ -33,14 +33,7 @@ export default class extends Controller {
       if (this.locked) return
 
       const { lng, lat } = e.lngLat
-
-      if (this.marker) {
-        this.marker.setLngLat([lng, lat])
-      } else {
-        this.marker = new maptilersdk.Marker({ color: "#ef4444" })
-          .setLngLat([lng, lat])
-          .addTo(this.map)
-      }
+      this.placePin(lat, lng)
 
       this.dispatch("pinned", { detail: { lat, lng } })
     })
@@ -61,6 +54,16 @@ export default class extends Controller {
       [ [min_lng, min_lat], [max_lng, max_lat] ],
       { padding: 60, maxZoom: 6, animate: false }
     )
+  }
+
+  placePin(lat, lng) {
+    if (this.marker) {
+      this.marker.setLngLat([lng, lat])
+    } else {
+      this.marker = new maptilersdk.Marker({ color: "#ef4444" })
+        .setLngLat([lng, lat])
+        .addTo(this.map)
+    }
   }
 
   lock() {

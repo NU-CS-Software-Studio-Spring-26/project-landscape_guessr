@@ -18,6 +18,46 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
+  test "practice renders with default timer when no seconds provided" do
+    get practice_path
+    assert_response :success
+    assert_includes response.body, 'data-practice-time-limit-value="0"'
+  end
+
+  test "practice accepts supported timer duration" do
+    get practice_path(seconds: 120)
+    assert_response :success
+    assert_includes response.body, 'data-practice-time-limit-value="120"'
+  end
+
+  test "practice falls back to default duration on unsupported seconds" do
+    get practice_path(seconds: 999)
+    assert_response :success
+    assert_includes response.body, 'data-practice-time-limit-value="60"'
+  end
+
+  test "practice accepts two-attempt option" do
+    get practice_path(attempts: 2)
+    assert_response :success
+    assert_includes response.body, 'data-practice-attempts-value="2"'
+    assert_includes response.body, "Submit first attempt"
+  end
+
+  test "practice falls back to one attempt on unsupported attempts value" do
+    get practice_path(attempts: 9)
+    assert_response :success
+    assert_includes response.body, 'data-practice-attempts-value="1"'
+  end
+
+  test "practice reuses provided image when changing timer options" do
+    get practice_path(seconds: 30, image_id: @public_image.id)
+    assert_response :success
+    assert_includes response.body, "data-practice-image-id-value=\"#{@public_image.id}\""
+    assert_includes response.body, 'data-action="practice#setTimer"'
+    assert_includes response.body, 'data-practice-seconds-param="60"'
+    assert_includes response.body, 'data-action="practice#setAttempts"'
+  end
+
   test "check returns coords for system-default image when unauthenticated" do
     get practice_check_path, params: { image_id: @public_image.id, lat: 0, lng: 0 }, as: :json
     assert_response :success

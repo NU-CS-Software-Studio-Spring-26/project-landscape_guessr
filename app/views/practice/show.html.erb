@@ -12,9 +12,65 @@
      data-action="guess-map:pinned->practice#pinChanged"
      data-practice-image-id-value="<%= @image.id %>"
      data-practice-check-url-value="<%= practice_check_path %>"
+     data-practice-time-limit-value="<%= @time_limit_seconds.to_i %>"
+     data-practice-attempts-value="<%= @attempts.to_i %>"
      class="w-full space-y-6">
 
-  <h1 class="heading-page">Where is this?</h1>
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <h1 class="heading-page">Where is this?</h1>
+    <div class="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+      <span>Timer:</span>
+      <button type="button"
+              data-practice-target="timerOption"
+              data-action="practice#setTimer"
+              data-practice-seconds-param="0"
+              aria-pressed="<%= @time_limit_seconds.nil? %>"
+              class="rounded-full border px-2.5 py-1 font-medium transition-colors cursor-pointer <%= @time_limit_seconds.nil? ? 'bg-blue-100 text-blue-800 border-blue-300 shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' %>">
+        Off
+      </button>
+      <% [30, 60, 120].each do |seconds| %>
+        <button type="button"
+                data-practice-target="timerOption"
+                data-action="practice#setTimer"
+                data-practice-seconds-param="<%= seconds %>"
+                aria-pressed="<%= @time_limit_seconds == seconds %>"
+                class="rounded-full border px-2.5 py-1 font-medium transition-colors cursor-pointer <%= @time_limit_seconds == seconds ? 'bg-blue-100 text-blue-800 border-blue-300 shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' %>">
+          <%= seconds %>s
+        </button>
+      <% end %>
+    </div>
+  </div>
+
+  <div class="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+    <span>Attempts:</span>
+    <% [1, 2].each do |attempts| %>
+      <button type="button"
+              data-practice-target="attemptsOption"
+              data-action="practice#setAttempts"
+              data-practice-attempts-param="<%= attempts %>"
+              aria-pressed="<%= @attempts == attempts %>"
+              class="rounded-full border px-2.5 py-1 font-medium transition-colors cursor-pointer <%= @attempts == attempts ? 'bg-blue-100 text-blue-800 border-blue-300 shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' %>">
+        <%= attempts %>
+      </button>
+    <% end %>
+  </div>
+
+  <div data-practice-target="timerPanel"
+       class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 <%= @time_limit_seconds.present? ? '' : 'hidden' %>">
+    <p class="text-sm text-amber-900">Drop a pin before time runs out. If time expires, your guess auto-submits.</p>
+    <div class="flex items-center gap-2">
+      <span class="text-xs text-amber-800">Time left</span>
+      <span data-practice-target="timer"
+            class="inline-flex min-w-14 justify-center rounded bg-white px-2.5 py-1 text-sm font-semibold text-amber-800 border border-amber-200">
+        <%= (@time_limit_seconds || 0) %>s
+      </span>
+    </div>
+    <div class="w-full h-3 rounded-full bg-amber-100 overflow-hidden border border-amber-200/70">
+      <div data-practice-target="timerBar"
+           class="h-full"
+           style="width: 100%"></div>
+    </div>
+  </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
     <%# Same scroll-zoom + inline-replace-with-original as /games/:id. %>
@@ -55,7 +111,7 @@
             data-action="practice#submitGuess"
             disabled
             class="btn-primary disabled:opacity-40 disabled:cursor-not-allowed">
-      Submit guess
+      <%= @attempts == 2 ? "Submit first attempt" : "Submit guess" %>
     </button>
 
     <button data-practice-target="nextBtn"

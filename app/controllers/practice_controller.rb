@@ -1,25 +1,14 @@
 class PracticeController < ApplicationController
+  PRACTICE_TIMER_SECONDS = [ 30, 60, 120 ].freeze
+  PRACTICE_ATTEMPTS = [ 1, 2 ].freeze
+
   allow_unauthenticated_access only: %i[ show check ]
   skip_before_action :require_email_verified
 
   def show
-    default_set = ImageSet.default
-    # Practice mode shows a random image and asks for a guess, so the image
-    # must have lat/lng — otherwise the "answer" is (0, 0) and every guess
-    # scores arbitrarily. Filter at the DB level.
-    # TODO: the `Image.all` fallback (when default set has no located images)
-    # leaks images from private sets to anonymous visitors. Replace with a
-    # `visible_to(Current.user)` scope, or just drop the fallback and let the
-    # nil-image branch render the friendly message.
-    # TODO: missing `and return` on the redirect below — the show view will
-    # render after the redirect and crash on `@image.id` when @image is nil.
-    located = ->(scope) { scope.where.not(latitude: nil).where.not(longitude: nil) }
-    @image = located.call(default_set&.images || Image.all).order(Arel.sql("RANDOM()")).first ||
-             located.call(Image.all).order(Arel.sql("RANDOM()")).first
-
-    if @image.nil?
-      redirect_to images_path, alert: "No images with coordinates are available yet."
-    end
+    @time_limit_seconds = practice_seconds_param
+    @attempts = practice_attempts_param
+    load_random_located_image
   end
 
   def check
@@ -46,5 +35,46 @@ class PracticeController < ApplicationController
       answer_lng: ans_lng,
       distance_km: distance_km
     }
+  end
+
+  private
+
+  def load_random_located_image
+    default_set = ImageSet.default
+    @image = current_image_from_params(default_set)
+    return if @image.present?
+
+    # Practice mode shows a random image and asks for a guess, so the image
+    # must have lat/lng — otherwise the "answer" is (0, 0) and every guess
+    # scores arbitrarily. Filter at the DB level.
+    located = ->(scope) { scope.where.not(latitude: nil).where.not(longitude: nil) }
+    @image = located.call(default_set&.images || Image.all).order(Arel.sql("RANDOM()")).first ||
+             located.call(Image.all).order(Arel.sql("RANDOM()")).first
+
+    return unless @image.nil?
+
+    redirect_to images_path, alert: "No images with coordinates are available yet."
+  end
+
+  def practice_seconds_param
+    seconds = params[:seconds].to_i
+    return nil if seconds <= 0
+
+    PRACTICE_TIMER_SECONDS.include?(seconds) ? seconds : 60
+  end
+
+  def practice_attempts_param
+    attempts = params[:attempts].to_i
+    PRACTICE_ATTEMPTS.include?(attempts) ? attempts : 1
+  end
+
+  def current_image_from_params(default_set)
+    image_id = params[:image_id].to_i
+    return nil if image_id <= 0 || default_set.blank?
+
+    default_set.images
+               .where(id: image_id)
+               .where.not(latitude: nil, longitude: nil)
+               .first
   end
 end
