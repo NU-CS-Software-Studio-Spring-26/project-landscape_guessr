@@ -1,0 +1,228 @@
+require "net/http"
+require "uri"
+require "json"
+
+# Runs SPARQL queries against query.wikidata.org and turns the rows into
+# Image / ImageSetItem records. The AI returns a *pattern* (WHERE-clause
+# body); this service wraps the pattern three ways:
+#
+#   count!    — `SELECT (COUNT(*) AS ?c) WHERE { <pattern> }`
+#   sample!   — random 30-row preview (uses bd:sample for large categories)
+#   import!   — full fetch, optionally with bd:sample for large categories,
+#               then insert into an ImageSet (image_set_items)
+#
+# All three reuse the wrapper helpers so the AI's pattern is the only
+# AI-controlled string anywhere in the codebase that reaches an external
+# service. The endpoint is hardcoded (read-only); there's no SSRF.
+class WikidataImporter
+  ENDPOINT = URI("https://query.wikidata.org/sparql").freeze
+  USER_AGENT = "landscape-guessr/ai-image-sets (https://github.com/NU-CS-Software-Studio-Spring-26/project-landscape_guessr) Ruby/#{RUBY_VERSION}".freeze
+
+  # WDQS hard timeout is 60s. Our read_timeout is 90s to swallow a bit of
+  # network jitter without a connection-reset on the application side.
+  READ_TIMEOUT = 90
+
+  # Server-side safety net. If the AI returns a pattern with no sample
+  # and no apparent limit on result size, this caps the import. AI is
+  # instructed to use bd:sample for huge categories; this catches the
+  # case where it forgets.
+  HARD_CAP = 10_000
+
+  # Non-photo filename patterns lifted from db/seeds.rb. Wikidata
+  # occasionally records a satellite image or schematic as P18. No \b
+  # word boundaries — Ruby's \b treats `_` as a word char, so \bMODIS\b
+  # fails to match "MODIS_satellite.jpg". The seeder learned this the
+  # hard way; do not re-add \b without testing against real filenames.
+  NON_PHOTO_PATTERNS = [
+    /ASTER|MODIS|Landsat|LANDSAT|Sentinel|MISR|Messtischblatt/i,
+    /_map[._]|location[_\s-]map|relief[_\s-]map|system[_\s-]map/i,
+    /topographic|schematic|Harper.?s[_\s-]New/i
+  ].freeze
+
+  class Error < StandardError; end
+  class TimeoutError < Error; end
+
+  # Returns the total number of items the pattern would match (counting
+  # items that have either a Wikidata P18 image or an English Wikipedia
+  # article — anything we could pull a photo from). Cheap; the WDQS
+  # optimizer handles COUNT queries quickly.
+  def self.count(pattern:)
+    sparql = <<~SPARQL
+      SELECT (COUNT(*) AS ?c) WHERE {
+        #{pattern}
+        #{image_or_article_block}
+      }
+    SPARQL
+    rows = run_query(sparql)
+    rows.first&.dig("c", "value").to_i
+  end
+
+  # Returns up to `limit` rows (default 30) for preview thumbnails on
+  # the form. NOT a random sample — WDQS's bd:sample SERVICE only
+  # accepts a single direct triple inside, which is incompatible with
+  # the multi-constraint patterns the AI generates (property paths,
+  # country filters, etc. all break it). LIMIT 30 gives alphabetical
+  # ordering, which for preview purposes is fine — the user just
+  # wants to see "what kind of thing is this query matching?"
+  def self.sample(pattern:, image_source: "wikidata_p18", limit: 30)
+    sparql = wrap_with_limit(pattern, limit: limit, with_label: true)
+    rows = run_query(sparql)
+    rows = normalize_rows(rows)
+    if image_source == "wikipedia_pageimages"
+      WikipediaImageFetcher.refresh_images!(rows: rows)
+    end
+    dedupe_by_url(rows.select { |r| r[:url].present? && r[:lat] && r[:lng] })
+  end
+
+  # Full import. Wraps the pattern with the OPTIONAL+FILTER trailer and
+  # caps at HARD_CAP (10,000). Updates `image_set.import_progress`
+  # periodically so the show page's polling UI can render progress bars.
+  def self.import!(image_set:, pattern:, image_source: "wikidata_p18")
+    sparql = wrap_with_limit(pattern, limit: HARD_CAP, with_label: true)
+
+    rows = run_query(sparql)
+    rows = normalize_rows(rows)
+
+    if image_source == "wikipedia_pageimages"
+      WikipediaImageFetcher.refresh_images!(rows: rows)
+    end
+
+    # Filter rows the renderer would just drop anyway. Reports an honest
+    # import_total before we start inserting so the progress bar isn't
+    # off-by-skipped-rows. URL-dedup AFTER pageimages rewrite (the
+    # rewrite changes URLs, so dedup must come after).
+    keepable = rows.select { |r| r[:url].present? && r[:lat] && r[:lng] && photo_url?(r[:url]) }
+    keepable = dedupe_by_url(keepable)
+
+    image_set.update_columns(import_total: keepable.size, import_progress: 0)
+
+    new_links = 0
+    inserted = 0
+    keepable.each_slice(100) do |slice|
+      ImageSetItem.transaction do
+        slice.each do |row|
+          image = Image.find_or_create_by!(url: row[:url]) do |img|
+            img.title     = row[:title].presence || "Untitled"
+            img.latitude  = row[:lat]
+            img.longitude = row[:lng]
+          end
+
+          item = image_set.image_set_items.find_or_initialize_by(image: image)
+          if item.new_record?
+            item.latitude  = row[:lat]
+            item.longitude = row[:lng]
+            item.save!
+            new_links += 1
+          end
+        end
+      end
+      inserted += slice.size
+      image_set.update_columns(import_progress: inserted)
+    end
+
+    new_links
+  end
+
+  # === wrappers ===
+
+  # Plain LIMIT-bounded query. Used when AI says the category isn't huge
+  # (uses_random_sample = false). The OPTIONAL+FILTER trailer is added
+  # outside the AI's pattern, then bounded by LIMIT.
+  def self.wrap_with_limit(pattern, limit:, with_label: true)
+    label_service = with_label ? %(SERVICE wikibase:label { bd:serviceParam wikibase:language "en" }) : ""
+    <<~SPARQL
+      SELECT DISTINCT ?item ?itemLabel ?image ?coord ?article WHERE {
+        #{pattern}
+        #{image_or_article_block}
+        #{label_service}
+      } LIMIT #{limit.to_i}
+    SPARQL
+  end
+
+  # Standard P18-or-Wikipedia-article trailer. Items pass if they have a
+  # Wikidata P18 image OR an English Wikipedia article (so we can fall
+  # back to the article's lead image via WikipediaImageFetcher).
+  def self.image_or_article_block
+    <<~BLOCK
+      OPTIONAL { ?item wdt:P18 ?image }
+      OPTIONAL {
+        ?article schema:about ?item ;
+                 schema:isPartOf <https://en.wikipedia.org/> .
+      }
+      FILTER (BOUND(?image) || BOUND(?article))
+    BLOCK
+  end
+
+  # === HTTP ===
+
+  def self.run_query(sparql)
+    req = Net::HTTP::Post.new(ENDPOINT)
+    req["Accept"]       = "application/sparql-results+json"
+    req["Content-Type"] = "application/x-www-form-urlencoded"
+    req["User-Agent"]   = USER_AGENT
+    req.body = URI.encode_www_form(query: sparql)
+
+    response = Net::HTTP.start(ENDPOINT.hostname, ENDPOINT.port, use_ssl: true, read_timeout: READ_TIMEOUT) do |h|
+      h.request(req)
+    end
+
+    if response.code != "200"
+      raise Error, "Wikidata returned HTTP #{response.code}: #{response.body.to_s[0, 300]}"
+    end
+
+    JSON.parse(response.body).dig("results", "bindings") || []
+  rescue Net::ReadTimeout, Net::OpenTimeout, EOFError => e
+    raise TimeoutError, "Wikidata query timed out: #{e.class}: #{e.message}"
+  end
+
+  # SPARQL binding -> plain hash. Dedupes by ?item: when an item has
+  # multiple P18 values, the query returns one row per (item, image)
+  # pair. Without this dedup, "Mount Fuji" would appear in the set twice
+  # — once for each of its P18 photos — which looks like a bug to users
+  # who asked for "one photo of every X". Keeps the first row per item;
+  # that's effectively the alphabetically-first image URL.
+  def self.normalize_rows(bindings)
+    seen_items = Set.new
+    bindings.filter_map do |b|
+      iri = b.dig("item", "value")
+      next if iri && !seen_items.add?(iri)
+
+      coord = b.dig("coord", "value")
+      m = coord && coord.match(/Point\(([-\d.]+)\s+([-\d.]+)\)/)
+      lng, lat = m ? [ m[1].to_f, m[2].to_f ] : [ nil, nil ]
+
+      url   = b.dig("image", "value")&.sub(/\Ahttp:/, "https:")
+      title = b.dig("itemLabel", "value").presence
+      title = nil if title&.match?(/\AQ\d+\z/) # Wikibase falls back to entity id when no label
+
+      {
+        item:    iri,
+        title:   title || "Untitled",
+        url:     url,
+        lat:     lat,
+        lng:     lng,
+        article: b.dig("article", "value") # may be nil; consumed by WikipediaImageFetcher
+      }
+    end
+  end
+
+  # Drops rows with a URL we've already seen. Why URL-dedup *after*
+  # item-dedup (in normalize_rows): two different Wikidata items can
+  # share an image URL (e.g. one photo featuring two adjacent peaks
+  # gets used as P18 for both items). Without this pass, both items
+  # render as separate cards in the preview/set with the same picture.
+  # Keeps the first row per URL.
+  def self.dedupe_by_url(rows)
+    seen = Set.new
+    rows.select { |r| seen.add?(r[:url]) }
+  end
+
+  # URL passes the "looks like a photo" sniff test? Drops obvious maps,
+  # schematics, satellite imagery that Wikidata sometimes records as P18.
+  def self.photo_url?(url)
+    return false if url.blank? || url.length > 500
+    return false unless url.match?(/\.(jpe?g|png)\z/i)
+    decoded = URI.decode_www_form_component(url.split("/").last.to_s)
+    !NON_PHOTO_PATTERNS.any? { |p| decoded.match?(p) }
+  end
+end

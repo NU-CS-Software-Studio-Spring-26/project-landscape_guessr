@@ -1,0 +1,451 @@
+require "net/http"
+require "uri"
+require "json"
+
+# Turns a natural-language prompt ("volcanoes in Japan") into a Wikidata
+# SPARQL graph pattern that the rest of the pipeline can run.
+#
+# Architecture: Gemini function-calling agent loop. The AI has two tools
+# at its disposal:
+#
+#   search_wikidata(query)  — look up Q-IDs by label (wbsearchentities)
+#   submit_answer(...)      — return the final structured payload
+#
+# The AI may call search_wikidata any number of times to resolve labels
+# like "Frank Lloyd Wright" or "Buddhist temple" to Q-IDs, then calls
+# submit_answer EXACTLY ONCE with the final SPARQL pattern. submit_answer
+# replaces the response_schema we used to use; Gemini's API rejects
+# response_schema + tools[] together (HTTP 400 INVALID_ARGUMENT), so we
+# move structured-output enforcement into the tool's parameter schema.
+#
+# The only AI-controlled string that leaves the app is the SPARQL
+# pattern, which is sent read-only to query.wikidata.org. Search queries
+# are also AI-controlled but go to wbsearchentities (read-only).
+#
+# Cost: Flash with ~6 tool rounds per query = ~$0.02-0.05 per generation.
+# At 50/month → ~$1-3. Pro (~$0.10-0.30 per generation) is used as a
+# fallback only when Flash returns no usable answer.
+class AiImageSetGenerator
+  class Error < StandardError; end
+  class RateLimitError < Error; end
+  class InvalidResponseError < Error; end
+
+  FLASH_MODEL = "gemini-2.5-flash".freeze
+  PRO_MODEL   = "gemini-2.5-pro".freeze
+  API_BASE    = "https://generativelanguage.googleapis.com/v1beta/models".freeze
+
+  # Cap the function-call cycle. The AI typically resolves 2-4 Q-IDs per
+  # query, plus the final submit_answer — so 8 turns is generous. Going
+  # over means the AI is stuck in a loop; better to fail and let the
+  # user refine.
+  MAX_TOOL_ROUNDS = 8
+
+  # Property list IS load-bearing — these are the SPARQL grammar, not
+  # entity lookups. Search-tool results for property concepts are noisy
+  # (search('country') #1 is "country music", not P17), so we hardcode
+  # this short list. Everything else — categories, countries, people,
+  # events, schema concepts — the AI discovers via search_wikidata.
+  #
+  # If the AI needs a property not in this list, it can search for it
+  # with entity_type='property'. The search tool supports both.
+  UNIVERSAL_PROPERTIES = <<~PROPS.freeze
+      P31    instance of                   P279   subclass of
+      P17    country                       P30    continent
+      P36    capital (country->capital)    P1376  capital of (city->country)
+      P18    image                         P625   coordinate location
+      P131   located in admin entity       P84    architect
+      P138   named after                   P361   part of
+      P571   inception                     P576   dissolved/demolished
+      P1435  heritage designation          P50    author
+      P170   creator                       P175   performer
+  PROPS
+
+  # The two tools the AI has access to. search_wikidata fans out to the
+  # wbsearchentities API; submit_answer is the AI's way of returning the
+  # final structured payload (replaces response_schema since Gemini
+  # rejects schema + tools together).
+  TOOLS = [ {
+    function_declarations: [
+      {
+        # Like submit_answer, the schema here is bare. Verbose descriptions
+        # + enum constraints make Gemini Flash emit MALFORMED_FUNCTION_CALL
+        # on multi-round prompts. Usage guidance lives in the system prompt.
+        name: "search_wikidata",
+        description: "Search Wikidata by English label. Returns up to 5 candidates. See system prompt for guidance.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            query:       { type: "STRING" },
+            # Renamed from `type` — that name reads as reserved to the
+            # model (research/adk-go#492) and was a plausible contributor
+            # to MALFORMED rate. `entity_type` is unambiguous.
+            entity_type: { type: "STRING" }
+          },
+          required: [ "query" ]
+        }
+      },
+      {
+        name: "inspect_entity",
+        description: "Inspect a known Wikidata item's actual claims (properties+values). Use to verify HOW Wikidata models a category — e.g. is 'UNESCO World Heritage Site' an instance (P31) or a designation (P1435) on member items? Pick a Q-ID you're confident is a representative example and inspect it.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            qid: { type: "STRING" }
+          },
+          required: [ "qid" ]
+        }
+      },
+      {
+        # Schema kept deliberately MINIMAL — earlier version with verbose
+        # descriptions + `enum` constraint triggered Gemini Flash to emit
+        # `finishReason: "MALFORMED_FUNCTION_CALL"` (empty parts) on ~40%
+        # of prompts. Descriptions + constraints belong in the system
+        # prompt; the function signature stays bare so Gemini reliably
+        # produces well-formed calls. Server-side validation in
+        # parse_submit catches bad values.
+        name: "submit_answer",
+        description: "Call exactly once with your final answer. Constraints on each field are in the system prompt.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            sparql_pattern: { type: "STRING" },
+            set_name:       { type: "STRING" },
+            explanation:    { type: "STRING" },
+            image_source:   { type: "STRING" },
+            cannot_answer:  { type: "BOOLEAN" }
+          },
+          required: %w[sparql_pattern set_name explanation image_source cannot_answer]
+        }
+      }
+    ]
+  } ].freeze
+
+  def initialize(api_key: ENV["GEMINI_API_KEY"], model: :flash, timeout: 60)
+    raise Error, "GEMINI_API_KEY not configured" if api_key.blank?
+    @api_key = api_key
+    @model = model_id_for(model)
+    @timeout = timeout
+  end
+
+  # `conversation` is an array of {role: "user"|"model", text: "..."} hashes
+  # representing prior user/AI turns (the AI's prior turns are summarized
+  # as the JSON they returned). The current user message must be the last
+  # element with role: "user".
+  #
+  # Returns a parsed hash with keys :sparql_pattern, :set_name,
+  # :explanation, :image_source, :cannot_answer. Function-call loop is
+  # internal; the returned hash is what submit_answer received.
+  def generate(conversation:)
+    raise Error, "conversation must end with a user turn" unless conversation.last&.dig(:role) == "user"
+
+    # Internal contents array uses Gemini's format. We rebuild it from
+    # the simpler user-facing conversation, then append model+function
+    # turns as the loop progresses.
+    contents = conversation.map do |turn|
+      { role: turn[:role], parts: [ { text: turn[:text] } ] }
+    end
+
+    text_only_retried = false
+    malformed_retries = 0
+
+    MAX_TOOL_ROUNDS.times do
+      response = call_gemini(contents)
+      candidate = response.dig("candidates", 0) || {}
+      parts = candidate.dig("content", "parts") || []
+      if parts.empty?
+        finish = candidate["finishReason"]
+        # MALFORMED_FUNCTION_CALL is non-deterministic on Flash with
+        # multi-round prompts — retry the SAME conversation once or twice
+        # before giving up. The retry uses temperature 0.0 already so
+        # we'd ordinarily expect determinism, but Flash structured-output
+        # behavior has stochastic edge cases.
+        if finish == "MALFORMED_FUNCTION_CALL" && malformed_retries < 4
+          malformed_retries += 1
+          next
+        end
+        safety = candidate["safetyRatings"]
+        usage = response["usageMetadata"]
+        raise InvalidResponseError,
+          "no parts in Gemini response (finishReason=#{finish.inspect}, " \
+          "usage=#{usage.to_json}, safety=#{safety.to_json})"
+      end
+
+      function_calls = parts.select { |p| p["functionCall"] }
+
+      if function_calls.empty?
+        # AI emitted text without calling submit_answer. Gemini sometimes
+        # forgets the tool-call instruction. Give it ONE chance to recover
+        # by re-prompting explicitly. If it still skips submit_answer
+        # after that, fail loud.
+        if text_only_retried
+          text = parts.find { |p| p["text"] }&.dig("text").to_s.slice(0, 300)
+          raise InvalidResponseError, "AI emitted text instead of calling submit_answer (after retry): #{text.inspect}"
+        end
+        contents << { role: "model", parts: parts }
+        contents << {
+          role: "user",
+          parts: [ { text: "You must respond by calling the submit_answer function, not by writing text. Call submit_answer now with your final answer." } ]
+        }
+        text_only_retried = true
+        next
+      end
+
+      # Append the AI's model turn (the function calls). Required by
+      # Gemini's protocol — the next request must include the model's
+      # functionCall AND our functionResponse, in order.
+      contents << { role: "model", parts: parts }
+
+      submit = function_calls.find { |fc| fc.dig("functionCall", "name") == "submit_answer" }
+      if submit
+        return parse_submit(submit["functionCall"]["args"])
+      end
+
+      # All search_wikidata responses go in ONE user turn with multiple
+      # parts. Earlier draft put each response in its own turn — Gemini's
+      # protocol for parallel function calls expects them batched.
+      response_parts = function_calls.map do |fc|
+        name = fc.dig("functionCall", "name")
+        args = fc.dig("functionCall", "args") || {}
+        result = run_tool(name, args)
+        { functionResponse: { name: name, response: { content: result } } }
+      end
+      contents << { role: "user", parts: response_parts }
+    end
+
+    raise InvalidResponseError, "Hit MAX_TOOL_ROUNDS (#{MAX_TOOL_ROUNDS}) without submit_answer — AI is stuck"
+  end
+
+  private
+
+  def model_id_for(model)
+    case model.to_sym
+    when :flash then FLASH_MODEL
+    when :pro   then PRO_MODEL
+    else raise Error, "unknown model: #{model.inspect}"
+    end
+  end
+
+  def call_gemini(contents)
+    body = {
+      systemInstruction: { parts: [ { text: system_prompt } ] },
+      contents: contents,
+      tools: TOOLS,
+      # VALIDATED mode is Google's documented fix for MALFORMED_FUNCTION_CALL:
+      # the model is constrained to either call one of the allowed functions
+      # OR emit text — and the output is schema-validated before being
+      # returned. AUTO (the default) lets the model freestyle structure,
+      # which is what produces empty parts + MALFORMED on multi-round
+      # prompts. See https://ai.google.dev/gemini-api/docs/function-calling.
+      toolConfig: {
+        functionCallingConfig: {
+          mode: "VALIDATED",
+          allowedFunctionNames: %w[search_wikidata inspect_entity submit_answer]
+        }
+      },
+      generationConfig: {
+        # Thinking gives the model space to plan tool calls cleanly.
+        # Empirically: disabling it raised MALFORMED rate; 1500 budget
+        # is a workable middle. CRITICAL companion to thinking: any
+        # thoughtSignature parts on returned functionCall parts MUST be
+        # echoed back verbatim in the next turn — Ruby's Hash preserves
+        # unknown keys when we round-trip via JSON.parse/JSON.generate,
+        # so the existing `contents << { role: "model", parts: parts }`
+        # already does this. Don't strip fields from response parts.
+        thinkingConfig: { thinkingBudget: 1500 },
+        maxOutputTokens: 4096,
+        temperature: 0.2
+      }
+    }
+
+    JSON.parse(post_with_retry(body).body)
+  end
+
+  def post_with_retry(body)
+    uri = URI("#{API_BASE}/#{@model}:generateContent")
+    attempts = 0
+    max_attempts = 2
+
+    loop do
+      attempts += 1
+      req = Net::HTTP::Post.new(uri)
+      req["Content-Type"] = "application/json"
+      req["x-goog-api-key"] = @api_key
+      req.body = JSON.generate(body)
+
+      response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true, read_timeout: @timeout) do |h|
+        h.request(req)
+      end
+
+      return response if response.code == "200"
+
+      retryable = response.code == "429" || response.code.start_with?("5")
+      if retryable && attempts < max_attempts
+        sleep 2 * attempts
+        next
+      end
+
+      raise RateLimitError, "Gemini rate-limited (#{response.code})" if response.code == "429"
+      raise Error, "Gemini API #{response.code}: #{response.body.to_s[0, 300]}"
+    end
+  end
+
+  # Dispatch a function call to the right service. Returns a JSON-
+  # serializable hash that Gemini will read back as the function's
+  # response.
+  def run_tool(name, args)
+    case name
+    when "search_wikidata"
+      type = %w[item property].include?(args["entity_type"]) ? args["entity_type"] : "item"
+      hits = WikidataEntitySearch.search(query: args["query"].to_s, type: type)
+      { results: hits }
+    when "inspect_entity"
+      entity = WikidataEntityInspect.inspect_entity(qid: args["qid"].to_s)
+      entity ? { entity: entity } : { error: "no entity found for #{args["qid"]}" }
+    else
+      { error: "unknown function: #{name}" }
+    end
+  end
+
+  # Validate + return the submit_answer payload. Defensive checks even
+  # though Gemini's parameter schema should enforce required fields;
+  # the AI occasionally violates schemas in practice.
+  def parse_submit(args)
+    payload = {
+      sparql_pattern: args["sparql_pattern"].to_s,
+      set_name:       args["set_name"].to_s.strip.presence || "Untitled AI Set",
+      explanation:    args["explanation"].to_s.strip,
+      image_source:   args["image_source"].to_s,
+      cannot_answer:  args["cannot_answer"] == true
+    }
+
+    unless %w[wikidata_p18 wikipedia_pageimages].include?(payload[:image_source])
+      payload[:image_source] = "wikipedia_pageimages"
+    end
+
+    return payload if payload[:cannot_answer]
+
+    raise InvalidResponseError, "submit_answer with empty sparql_pattern" if payload[:sparql_pattern].strip.empty?
+
+    %w[SELECT OPTIONAL FILTER UNION SERVICE].each do |kw|
+      if payload[:sparql_pattern] =~ /\b#{kw}\b/i
+        raise InvalidResponseError, "AI returned #{kw} in sparql_pattern (must be selection-only)"
+      end
+    end
+
+    payload
+  end
+
+  def system_prompt
+    <<~PROMPT
+      You generate Wikidata SPARQL graph patterns for an image-set
+      creation tool. The user describes images they want. You reason
+      about how Wikidata models that intent, resolve every Q-ID via
+      the search_wikidata tool, then call submit_answer with the
+      final SPARQL pattern.
+
+      UNIVERSAL PROPERTIES (no need to search for these):
+      #{UNIVERSAL_PROPERTIES}
+
+      WORKFLOW:
+      1. Identify the entities and relationships in the user's request.
+      2. For each one, call search_wikidata with a SHORT English label
+         (e.g. "volcano", "Japan", "Frank Lloyd Wright" — not the user's
+         whole sentence). For properties not in the universal list above,
+         set entity_type="property".
+      3. Read every candidate's DESCRIPTION and pick the one whose
+         description matches your intent. The ranking is label-match,
+         not semantic — for common nouns the #1 result is often wrong
+         (e.g. search('country') returns "country music" first). If no
+         candidate clearly fits, search again with a different phrasing.
+      4. If you're uncertain HOW Wikidata models the category (e.g. is
+         "Gothic" a P31 class on its own, or a P149 value on a building
+         that's classed as P31 wd:Q41176? is "UNESCO World Heritage Site"
+         used as P31 or P1435?), pick a Q-ID you know is a representative
+         example (e.g. search "Notre-Dame de Paris" → inspect that
+         entity) and call inspect_entity. The claims you see will show
+         which property carries the attribute you care about.
+      5. Compose the SPARQL pattern using only the Q-IDs you've
+         verified through search/inspect.
+      6. Call submit_answer.
+
+      SUBMIT_ANSWER FIELD CONSTRAINTS:
+      - sparql_pattern: selection-only SPARQL. MUST bind ?item and ?coord.
+        MUST NOT contain SELECT, LIMIT, OPTIONAL, FILTER, UNION, or
+        service blocks — the server wraps the pattern. Empty string is
+        OK when cannot_answer=true. Example shape:
+        `?item wdt:P31/wdt:P279* wd:Q##### ; wdt:P17 wd:Q## ; wdt:P625 ?coord .`
+        Use wdt:P31/wdt:P279* (subclass walk) for broad categories;
+        exact wdt:P31 for narrow concepts with deliberate scope.
+      - set_name: 4-6 words, Title Case ("Volcanoes of Japan").
+      - explanation: 1-2 plain-English sentences, no jargon.
+      - image_source: MUST be exactly "wikipedia_pageimages" (default)
+        or "wikidata_p18". No other values.
+      - cannot_answer: boolean. true to refuse, false to provide a pattern.
+
+      MODELING PRINCIPLES (apply these before composing the pattern):
+
+      - **Attribute, not class.** When the user describes things with an
+        ATTRIBUTE (style, designation, status, award, role, period),
+        the attribute almost always has its own dedicated PROPERTY.
+        Examples of attribute kinds — architectural style, art movement,
+        heritage designation, listing status, awards, era, denomination.
+        Find the property that models that attribute (search with
+        entity_type="property"); do NOT filter on wdt:P31 of the
+        attribute's name. The item's P31 should be the "kind of thing"
+        (e.g. "building", "city"), and the attribute lives in a separate
+        triple.
+
+      - **Relation, not class.** "X of Y" relations (capital of, work by,
+        member of) use a property, not P31. Look for the property that
+        directly links X to Y. For "all capitals of countries":
+        `?country wdt:P36 ?item`, not `?item wdt:P31 wd:Q5119`.
+
+      - **Sovereign filtering.** If "country" must mean an actual
+        sovereign nation (not territory/region), search for the
+        sovereign-state concept Q-ID and constrain with that.
+
+      - **Multi-country regions** ("Scandinavia", "South America"):
+        `VALUES ?country { wd:QA wd:QB ... } . ?item wdt:P17 ?country` —
+        search each country Q-ID first.
+
+      REFUSAL — call submit_answer with cannot_answer=true if:
+      - The category isn't comprehensively indexed in Wikidata — even if
+        a Q-ID exists for the concept itself. Restaurants/shops/cafes
+        are the canonical case: there IS a Q-ID for "ramen shop"
+        (Q23812032), but Wikidata indexes only a handful of notable
+        examples, not the millions in real cities. Same logic for:
+        small private buildings, individual residences, local
+        businesses, social media accounts, recent events, people below
+        encyclopedic-celebrity threshold.
+      - The user's request is too vague to model ("stuff", "things",
+        "some images").
+      - Search results don't give you a confident Q-ID for the
+        CATEGORY (i.e. the kind of thing you'd P31-match) after 2-3
+        rephrasings. Don't guess.
+
+      IMAGE SOURCE:
+      - Default "wikipedia_pageimages" — fresher, editorially-curated
+        infobox photo from the English Wikipedia article.
+      - Use "wikidata_p18" only for very obscure long-tail categories
+        where most items won't have English Wikipedia articles, OR if
+        the user explicitly asks for "fast".
+
+      EXPLANATION STYLE:
+      - Plain English, friendly, no jargon.
+      - Bad: "Filters wd:Q8072 via wdt:P31/wdt:P279* with wdt:P17 wd:Q17."
+      - Good: "I'll find volcanoes located in Japan that have photos."
+
+      ONE EXAMPLE FLOW — user: "volcanoes in Japan"
+
+        search_wikidata("volcano") → Q8072 "type of mountain" ✓
+        search_wikidata("Japan")   → Q17  "country in East Asia" ✓
+        submit_answer(
+          sparql_pattern: "?item wdt:P31/wdt:P279* wd:Q8072 ; wdt:P17 wd:Q17 ; wdt:P625 ?coord .",
+          set_name: "Volcanoes of Japan",
+          explanation: "I'll find volcanoes located in Japan that have photos.",
+          image_source: "wikipedia_pageimages",
+          cannot_answer: false
+        )
+    PROMPT
+  end
+end

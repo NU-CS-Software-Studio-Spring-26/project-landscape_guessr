@@ -1,5 +1,5 @@
 class ImageSetsController < ApplicationController
-  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image attach_blob processing_status remove_item map new_filtered edit_filter update_filter preview_filter_count]
+  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image attach_blob processing_status remove_item map new_filtered edit_filter update_filter preview_filter_count import_status]
   before_action :require_owner, only: %i[edit update destroy locations update_locations add_image attach_blob processing_status remove_item edit_filter update_filter preview_filter_count]
   # Filtered sets' items are derived from the filter — any direct edit gets
   # blown away on the next materialize. Redirect those routes to the filter
@@ -337,6 +337,122 @@ class ImageSetsController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
+  # GET /image_sets/ai_new
+  # Empty AI form — user types a prompt, posts to ai_generate.
+  def ai_new
+    @ai_conversation = []
+    @ai_result = nil
+    @ai_preview = nil
+    @ai_count = nil
+  end
+
+  # POST /image_sets/ai_generate
+  #
+  # Multi-turn conversation: client posts the prior conversation as a
+  # serialized hidden field plus the new user message. We call Gemini,
+  # then auto-run the resulting pattern as a COUNT + 30-row preview so
+  # the user immediately sees what the AI matched. On Flash 0-results we
+  # silently escalate to Pro for one retry.
+  def ai_generate
+    return render plain: "Rate limit: try again tomorrow.", status: :too_many_requests if ai_rate_limited?
+
+    prior_conv = parse_conversation(params[:conversation_json])
+    user_msg   = params[:user_message].to_s.strip
+    if user_msg.empty?
+      redirect_to ai_new_image_sets_path, alert: "Type a prompt first." and return
+    end
+
+    conv = prior_conv + [ { role: "user", text: user_msg } ]
+
+    begin
+      @ai_result, model_used = generate_with_fallback(conv)
+    rescue AiImageSetGenerator::InvalidResponseError, AiImageSetGenerator::Error => e
+      # Gemini sometimes returns malformed responses (MALFORMED_FUNCTION_CALL)
+      # or is briefly down (503). Show a friendly retry message instead of
+      # leaking the stacktrace. The conversation_json hidden field has the
+      # prior turn so the user can retry from the same state.
+      Rails.logger.warn "[ai_generate] #{e.class}: #{e.message.slice(0, 300)}"
+      @ai_conversation = conv
+      @ai_result = nil
+      @ai_preview = nil
+      @ai_count = nil
+      @model_used = nil
+      flash.now[:alert] = "Something went wrong with the AI. Try sending your message again."
+      render :ai_new, status: :unprocessable_entity and return
+    end
+    @ai_conversation = conv + [ { role: "model", text: @ai_result.to_json } ]
+    bump_ai_rate_limit_counter
+
+    if @ai_result[:cannot_answer]
+      @ai_preview = nil
+      @ai_count = nil
+    else
+      @ai_count   = safe_count(@ai_result[:sparql_pattern])
+      @ai_preview = safe_sample(@ai_result[:sparql_pattern], image_source: @ai_result[:image_source])
+
+      # Flash 0-results → silently retry on Pro. Non-technical UX —
+      # the user shouldn't have to know about model choice; we just
+      # try harder behind the scenes when the first answer is empty.
+      if @ai_count.to_i.zero? && model_used == :flash
+        retry_result = retry_on_pro(conv)
+        if retry_result && !retry_result[:cannot_answer]
+          @ai_result = retry_result
+          @ai_conversation = conv + [ { role: "model", text: retry_result.to_json } ]
+          @ai_count = safe_count(@ai_result[:sparql_pattern])
+          @ai_preview = safe_sample(@ai_result[:sparql_pattern], image_source: @ai_result[:image_source])
+          flash.now[:notice] = "Tried harder on the second attempt."
+        end
+      end
+    end
+
+    @model_used = model_used
+    render :ai_new
+  end
+
+  # POST /image_sets/ai_create
+  #
+  # User has approved the preview. Create the ImageSet immediately (so
+  # they have somewhere to land) and kick off AiImportImagesJob to run
+  # the full SPARQL + image attachment in the background.
+  def ai_create
+    pattern = params[:ai_query].to_s.strip
+    if pattern.empty?
+      redirect_to ai_new_image_sets_path, alert: "No query to import." and return
+    end
+
+    image_set = Current.user.image_sets.new(
+      name:            params[:name].to_s.strip.presence || "Untitled AI Set",
+      visibility:      %w[public private].include?(params[:visibility]) ? params[:visibility] : "private",
+      ai_prompt:       params[:ai_prompt].to_s.strip,
+      ai_query:        pattern,
+      ai_explanation:  params[:ai_explanation].to_s.strip,
+      ai_model:        params[:ai_model].to_s.strip.presence || "flash",
+      ai_image_source: %w[wikidata_p18 wikipedia_pageimages].include?(params[:ai_image_source]) ? params[:ai_image_source] : "wikidata_p18",
+      import_state:    "pending"
+    )
+
+    if image_set.save
+      AiImportImagesJob.perform_later(image_set.id)
+      redirect_to image_set, notice: "Set created — importing images in the background."
+    else
+      redirect_to ai_new_image_sets_path, alert: image_set.errors.full_messages.join("; ")
+    end
+  end
+
+  # GET /image_sets/1/import_status
+  #
+  # Lightweight JSON for the show page's polling banner. Returns the
+  # current import state + progress so the UI can render a progress bar
+  # without a full page reload.
+  def import_status
+    render json: {
+      state:    @image_set.import_state,
+      progress: @image_set.import_progress.to_i,
+      total:    @image_set.import_total.to_i,
+      error:    @image_set.import_error
+    }
+  end
+
   private
 
   def set_image_set
@@ -445,5 +561,79 @@ class ImageSetsController < ApplicationController
   # blocking add_image / remove_item requests on Nominatim fetches.
   def refresh_filtered_children
     RematerializeFilteredSetsJob.perform_later(@image_set.id) if @image_set.filtered_sets.exists?
+  end
+
+  # === AI helpers ===
+
+  # Per-user daily cap. With $0.01-0.03 per call on Flash, 20 calls/day
+  # caps a single user at ~$0.60/day worst case. Cache key rolls over at
+  # midnight (Date#to_s yields YYYY-MM-DD).
+  AI_DAILY_LIMIT = 20
+
+  def ai_rate_limited?
+    Rails.cache.read(ai_rate_limit_key).to_i >= AI_DAILY_LIMIT
+  end
+
+  def bump_ai_rate_limit_counter
+    Rails.cache.increment(ai_rate_limit_key, 1, expires_in: 24.hours, raw: true) ||
+      Rails.cache.write(ai_rate_limit_key, 1, expires_in: 24.hours, raw: true)
+  end
+
+  def ai_rate_limit_key
+    "ai_image_set:#{Current.user.id}:#{Date.current}"
+  end
+
+  # Parse the hidden conversation field. Bounded length so a giant
+  # forged payload can't blow up the Gemini request.
+  MAX_CONVERSATION_TURNS = 10
+
+  def parse_conversation(raw)
+    return [] if raw.blank?
+    parsed = JSON.parse(raw)
+    return [] unless parsed.is_a?(Array)
+    parsed.first(MAX_CONVERSATION_TURNS).filter_map do |turn|
+      next unless turn.is_a?(Hash)
+      role = turn["role"]
+      text = turn["text"].to_s
+      next unless %w[user model].include?(role) && !text.empty?
+      { role: role, text: text.first(8000) }
+    end
+  rescue JSON::ParserError
+    []
+  end
+
+  # On the first turn, use Flash. On subsequent turns within a
+  # conversation, keep using Flash unless the user (via the next
+  # message) explicitly asked to escalate (handled separately).
+  def generate_with_fallback(conv)
+    gen = AiImageSetGenerator.new(model: :flash)
+    [ gen.generate(conversation: conv), :flash ]
+  rescue AiImageSetGenerator::Error => e
+    Rails.logger.warn "[ai_generate flash] #{e.class}: #{e.message}"
+    pro = AiImageSetGenerator.new(model: :pro)
+    [ pro.generate(conversation: conv), :pro ]
+  end
+
+  def retry_on_pro(conv)
+    AiImageSetGenerator.new(model: :pro).generate(conversation: conv)
+  rescue AiImageSetGenerator::Error => e
+    Rails.logger.warn "[ai_generate pro-retry] #{e.class}: #{e.message}"
+    nil
+  end
+
+  # Wikidata can return HTTP errors / timeouts; surface 0/[] so the
+  # view renders gracefully instead of 500ing the whole flow.
+  def safe_count(pattern)
+    WikidataImporter.count(pattern: pattern)
+  rescue WikidataImporter::Error => e
+    Rails.logger.warn "[ai_generate count] #{e.class}: #{e.message}"
+    nil
+  end
+
+  def safe_sample(pattern, image_source:)
+    WikidataImporter.sample(pattern: pattern, image_source: image_source, limit: 30)
+  rescue WikidataImporter::Error => e
+    Rails.logger.warn "[ai_generate sample] #{e.class}: #{e.message}"
+    []
   end
 end

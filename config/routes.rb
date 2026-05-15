@@ -21,6 +21,11 @@ Rails.application.routes.draw do
     collection { get :map }
   end
   resources :image_sets do
+    collection do
+      get  :ai_new
+      post :ai_generate
+      post :ai_create
+    end
     member do
       get  :locations
       put  :locations, action: :update_locations
@@ -33,6 +38,7 @@ Rails.application.routes.draw do
       patch :update_filter
       get :preview_filter_count
       post :preview_filter_count, action: :preview_filter_count
+      get :import_status
     end
     delete "items/:item_id", to: "image_sets#remove_item", as: :remove_item
   end

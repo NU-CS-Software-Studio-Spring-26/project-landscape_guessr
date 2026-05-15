@@ -123,4 +123,85 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
     assert_match(/locked.*default set/i, flash.now[:alert].to_s)
     assert_equal original_title, item.image.reload.title
   end
+
+  # === AI flow ===
+
+  test "ai_new requires authentication" do
+    delete session_path # log out
+    get ai_new_image_sets_path
+    assert_redirected_to new_session_path
+  end
+
+  test "ai_new renders the prompt form for logged-in user" do
+    get ai_new_image_sets_path
+    assert_response :success
+    assert_match(/AI Image Set/i, response.body)
+    assert_match(/user_message/, response.body)
+  end
+
+  test "ai_generate rejects empty prompt" do
+    post ai_generate_image_sets_path, params: { user_message: "" }
+    assert_redirected_to ai_new_image_sets_path
+    assert_match(/Type a prompt first/i, flash[:alert])
+  end
+
+  test "ai_generate enforces daily rate limit" do
+    # Test env defaults to :null_store, which silently drops writes. Swap
+    # to a memory store for the duration of this one test so the rate-
+    # limit counter actually persists across the read.
+    original = Rails.cache
+    Rails.cache = ActiveSupport::Cache::MemoryStore.new
+    Rails.cache.write("ai_image_set:#{@alice.id}:#{Date.current}", 20, expires_in: 1.hour, raw: true)
+    post ai_generate_image_sets_path, params: { user_message: "volcanoes" }
+    assert_response :too_many_requests
+  ensure
+    Rails.cache = original if original
+  end
+
+  test "ai_create rejects empty query" do
+    post ai_create_image_sets_path, params: { name: "x", ai_query: "" }
+    assert_redirected_to ai_new_image_sets_path
+    assert_match(/No query to import/i, flash[:alert])
+  end
+
+  test "ai_create makes a set, enqueues import job, redirects to show" do
+    assert_difference("ImageSet.count", 1) do
+      assert_enqueued_with(job: AiImportImagesJob) do
+        post ai_create_image_sets_path, params: {
+          name: "Volcanoes of Japan",
+          visibility: "private",
+          ai_query: "?item wdt:P31 wd:Q8072 .",
+          ai_explanation: "Volcanoes in Japan.",
+          ai_prompt: "volcanoes in Japan",
+          ai_model: "flash",
+          ai_image_source: "wikidata_p18"
+        }
+      end
+    end
+    set = ImageSet.last
+    assert_equal "Volcanoes of Japan", set.name
+    assert_equal "pending", set.import_state
+    assert_redirected_to set
+  end
+
+  test "ai_create defaults to private and rejects invalid visibility" do
+    post ai_create_image_sets_path, params: {
+      name: "X",
+      visibility: "wide-open", # invalid
+      ai_query: "?item wdt:P31 wd:Q8072 ."
+    }
+    assert_equal "private", ImageSet.last.visibility
+  end
+
+  test "import_status returns JSON for owner" do
+    set = ImageSet.create!(user: @alice, name: "AI Set",
+                            visibility: "private", import_state: "importing",
+                            import_progress: 10, import_total: 50)
+    get import_status_image_set_path(set)
+    assert_response :success
+    body = JSON.parse(response.body)
+    assert_equal "importing", body["state"]
+    assert_equal 10, body["progress"]
+    assert_equal 50, body["total"]
+  end
 end

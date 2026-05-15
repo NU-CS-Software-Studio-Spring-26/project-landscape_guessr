@@ -52,6 +52,32 @@
     </div>
   </div>
 
+  <%# AI-import progress banner. Polls /import_status until the job
+      moves out of pending/importing, then reloads. %>
+  <% if %w[pending importing].include?(@image_set.import_state) %>
+    <div class="rounded-xl border border-forest-200 bg-forest-50 px-6 py-5 space-y-3"
+         data-controller="ai-import-poll"
+         data-ai-import-poll-url-value="<%= import_status_image_set_path(@image_set) %>">
+      <p class="text-sm text-forest-800">
+        <span data-ai-import-poll-target="status">Starting import…</span>
+        <span class="muted">
+          (<span data-ai-import-poll-target="progress">0</span> /
+          <span data-ai-import-poll-target="total">?</span>)
+        </span>
+      </p>
+      <progress data-ai-import-poll-target="bar" value="0" max="100" class="w-full h-2"></progress>
+      <p class="muted text-xs">
+        This can take a minute or two for big sets. You can leave this page —
+        the import keeps running in the background.
+      </p>
+    </div>
+  <% elsif @image_set.import_state == "failed" %>
+    <div class="rounded-xl border border-red-300 bg-red-50 px-6 py-5 space-y-2">
+      <p class="text-sm text-red-800 font-medium">Import failed</p>
+      <p class="text-xs text-red-700"><%= @image_set.import_error.presence || "Unknown error" %></p>
+    </div>
+  <% end %>
+
   <% if @total_items.zero? %>
     <div class="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-6 py-10 text-center space-y-3">
       <% if @image_set.filtered? %>
@@ -59,6 +85,8 @@
         <% if @image_set.owned_by?(Current.user) %>
           <%= link_to "Edit filter", edit_filter_image_set_path(@image_set), class: "btn-primary inline-block" %>
         <% end %>
+      <% elsif %w[pending importing].include?(@image_set.import_state) %>
+        <%# Banner above already explains; no extra empty-state needed. %>
       <% else %>
         <p class="text-gray-600">No images in this set yet.</p>
         <% if @image_set.owned_by?(Current.user) %>
