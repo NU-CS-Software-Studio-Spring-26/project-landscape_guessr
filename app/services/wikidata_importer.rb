@@ -103,20 +103,45 @@ class WikidataImporter
   end
 
   # Returns up to `limit` rows (default 30) for preview thumbnails on
-  # the form. NOT a random sample — WDQS's bd:sample SERVICE only
-  # accepts a single direct triple inside, which is incompatible with
-  # the multi-constraint patterns the AI generates (property paths,
-  # country filters, etc. all break it). LIMIT 30 gives alphabetical
-  # ordering, which for preview purposes is fine — the user just
-  # wants to see "what kind of thing is this query matching?"
+  # the form. NOT a random sample (WDQS's bd:sample SERVICE only
+  # accepts a single direct triple inside, incompatible with our
+  # multi-constraint patterns). LIMIT 30 gives alphabetical ordering.
+  #
+  # Same per-type fan-out as count(): broad `VALUES ?type { ... }`
+  # patterns combined with P31/P279* walks timeout WDQS even at
+  # LIMIT 30, because the optimizer can't short-circuit the OPTIONAL
+  # + FILTER on image-or-article without evaluating the broad union
+  # first. Per-type queries are each fast; we run them in parallel
+  # and take the first `limit` rows.
   def self.sample(pattern:, image_source: "wikidata_p18", limit: 30)
-    sparql = wrap_with_limit(pattern, limit: limit, with_label: true)
-    rows = run_query(sparql)
+    rows = if (types = extract_union_types(pattern))
+      sample_per_type(pattern, types: types, limit: limit)
+    else
+      run_query(wrap_with_limit(pattern, limit: limit, with_label: true))
+    end
     rows = normalize_rows(rows)
     if image_source == "wikipedia_pageimages"
       WikipediaImageFetcher.refresh_images!(rows: rows)
     end
-    dedupe_by_url(rows.select { |r| r[:url].present? && r[:lat] && r[:lng] })
+    dedupe_by_url(rows.select { |r| r[:url].present? && r[:lat] && r[:lng] }).first(limit)
+  end
+
+  # Per-type sample matching the per-type count logic. Each per-type
+  # query gets `limit/types.size` rows (rounded up) so the combined
+  # result has roughly `limit` items after dedup. Runs in parallel
+  # threads — same safety story as count_per_type.
+  def self.sample_per_type(pattern, types:, limit:)
+    stripped = pattern.sub(/VALUES\s+\?type\s*\{[^}]+\}\s*\.?\s*/m, "")
+    per_type_limit = (limit.to_f / types.size).ceil + 2 # +2 buffer for dedup losses
+    threads = types.map do |qid|
+      Thread.new do
+        one = stripped.gsub("?type", "wd:#{qid}")
+        run_query(wrap_with_limit(one, limit: per_type_limit, with_label: true))
+      rescue Error
+        []
+      end
+    end
+    threads.flat_map(&:value)
   end
 
   # Full import. Wraps the pattern with the OPTIONAL+FILTER trailer and

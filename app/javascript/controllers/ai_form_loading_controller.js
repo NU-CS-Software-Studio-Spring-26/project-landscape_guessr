@@ -15,27 +15,46 @@ export default class extends Controller {
 
   // Plausible-sounding stages we cycle through while the AI works.
   // We DON'T actually know which stage Gemini is in — the API isn't
-  // streamed — but for a 5-15s wait, rotating text gives the user
-  // something to watch and signals real progress. Order ~tracks the
-  // backend's typical work pattern (search → inspect → compose).
+  // streamed back to us — but for a 5-15s wait, rotating text signals
+  // real progress. Order ~tracks the backend's typical work pattern
+  // (the model thinks first, then searches for Q-IDs, then composes).
   static stages = [
+    "Thinking…",
     "Looking up Wikidata IDs…",
     "Verifying the data shape…",
     "Composing the SPARQL query…",
-    "Almost there…",
+    "Still thinking…",
   ]
-  static stageInterval = 3500 // ms — slow enough to read, fast enough not to stall
+  static stageInterval = 5000 // ms — slow enough to actually read
 
-  submit() {
-    // Disable but don't relabel — the standalone spinner span is the
-    // visible loading indicator. Earlier version did both, which left
-    // "Thinking…" duplicated next to a "Thinking…" button.
-    if (this.hasSubmitTarget) this.submitTarget.disabled = true
+  submit(event) {
+    this.#lock(event?.submitter)
     if (this.hasThinkingTarget) this.thinkingTarget.classList.remove("hidden")
     this.#startStageRotation()
   }
 
+  // Also bind to the submit-button's click as a backup. If the submit
+  // event somehow misfires (Stimulus reconnect, double-click race), the
+  // click handler still locks the form before the page navigates.
+  click(event) {
+    this.#lock(event.currentTarget)
+  }
+
   disconnect() { if (this.stageTimer) clearInterval(this.stageTimer) }
+
+  #lock(submitter) {
+    // Disable the submit target. Don't relabel — the standalone spinner
+    // span is the visible loading indicator. Earlier version replaced
+    // the button text with "Thinking…", which duplicated the span.
+    if (this.hasSubmitTarget) {
+      this.submitTarget.disabled = true
+      this.submitTarget.setAttribute("aria-busy", "true")
+    }
+    // Belt-and-suspenders: if the click came from a different button
+    // than our declared target (e.g. Stimulus targets out of sync after
+    // a turbo refresh), disable the actual submitter too.
+    if (submitter && submitter !== this.submitTarget) submitter.disabled = true
+  }
 
   #startStageRotation() {
     const label = this.element.querySelector("[data-thinking-label]")
@@ -44,7 +63,7 @@ export default class extends Controller {
     let i = 0
     label.textContent = stages[i]
     this.stageTimer = setInterval(() => {
-      i = Math.min(i + 1, stages.length - 1) // stick on "Almost there…" once we hit the last
+      i = Math.min(i + 1, stages.length - 1) // stick on the last label after we run out
       label.textContent = stages[i]
     }, this.constructor.stageInterval)
   }

@@ -172,7 +172,7 @@
       </span>
       <%= submit_tag(@ai_conversation.any? ? "Send" : "Generate",
             class: "btn-primary cursor-pointer",
-            data: { ai_form_loading_target: "submit" }) %>
+            data: { ai_form_loading_target: "submit", action: "click->ai-form-loading#click" }) %>
     </div>
   <% end %>
 </div>
