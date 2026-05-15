@@ -116,8 +116,11 @@ class Region < ApplicationRecord
     return nil unless geom
     geom.make_valid
   rescue RGeo::Error::InvalidGeometry
+    # buffer(0) is the standard trick to repair self-intersecting polygons.
+    # If even that fails, return the un-validated geom — point-in-polygon
+    # against it is still cheap and roughly correct for our use case.
     geom.buffer(0) rescue geom
-  rescue
+  rescue JSON::ParserError, RGeo::Error::RGeoError
     nil
   end
 
@@ -128,7 +131,7 @@ class Region < ApplicationRecord
     factory = RGeo::Geographic.spherical_factory(srid: 4326)
     point = factory.point(lng.to_f, lat.to_f)
     geom.contains?(point)
-  rescue
+  rescue RGeo::Error::RGeoError
     false
   end
 
@@ -218,144 +221,7 @@ class Region < ApplicationRecord
     nil
   end
 
-  # Reverse-geocode a point. Returns an ordered list of candidates from most-
-  # specific (city) to broadest (country), each carrying everything the caller
-  # needs to either show it to the user or resolve it into a Region row via
-  # resolve_candidate. Returns [] on failure (no land, API down, no country in
-  # the response) — failures aren't cached so retries can succeed.
-  #
-  # A candidate looks like:
-  #   {
-  #     name: "Auvergne-Rhône-Alpes",
-  #     admin_level: "admin1",
-  #     country_code: "FR",
-  #     ancestor_chain: [
-  #       { name: "France", admin_level: "country", country_code: "FR" }
-  #     ]
-  #   }
-  # The ancestor_chain is the path of parents from country down to (but not
-  # including) the candidate itself. Country candidates have an empty chain.
-  def self.reverse_geocode(lat, lng)
-    cache_key = "maptiler_reverse:v2:#{lat.to_f.round(3)}:#{lng.to_f.round(3)}"
-    Rails.cache.fetch(cache_key, expires_in: 1.day, skip_nil: true) do
-      require "net/http"
-      key = ENV["MAPTILER_KEY"].presence || "biJMFiy9HEvnGGS540u4"
-      uri = URI("https://api.maptiler.com/geocoding/#{lng.to_f},#{lat.to_f}.json")
-      # language=en lets us share normalize_admin_name rules (which key off
-      # English admin words like "State of", "County"); MapTiler still returns
-      # native names for some levels (e.g. Vietnam's "Hà Nội") which the
-      # normalizer's unaccent step handles.
-      uri.query = URI.encode_www_form(key: key, language: "en")
-
-      http = Net::HTTP.new(uri.host, uri.port)
-      http.use_ssl = true
-      http.open_timeout = 3
-      http.read_timeout = 5
-      response = http.request(Net::HTTP::Get.new(uri))
-      next nil unless response.is_a?(Net::HTTPSuccess)
-
-      candidates = build_candidates_from_features(JSON.parse(response.body)["features"])
-      candidates.presence
-    end || []
-  rescue => e
-    Rails.logger.warn("MapTiler reverse failed: #{e.message}")
-    []
-  end
-
-  # MapTiler features come most-specific first. Each feature has a `place_type`
-  # like "address" / "municipality" / "region" / "country". The same admin level
-  # surfaces under different place_types across countries, so we map by-priority:
-  #   country  ← place_type "country"
-  #   admin1   ← "region" or "subregion" (when subregion isn't the country itself)
-  #   admin2   ← "county", or "subregion" if it wasn't claimed for admin1
-  #   city     ← first match in CITY_TYPE_PRIORITY
-  #
-  # We don't try to disambiguate which slot a given feature *should* live in —
-  # we just produce one candidate per level we can identify. The caller resolves
-  # whichever the user picks.
-  CITY_TYPE_PRIORITY = %w[
-    municipality joint_municipality municipal_district sub_municipality
-    joint_submunicipality locality place neighbourhood
-  ].freeze
-
-  def self.build_candidates_from_features(features)
-    return [] if features.blank?
-
-    by_type = {}
-    features.each do |f|
-      type = Array(f["place_type"]).first
-      next unless type && f["text"]
-      by_type[type] ||= f
-    end
-    Array(features.first["context"]).each do |c|
-      type = c["id"]&.split(".")&.first
-      next unless type && c["text"]
-      by_type[type] ||= c
-    end
-
-    country = by_type["country"]
-    return [] unless country
-
-    cc = (country["country_code"] || country.dig("properties", "country_code"))&.upcase
-    return [] unless cc
-    country_name = country["text"]
-
-    # Slot the geocoder's features into our admin levels.
-    admin1_feature = pick_admin1_feature(by_type, country_name)
-    admin2_feature = pick_admin2_feature(by_type, admin1_feature)
-    city_feature   = pick_city_feature(by_type)
-
-    # Build each level's entry (sans ancestor_chain) plus a running chain so
-    # each candidate's ancestor_chain contains every broader level that was
-    # picked. A city candidate can be resolved fully standalone — no re-call to
-    # the reverse-geocode needed.
-    country_entry = { name: country_name, admin_level: "country", country_code: cc }
-    country_candidate = country_entry.merge(ancestor_chain: [])
-    chain = [ country_entry ]
-
-    admin1_candidate = nil
-    if admin1_feature
-      admin1_entry = { name: admin1_feature["text"], admin_level: "admin1", country_code: cc }
-      admin1_candidate = admin1_entry.merge(ancestor_chain: chain.dup)
-      chain << admin1_entry
-    end
-
-    admin2_candidate = nil
-    if admin2_feature && admin1_feature
-      admin2_entry = { name: admin2_feature["text"], admin_level: "admin2", country_code: cc }
-      admin2_candidate = admin2_entry.merge(ancestor_chain: chain.dup)
-      chain << admin2_entry
-    end
-
-    city_candidate = nil
-    if city_feature
-      city_name = clean_admin_name(city_feature["text"])
-      if city_name.present?
-        city_candidate = { name: city_name, admin_level: "city", country_code: cc, ancestor_chain: chain.dup }
-      end
-    end
-
-    # Most-specific (city) → broadest (country). The UI shows them in this
-    # order so the user's "best match" is at the top.
-    [ city_candidate, admin2_candidate, admin1_candidate, country_candidate ].compact
-  end
-
-  def self.pick_admin1_feature(by_type, country_name)
-    [ by_type["region"], by_type["subregion"] ].compact.find { |f| f["text"] != country_name }
-  end
-
-  def self.pick_admin2_feature(by_type, admin1_feature)
-    return by_type["county"] if by_type["county"]
-    # subregion only doubles as admin2 if it wasn't already used for admin1
-    sub = by_type["subregion"]
-    sub if sub && sub != admin1_feature
-  end
-
-  def self.pick_city_feature(by_type)
-    CITY_TYPE_PRIORITY.lazy.map { |t| by_type[t] }.find { |f| f }
-  end
-
-  # Resolve a candidate hash (as produced by reverse_geocode) to an actual
+  # Resolve a candidate hash (as produced by the JS-side Nominatim reverse) to an actual
   # Region row, lazily creating intermediate parents as needed. Returns the
   # Region row, or nil if the country isn't in our DB.
   #
@@ -391,35 +257,49 @@ class Region < ApplicationRecord
   end
 
   # Find a region with the same normalized name under `parent` at `level`, or
-  # insert a new one. Race-safe: if a concurrent request inserts the same row
-  # between our find and our insert, the second insert fails normalize matching
-  # too (because the column index is non-unique) — accept the rare duplicate;
-  # both rows resolve to the same place.
+  # insert a new one.
+  #
+  # Ordering preference among candidates with the same normalized_name:
+  #   1. has a boundary (real data)
+  #   2. has a population (real data)
+  #   3. higher population
+  #   4. lower id (stable tiebreaker — likely the GeoNames-seeded original)
+  # This ensures that, given a junk stub row from a bad-name geocoder pick AND
+  # a real GeoNames row with the same normalized name, we pick the real one.
+  #
+  # If the chosen row is a stub (no boundary, no population, no iso_code) and
+  # the incoming candidate has a longer/better name, promote the stub's name
+  # to the new one. Avoids polluting the DB with both "South" and "South
+  # County" rows for the same place.
   def self.find_or_create_under(parent, name, level)
     return nil if parent.nil? || name.blank? || !ADMIN_LEVELS.include?(level)
     norm = normalize_admin_name(name)
     return nil if norm.blank?
 
     scope = where(parent_id: parent.id, admin_level: level, normalized_name: norm)
-    existing = scope.order(Arel.sql("COALESCE(regions.population, 0) DESC, regions.id ASC")).first
-    return existing if existing
+    order_sql = "(CASE WHEN boundary IS NULL THEN 1 ELSE 0 END), " \
+                "(CASE WHEN population IS NULL THEN 1 ELSE 0 END), " \
+                "COALESCE(population, 0) DESC, id ASC"
+    existing = scope.order(Arel.sql(order_sql)).first
+    if existing
+      promote_stub_name(existing, name)
+      return existing
+    end
 
     create!(parent: parent, name: name, admin_level: level)
   end
 
-  # Strip English prefixes that appear in MapTiler names but not in GeoNames.
-  # "City of Albany" → "Albany". For "City"/"Town"/"Village"/"Municipality"/
-  # "Borough", we require "of" after — otherwise "City Heights" would wrongly
-  # become "Heights". "Greater" is stripped unconditionally ("Greater London"
-  # → "London") since GeoNames doesn't carry the "Greater" prefix.
-  def self.clean_admin_name(name)
-    return nil if name.blank?
-    cleaned = name.sub(/\A(City|Town|Village|Municipality|Borough)\s+of\s+/i, "")
-    cleaned = cleaned.sub(/\AGreater\s+/i, "")
-    cleaned.strip.presence || name
+  # When we matched a row that's clearly a stub (no boundary / population /
+  # iso_code) and the new candidate has a longer name with the same normalized
+  # form, overwrite the stub's name. "South" → "South County" for example.
+  def self.promote_stub_name(region, new_name)
+    return unless region.boundary.blank? && region.population.blank? && region.iso_code.blank?
+    return if region.name == new_name
+    return if region.name.length >= new_name.length  # keep the longer one
+    region.update_columns(name: new_name, normalized_name: normalize_admin_name(new_name))
   end
 
-  # GeoNames admin1 names and MapTiler's reported names disagree in many countries:
+  # GeoNames admin1 names and reverse-geocoder names disagree in many countries:
   #   "Lagos State"           (MapTiler)  vs  "Lagos"           (GeoNames)
   #   "Autonomous City of …"  (MapTiler)  vs  "Buenos Aires …"  (GeoNames)
   #   "Hà Nội"                (MapTiler)  vs  "Hanoi"           (GeoNames)
@@ -444,22 +324,6 @@ class Region < ApplicationRecord
     s.gsub(/[^a-z0-9]+/, "")
   end
 
-  # SQL fragment producing the same normalized form for a column. Use inside
-  # WHERE clauses where the comparison needs to happen server-side. Builds a
-  # plain string — caller is responsible for ensuring `column` is a trusted
-  # identifier (we only pass literal column names).
-  def self.normalize_admin_name_sql(column)
-    "regexp_replace(" \
-      "regexp_replace(" \
-        "regexp_replace(" \
-          "lower(unaccent(#{column}))," \
-          "'^#{ADMIN_PREFIX_RE}\\s+', '', 'i'" \
-        ")," \
-        "'\\s+#{ADMIN_SUFFIX_RE}$', '', 'i'" \
-      ")," \
-      "'[^a-z0-9]+', '', 'g'" \
-    ")"
-  end
 
   # Nominatim allows 1 req/sec per IP. The last-request timestamp lives in
   # Rails.cache so multiple Puma workers / Sidekiq workers share the throttle —

@@ -217,7 +217,7 @@ export default class extends Controller {
     // Items are one of two shapes:
     //   - search-bar results: { id, name, admin_level, parent_name, ... }
     //     → button carries data-region-id and can be added immediately.
-    //   - at_point candidates: { name, admin_level, country_code, ancestor_chain }
+    //   - Nominatim candidates: { name, admin_level, country_code, ancestor_chain }
     //     → no DB row yet; button carries the candidate as a data-candidate
     //       JSON blob, and addFromResult must POST /regions/resolve first.
     // Build via DOM nodes so region names from the API can't inject HTML.
@@ -517,17 +517,77 @@ export default class extends Controller {
     this.resultsSource = "click"
     this.showResultsMessage('<div class="p-3 text-sm text-gray-500">Finding regions at this point...</div>')
 
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      this.showResultsMessage('<div class="p-3 text-sm text-gray-500">No regions found at this location</div>')
+      return
+    }
+
     try {
-      const resp = await fetch(`/regions/at_point.json?lat=${lat}&lng=${lng}`)
-      const regions = await resp.json()
-      if (!Array.isArray(regions) || !regions.length) {
+      const candidates = await this.nominatimReverse(lat, lng)
+      if (!candidates.length) {
         this.showResultsMessage('<div class="p-3 text-sm text-gray-500">No regions found at this location</div>')
         return
       }
-
-      this.renderResults(regions)
-    } catch (e) {
+      this.renderResults(candidates)
+    } catch (err) {
       this.showResultsMessage('<div class="p-3 text-sm text-red-500">Failed to find regions</div>')
     }
+  }
+
+  // Client-side Nominatim reverse-geocode. Same provider as the server-side
+  // boundary fetch (Region.fetch_real_boundary!), which means the names we
+  // receive here will match what Nominatim's search endpoint returns later
+  // when the server fetches the boundary — no name-drift between providers.
+  // Distributing the call across user IPs also sidesteps the 1 req/sec/IP
+  // rate limit that would otherwise be a chokepoint server-side.
+  async nominatimReverse(lat, lng) {
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}` +
+                `&format=jsonv2&addressdetails=1&accept-language=en&zoom=12`
+    const resp = await fetch(url, { headers: { "Accept": "application/json" } })
+    if (!resp.ok) return []
+    const data = await resp.json()
+    return this.buildCandidatesFromNominatim(data)
+  }
+
+  // Map Nominatim's `address` block onto our 4-level admin hierarchy. The
+  // returned list goes most-specific (city) → broadest (country) so the UI
+  // shows the user's "best guess" at the top of the picker. Each candidate
+  // carries the full ancestor chain so the server can resolve it standalone.
+  //
+  // Field priority per level mirrors how OSM tags admin entities:
+  //   admin1: state > region > province
+  //   admin2: county > municipality (some EU countries put admin2 there)
+  //   city:   city > town > village > hamlet
+  // Borough/suburb/neighbourhood are intentionally not city candidates —
+  // they're sub-city and would create noise admin levels in our DB.
+  buildCandidatesFromNominatim(data) {
+    const a = data?.address || {}
+    const cc = (a.country_code || "").toUpperCase()
+    if (!cc || !a.country) return []
+
+    // Build the ancestor chain top-down so each level can snapshot the right
+    // prefix when emitting its candidate.
+    const entries = [{ name: a.country, admin_level: "country", country_code: cc }]
+
+    const admin1Name = a.state || a.region || a.province
+    if (admin1Name && admin1Name !== a.country) {
+      entries.push({ name: admin1Name, admin_level: "admin1", country_code: cc })
+    }
+
+    const admin2Name = a.county || a.municipality
+    if (admin2Name && admin2Name !== admin1Name) {
+      entries.push({ name: admin2Name, admin_level: "admin2", country_code: cc })
+    }
+
+    const cityName = a.city || a.town || a.village || a.hamlet
+    if (cityName && cityName !== admin1Name && cityName !== admin2Name) {
+      entries.push({ name: cityName, admin_level: "city", country_code: cc })
+    }
+
+    const candidates = entries.map((e, i) => ({
+      ...e,
+      ancestor_chain: entries.slice(0, i)
+    }))
+    return candidates.reverse()
   }
 }

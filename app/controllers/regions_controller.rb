@@ -100,39 +100,18 @@ class RegionsController < ApplicationController
     end
   end
 
-  # GET /regions/at_point.json?lat=X&lng=Y
-  #
-  # Returns geocoder candidates verbatim — no DB matching. The caller (typically
-  # the filter-builder UI) shows them as options; when the user picks one, the
-  # `resolve` action below turns it into an actual Region row.
-  #
-  # We don't try to match names against the pre-seeded DB here because GeoNames
-  # and MapTiler frequently disagree (MapTiler "Lagos State" vs GeoNames "Lagos",
-  # MapTiler "Hà Nội" vs GeoNames "Hanoi", etc.). Matching at click-time is
-  # fragile and high-traffic; we instead defer the match to insert-time inside
-  # Region.resolve_candidate, which is per-pick (low traffic) and authoritative.
-  def at_point
-    lat = params[:lat].to_f
-    lng = params[:lng].to_f
-    # Bail on missing / out-of-range coords. to_f silently coerces "DROP TABLE"
-    # to 0.0; without these guards garbage values reach MapTiler and pollute the
-    # per-(lat,lng) cache key with junk entries.
-    return render(json: []) unless lat.between?(-90, 90) && lng.between?(-180, 180)
-    return render(json: []) if lat.zero? && lng.zero?
-
-    candidates = Region.reverse_geocode(lat, lng)
-    render json: candidates
-  rescue => e
-    Rails.logger.error("[regions#at_point] #{e.class}: #{e.message}")
-    render json: []
-  end
-
   # POST /regions/resolve.json
   #
-  # Takes one candidate (as produced by at_point) and either finds the existing
-  # Region row it represents or creates one — plus walks the ancestor chain
-  # creating intermediates as needed. Returns the resolved region's id so the
-  # caller can add it to a filtered set.
+  # Takes one candidate (as produced by the JS-side Nominatim reverse) and
+  # either finds the existing Region row it represents or creates one — plus
+  # walks the ancestor chain creating intermediates as needed. Returns the
+  # resolved region's id so the caller can add it to a filtered set.
+  #
+  # Click-time reverse-geocoding lives in the browser (region_filter_controller
+  # .js#nominatimReverse) so it (a) shares the rate limit across user IPs
+  # rather than chokepointing on the server's IP and (b) uses the same
+  # provider as our boundary fetch, so the names we get back match what
+  # Nominatim's search endpoint returns when we lazy-fetch the polygon below.
   def resolve
     candidate = candidate_params
     return render(json: { error: "missing fields" }, status: :unprocessable_entity) if candidate.nil?
@@ -140,10 +119,20 @@ class RegionsController < ApplicationController
     region = Region.resolve_candidate(candidate)
     return render(json: { error: "could not resolve" }, status: :not_found) unless region
 
-    # Lazy-fetch boundary so the next /regions/boundaries call has something to
-    # render. Caller can show the pill immediately and tolerate the boundary
-    # arriving on the next render cycle.
-    region.fetch_real_boundary! if region.needs_boundary_upgrade?
+    # If the row is brand-new, it has no boundary yet. Try to fetch one. If
+    # the geocoder gave us a name Nominatim's search can't find a polygon
+    # for (e.g. truncated / wrong / too-generic names), don't leave a junk
+    # row stranded in the DB — destroy it and tell the client we couldn't
+    # resolve. Existing rows with boundary failures are kept (they may have
+    # population / bbox / image links that are still useful).
+    was_new = region.previously_new_record?
+    if region.needs_boundary_upgrade?
+      region.fetch_real_boundary!
+      if region.boundary.blank? && was_new
+        region.destroy
+        return render(json: { error: "no boundary available for this region" }, status: :not_found)
+      end
+    end
 
     render json: {
       region_id: region.id,

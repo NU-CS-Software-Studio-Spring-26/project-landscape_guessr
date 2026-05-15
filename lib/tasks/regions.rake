@@ -202,6 +202,7 @@ namespace :regions do
 
       batch << {
         name: name,
+        normalized_name: Region.normalize_admin_name(name),
         admin_level: "admin2",
         parent_id: parent.id,
         iso_code: code,
@@ -371,6 +372,7 @@ namespace :regions do
       # to compare against.
       batch << {
         name: name,
+        normalized_name: Region.normalize_admin_name(name),
         admin_level: "city",
         parent_id: parent_id,
         population: population,

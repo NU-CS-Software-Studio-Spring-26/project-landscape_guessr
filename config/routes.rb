@@ -40,7 +40,6 @@ Rails.application.routes.draw do
       get :search
       get :boundaries
       get :tree
-      get :at_point
       post :resolve
     end
     member do
