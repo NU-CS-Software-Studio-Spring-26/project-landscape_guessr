@@ -2,6 +2,7 @@ class Image < ApplicationRecord
   has_one_attached :photo
   has_many :guesses, dependent: :destroy
   has_many :game_images, dependent: :destroy
+  has_many :challenge_images, dependent: :destroy
   has_many :image_set_items, dependent: :destroy
   has_many :image_sets, through: :image_set_items
 
@@ -52,6 +53,7 @@ class Image < ApplicationRecord
   def purge_if_orphan!
     return if image_set_items.exists?
     return if game_images.exists?
+    return if challenge_images.exists?
     return if guesses.exists?
     destroy
   end

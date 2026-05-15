@@ -6,7 +6,14 @@ Rails.application.routes.draw do
   resource :session, only: %i[ new create destroy ]
   resources :passwords, param: :token, only: %i[ new create edit update ]
   resource :registration, only: %i[ new create ]
-  resource :profile, only: :show
+  resource :email_verification, only: %i[ show create ]
+  resource :profile, only: %i[ show destroy ] do
+    get   :setup_username
+    patch :setup_username, action: :update_username
+  end
+
+  get "/auth/:provider/callback", to: "sessions/omni_auths#create", as: :omniauth_callback
+  get "/auth/failure",            to: "sessions/omni_auths#failure"
 
   resources :challenges, param: :token, only: [ :index, :new, :create, :show, :destroy ] do
     member { post :play }

@@ -11,8 +11,9 @@ class RegistrationsController < ApplicationController
   def create
     @user = User.new(registration_params)
     if @user.save
+      EmailVerificationMailer.verify(@user).deliver_later
       start_new_session_for @user
-      redirect_to after_authentication_url, notice: "Welcome!"
+      redirect_to after_authentication_url
     else
       flash.now[:alert] = @user.errors.full_messages.first
       render :new, status: :unprocessable_entity

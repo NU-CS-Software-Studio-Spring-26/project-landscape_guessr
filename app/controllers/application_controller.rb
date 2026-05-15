@@ -12,7 +12,10 @@ class ApplicationController < ActionController::Base
   # flash so the user lands on a real page.
   rescue_from ActiveRecord::RecordNotFound, with: :render_not_found
 
-  helper_method :admin?
+  before_action :require_username_set
+  before_action :require_email_verified
+
+  helper_method :admin?, :email_verified?
 
   PER_PAGE_OPTIONS = [ 25, 50, 100, 250, 500 ].freeze
 
@@ -23,6 +26,26 @@ class ApplicationController < ActionController::Base
 
     def require_admin
       redirect_to root_path, alert: "Admin access required." unless admin?
+    end
+
+    def email_verified?
+      authenticated? && Current.user.email_verified?
+    end
+
+    def require_email_verified
+      return unless authenticated?
+      return if Current.user.email_verified?
+      flash[:verify_email] = true
+      redirect_to root_path
+    end
+
+    # OAuth-created users start with a blank username; force them to pick one
+    # before they can do anything else. Skipped on the setup page itself, on
+    # sign-out, and on the OAuth callback (where the redirect is set up).
+    def require_username_set
+      return unless authenticated?
+      return if Current.user.username.present?
+      redirect_to setup_username_profile_path
     end
 
     def render_not_found

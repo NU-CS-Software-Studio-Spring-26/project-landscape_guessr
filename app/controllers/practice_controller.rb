@@ -1,5 +1,6 @@
 class PracticeController < ApplicationController
   allow_unauthenticated_access only: %i[ show check ]
+  skip_before_action :require_email_verified
 
   def show
     default_set = ImageSet.default
