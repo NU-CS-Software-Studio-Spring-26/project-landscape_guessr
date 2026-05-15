@@ -120,15 +120,24 @@ class WikidataImporter
   end
 
   # Full import. Wraps the pattern with the OPTIONAL+FILTER trailer and
-  # caps at HARD_CAP (10,000). Updates `image_set.import_progress`
-  # periodically so the show page's polling UI can render progress bars.
+  # caps at HARD_CAP (10,000).
+  #
+  # Reports progress through three sub-states so the show-page polling
+  # banner can tell the user what's actually happening, instead of
+  # sitting on "0 / ?" for 30-90 seconds while the SPARQL + Wikipedia
+  # legs finish:
+  #   "fetching"           — running the full SPARQL (slow for broad ones)
+  #   "looking_up_images"  — Wikipedia pageimages batch (pageimages mode only)
+  #   "inserting"          — INSERT phase, where progress/total numbers
+  #                          are populated and meaningful
   def self.import!(image_set:, pattern:, image_source: "wikidata_p18")
+    image_set.update_columns(import_state: "fetching")
     sparql = wrap_with_limit(pattern, limit: HARD_CAP, with_label: true)
-
     rows = run_query(sparql)
     rows = normalize_rows(rows)
 
     if image_source == "wikipedia_pageimages"
+      image_set.update_columns(import_state: "looking_up_images")
       WikipediaImageFetcher.refresh_images!(rows: rows)
     end
 
@@ -139,7 +148,7 @@ class WikidataImporter
     keepable = rows.select { |r| r[:url].present? && r[:lat] && r[:lng] && photo_url?(r[:url]) }
     keepable = dedupe_by_url(keepable)
 
-    image_set.update_columns(import_total: keepable.size, import_progress: 0)
+    image_set.update_columns(import_state: "inserting", import_total: keepable.size, import_progress: 0)
 
     new_links = 0
     inserted = 0
