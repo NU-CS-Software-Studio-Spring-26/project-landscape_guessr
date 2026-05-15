@@ -1,3 +1,11 @@
-<svg width="512" height="512" xmlns="http://www.w3.org/2000/svg">
-  <circle cx="256" cy="256" r="256" fill="red"/>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <clipPath id="iconmask">
+      <rect x="0" y="0" width="512" height="512" rx="114"/>
+    </clipPath>
+  </defs>
+  <rect x="0" y="0" width="512" height="512" rx="114" fill="#EFE4D0"/>
+  <g clip-path="url(#iconmask)">
+    <polygon points="0,512 162,333 239,392 367,179 512,512" fill="#1F3D2E"/>
+  </g>
 </svg>

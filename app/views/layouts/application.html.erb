@@ -4,8 +4,10 @@
     <title><%= content_for(:title) ? "#{content_for(:title)} — Landscape Guessr" : "Landscape Guessr" %></title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Guessr">
     <meta name="application-name" content="Landscape Guessr">
     <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#166534">
     <%= csrf_meta_tags %>
     <%= csp_meta_tag %>
 
@@ -14,6 +16,7 @@
     <link rel="icon" href="/icon.png" type="image/png">
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/icon.png">
+    <link rel="manifest" href="<%= pwa_manifest_path(format: :json) %>">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -127,5 +130,12 @@
       </div>
     </footer>
 
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", function () {
+          navigator.serviceWorker.register("<%= pwa_service_worker_path(format: :js) %>", { scope: "/" });
+        });
+      }
+    </script>
   </body>
 </html>
