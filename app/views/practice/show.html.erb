@@ -78,10 +78,15 @@
          data-zoomable-cap-width-value="<%= Image::ZOOM_CAP_WIDTH %>"
          class="space-y-1">
       <div data-zoomable-target="viewport"
-           class="max-h-[60vh] rounded-md border border-gray-200 overflow-hidden select-none">
-        <img src="<%= image_src(@image, width: Image::ZOOM_CAP_WIDTH) %>"
+           class="relative max-h-[60vh] rounded-md border border-gray-200 overflow-hidden select-none">
+        <img data-zoomable-target="image"
+             src="<%= image_src(@image, width: Image::ZOOM_CAP_WIDTH) %>"
              alt="Guess this location"
              class="max-w-full max-h-[60vh] block mx-auto" />
+        <div data-zoomable-target="loader"
+             class="absolute inset-0 z-10 flex items-center justify-center bg-white/70">
+          <div class="h-8 w-8 animate-spin rounded-full border-4 border-gray-300 border-t-blue-600"></div>
+        </div>
       </div>
       <div class="flex items-center justify-between gap-2 text-xs text-gray-500">
         <span>scroll to zoom · drag to pan · double-click to reset</span>

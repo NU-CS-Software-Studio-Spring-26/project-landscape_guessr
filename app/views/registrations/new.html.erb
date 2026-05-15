@@ -41,11 +41,7 @@
 
   <%= button_to "Sign up with Google", "/auth/google_oauth2", method: :post, data: { turbo: false }, class: "btn-secondary w-full" %>
 
-  <p class="mt-6 text-sm text-gray-600">
-    Already have an account?
-    <%= link_to "Sign in", new_session_path, class: "text-blue-600 underline hover:no-underline" %>
-  </p>
-    <p class="text-center text-sm text-gray-500">
+    <p class="mt-6 text-center text-sm text-gray-500">
       Already have an account?
       <%= link_to "Sign in", new_session_path,
             class: "text-forest-600 font-medium hover:text-forest-800 underline-offset-2 hover:underline" %>

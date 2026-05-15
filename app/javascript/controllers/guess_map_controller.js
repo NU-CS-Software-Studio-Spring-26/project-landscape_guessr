@@ -2,7 +2,7 @@ import { Controller } from "@hotwired/stimulus"
 import { MAPTILER_KEY, ensureMaptilerSdk, hideOutdoorTrails, escapeText } from "lib/maptiler"
 
 export default class extends Controller {
-  static targets = ["container"]
+  static targets = ["container", "loader"]
   static values = {
     answer: { type: Array,  default: [] },
     style:  { type: String, default: "outdoor-v2" },
@@ -21,10 +21,15 @@ export default class extends Controller {
       zoom: 1.5
     })
 
+    // outdoor-v2 paints colored hiking / bicycle / via-ferrata trails on
+    // top of everything — useful for hikers, distracting for a guessing
+    // game. They all live in source "outdoor", source-layer "trail";
+    // hide the whole layer set in one pass after the style loads.
     this.map.on("load", () => {
       hideOutdoorTrails(this.map)
-      this.fitToBbox()
+      this.#hideLoader()
     })
+    this.map.on("error", () => this.#hideLoader())
 
     this.marker = null
     this.otherGuessLayers = []
@@ -176,5 +181,9 @@ export default class extends Controller {
 
   disconnect() {
     this.map?.remove()
+  }
+
+  #hideLoader() {
+    if (this.hasLoaderTarget) this.loaderTarget.classList.add("hidden")
   }
 }

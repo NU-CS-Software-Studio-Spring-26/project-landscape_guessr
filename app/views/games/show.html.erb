@@ -44,9 +44,14 @@
             letterboxed if it doesn't match 60vh — cropping the edges
             of a clue photo is confusing in a guesser game. %>
         <div data-zoomable-target="viewport"
-             class="h-[60vh] flex items-center justify-center bg-gray-100 rounded-md border border-gray-200 select-none">
-          <img src="<%= image_src(@image, width: Image::ZOOM_CAP_WIDTH) %>" alt="Guess this location"
+             class="relative h-[60vh] flex items-center justify-center bg-gray-100 rounded-md border border-gray-200 select-none">
+          <img data-zoomable-target="image"
+               src="<%= image_src(@image, width: Image::ZOOM_CAP_WIDTH) %>" alt="Guess this location"
                class="max-w-full max-h-full object-contain">
+          <div data-zoomable-target="loader"
+               class="absolute inset-0 z-10 flex items-center justify-center bg-white/70">
+            <div class="h-8 w-8 animate-spin rounded-full border-4 border-gray-300 border-t-blue-600"></div>
+          </div>
         </div>
         <div class="flex items-center justify-between gap-2 text-xs text-gray-500">
           <span>scroll to zoom · drag to pan · double-click to reset</span>
