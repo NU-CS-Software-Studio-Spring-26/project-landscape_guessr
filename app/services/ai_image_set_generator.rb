@@ -326,9 +326,17 @@ class AiImageSetGenerator
 
     raise InvalidResponseError, "submit_answer with empty sparql_pattern" if payload[:sparql_pattern].strip.empty?
 
-    %w[SELECT OPTIONAL FILTER UNION SERVICE].each do |kw|
+    # Only the three constructs that would actually conflict with our
+    # wrapping or open a security hole:
+    #   SELECT  — we wrap with our own outer SELECT
+    #   LIMIT   — we apply a server-side cap; AI's LIMIT would silently shrink results
+    #   SERVICE — AI-controlled service blocks could hit arbitrary endpoints
+    # OPTIONAL/FILTER/UNION inside the pattern are fine; SPARQL allows
+    # them alongside the OPTIONAL+FILTER trailer we add and they're
+    # often necessary (numeric thresholds, alternatives, etc).
+    %w[SELECT LIMIT SERVICE].each do |kw|
       if payload[:sparql_pattern] =~ /\b#{kw}\b/i
-        raise InvalidResponseError, "AI returned #{kw} in sparql_pattern (must be selection-only)"
+        raise InvalidResponseError, "AI returned #{kw} in sparql_pattern (not allowed)"
       end
     end
 
@@ -369,13 +377,32 @@ class AiImageSetGenerator
       6. Call submit_answer.
 
       SUBMIT_ANSWER FIELD CONSTRAINTS:
-      - sparql_pattern: selection-only SPARQL. MUST bind ?item and ?coord.
-        MUST NOT contain SELECT, LIMIT, OPTIONAL, FILTER, UNION, or
-        service blocks — the server wraps the pattern. Empty string is
-        OK when cannot_answer=true. Example shape:
+      - sparql_pattern: SPARQL WHERE-clause body. MUST bind ?item and
+        ?coord. MUST NOT contain SELECT, LIMIT, or SERVICE blocks —
+        the server adds those, plus its own OPTIONAL+FILTER trailer
+        for the image/article fallback. Empty string is OK when
+        cannot_answer=true. Basic shape:
         `?item wdt:P31/wdt:P279* wd:Q##### ; wdt:P17 wd:Q## ; wdt:P625 ?coord .`
         Use wdt:P31/wdt:P279* (subclass walk) for broad categories;
         exact wdt:P31 for narrow concepts with deliberate scope.
+
+        You ARE allowed (and encouraged for the relevant cases) to use:
+          * FILTER for numeric thresholds, date ranges, regex.
+            Examples:
+              ?item wdt:P2043 ?length . FILTER(?length > 500)
+              ?item wdt:P571 ?built . FILTER(YEAR(?built) >= 1900)
+          * OPTIONAL for attributes that may or may not be present and
+            shouldn't drop the row if absent.
+          * UNION for "either X or Y" alternatives that aren't easily
+            expressed as VALUES.
+
+      - When the user asks for something subjective ("major", "famous",
+        "notable") AND there's a measurable proxy (length, height,
+        population, year built), pick a SENSIBLE THRESHOLD and use it.
+        Don't refuse just because the line is fuzzy. Mention the
+        threshold you chose in `explanation` so the user can adjust it
+        in a refinement turn. Example: "I picked mountain ranges with
+        a recorded length > 500 km. Want a different cutoff?"
       - set_name: 4-6 words, Title Case ("Volcanoes of Japan").
       - explanation: 1-2 plain-English sentences, no jargon.
       - image_source: MUST be exactly "wikipedia_pageimages" (default)

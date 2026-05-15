@@ -88,6 +88,19 @@ class AiImageSetGeneratorTest < ActiveSupport::TestCase
     end
   end
 
+  test "submit_answer with FILTER in pattern is allowed" do
+    gen = AiImageSetGenerator.new(api_key: "stub")
+    args = {
+      sparql_pattern: "?item wdt:P31 wd:Q46831 ; wdt:P2043 ?len ; wdt:P625 ?coord . FILTER(?len > 500)",
+      set_name: "Major Mountain Ranges", explanation: "Ranges over 500 km.",
+      image_source: "wikipedia_pageimages", cannot_answer: false
+    }
+    queue_gemini_responses([ submit_answer_envelope(args) ]) do
+      r = gen.generate(conversation: [ { role: "user", text: "major mountain ranges" } ])
+      assert_match(/FILTER/, r[:sparql_pattern])
+    end
+  end
+
   test "cannot_answer accepts empty pattern" do
     gen = AiImageSetGenerator.new(api_key: "stub")
     args = {
