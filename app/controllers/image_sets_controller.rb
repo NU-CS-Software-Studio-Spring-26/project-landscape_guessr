@@ -625,17 +625,26 @@ class ImageSetsController < ApplicationController
 
   # Wikidata can return HTTP errors / timeouts; surface 0/[] so the
   # view renders gracefully instead of 500ing the whole flow.
+  # Logs timing so we can see which leg (Gemini vs count vs sample) is
+  # the bottleneck for any given user prompt — grep bin/dev for [ai_gen]
+  # / [ai_count] / [ai_sample].
   def safe_count(pattern)
-    WikidataImporter.count(pattern: pattern)
+    t0 = Time.now
+    n = WikidataImporter.count(pattern: pattern)
+    Rails.logger.info "[ai_count] #{(Time.now - t0).round(2)}s -> #{n}"
+    n
   rescue WikidataImporter::Error => e
-    Rails.logger.warn "[ai_generate count] #{e.class}: #{e.message}"
+    Rails.logger.warn "[ai_count] #{(Time.now - t0).round(2)}s ERR #{e.class}: #{e.message.slice(0, 200)}"
     nil
   end
 
   def safe_sample(pattern, image_source:)
-    WikidataImporter.sample(pattern: pattern, image_source: image_source, limit: 30)
+    t0 = Time.now
+    rows = WikidataImporter.sample(pattern: pattern, image_source: image_source, limit: 30)
+    Rails.logger.info "[ai_sample] #{(Time.now - t0).round(2)}s -> #{rows.size} rows (src=#{image_source})"
+    rows
   rescue WikidataImporter::Error => e
-    Rails.logger.warn "[ai_generate sample] #{e.class}: #{e.message}"
+    Rails.logger.warn "[ai_sample] #{(Time.now - t0).round(2)}s ERR #{e.class}: #{e.message.slice(0, 200)}"
     []
   end
 end

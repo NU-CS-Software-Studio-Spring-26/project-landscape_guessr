@@ -135,6 +135,10 @@ class AiImageSetGenerator
   # Returns a parsed hash with keys :sparql_pattern, :set_name,
   # :explanation, :image_source, :cannot_answer. Function-call loop is
   # internal; the returned hash is what submit_answer received.
+  #
+  # Logs per-round elapsed time + tool name on every round, plus a
+  # summary line on completion. Grep `bin/dev` logs for `[ai_gen]` to
+  # see the breakdown.
   def generate(conversation:)
     raise Error, "conversation must end with a user turn" unless conversation.last&.dig(:role) == "user"
 
@@ -147,9 +151,15 @@ class AiImageSetGenerator
 
     text_only_retried = false
     malformed_retries = 0
+    started = Time.now
+    gemini_time = 0.0
+    tool_time = 0.0
+    tool_counts = Hash.new(0)
 
-    MAX_TOOL_ROUNDS.times do
+    MAX_TOOL_ROUNDS.times do |i|
+      t0 = Time.now
       response = call_gemini(contents)
+      gemini_time += Time.now - t0
       candidate = response.dig("candidates", 0) || {}
       parts = candidate.dig("content", "parts") || []
       if parts.empty?
@@ -197,22 +207,34 @@ class AiImageSetGenerator
 
       submit = function_calls.find { |fc| fc.dig("functionCall", "name") == "submit_answer" }
       if submit
+        tool_counts["submit_answer"] += 1
+        log_generate_summary(started, gemini_time, tool_time, tool_counts)
         return parse_submit(submit["functionCall"]["args"])
       end
 
       # All search_wikidata responses go in ONE user turn with multiple
       # parts. Earlier draft put each response in its own turn — Gemini's
       # protocol for parallel function calls expects them batched.
+      t_tools = Time.now
       response_parts = function_calls.map do |fc|
         name = fc.dig("functionCall", "name")
         args = fc.dig("functionCall", "args") || {}
+        tool_counts[name] += 1
         result = run_tool(name, args)
         { functionResponse: { name: name, response: { content: result } } }
       end
+      tool_time += Time.now - t_tools
       contents << { role: "user", parts: response_parts }
     end
 
+    log_generate_summary(started, gemini_time, tool_time, tool_counts)
     raise InvalidResponseError, "Hit MAX_TOOL_ROUNDS (#{MAX_TOOL_ROUNDS}) without submit_answer — AI is stuck"
+  end
+
+  def log_generate_summary(started, gemini_time, tool_time, tool_counts)
+    elapsed = (Time.now - started).round(2)
+    counts = tool_counts.map { |k, v| "#{k}=#{v}" }.join(" ")
+    Rails.logger.info "[ai_gen] gemini=#{gemini_time.round(2)}s tools=#{tool_time.round(2)}s total=#{elapsed}s (#{counts})" if defined?(Rails)
   end
 
   private
@@ -244,14 +266,17 @@ class AiImageSetGenerator
       },
       generationConfig: {
         # Thinking gives the model space to plan tool calls cleanly.
-        # Empirically: disabling it raised MALFORMED rate; 1500 budget
-        # is a workable middle. CRITICAL companion to thinking: any
-        # thoughtSignature parts on returned functionCall parts MUST be
-        # echoed back verbatim in the next turn — Ruby's Hash preserves
-        # unknown keys when we round-trip via JSON.parse/JSON.generate,
-        # so the existing `contents << { role: "model", parts: parts }`
-        # already does this. Don't strip fields from response parts.
-        thinkingConfig: { thinkingBudget: 1500 },
+        # 0 reliably worsens MALFORMED rate; 500-1500 are similar
+        # quality. 1000 is the conservative middle — modest latency
+        # savings vs 1500 with no measured quality hit. Don't drop
+        # below ~500 without re-running the eval. CRITICAL companion:
+        # thoughtSignature parts on returned functionCall parts MUST
+        # be echoed back verbatim in the next turn — Ruby's Hash
+        # preserves unknown keys when we round-trip via JSON.parse /
+        # JSON.generate, so the existing `contents << { role: "model",
+        # parts: parts }` already does this. Don't strip fields from
+        # response parts.
+        thinkingConfig: { thinkingBudget: 1000 },
         maxOutputTokens: 4096,
         temperature: 0.2
       }
@@ -434,6 +459,19 @@ class AiImageSetGenerator
       - **Multi-country regions** ("Scandinavia", "South America"):
         `VALUES ?country { wd:QA wd:QB ... } . ?item wdt:P17 ?country` —
         search each country Q-ID first.
+
+      - **Broad concepts span multiple classes.** When the user's
+        category is a vibe / domain / feeling rather than one Wikidata
+        class ("nature", "transportation", "sports", "art",
+        "architecture", "wildlife"), do NOT pick a single overly-
+        abstract Q-ID and use it as P31 — most actual items are
+        classified under SPECIFIC subclasses, not the umbrella concept.
+        Wikidata's "natural object" (Q1970309) has ~5 US instances;
+        "mountain" alone has thousands. Enumerate the meaningful
+        specific classes with VALUES + P31/P279*:
+          VALUES ?type { wd:Q8502 wd:Q23397 wd:Q34038 wd:Q4421 wd:Q46169 }
+          ?item wdt:P31/wdt:P279* ?type ; wdt:P17 wd:Q30 ; wdt:P625 ?coord .
+        Search each specific class first to find its Q-ID.
 
       REFUSAL — call submit_answer with cannot_answer=true if:
       - The category isn't comprehensively indexed in Wikidata — even if

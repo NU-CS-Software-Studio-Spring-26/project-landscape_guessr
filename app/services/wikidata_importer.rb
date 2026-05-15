@@ -42,19 +42,64 @@ class WikidataImporter
   class Error < StandardError; end
   class TimeoutError < Error; end
 
-  # Returns the total number of items the pattern would match (counting
-  # items that have either a Wikidata P18 image or an English Wikipedia
-  # article — anything we could pull a photo from). Cheap; the WDQS
-  # optimizer handles COUNT queries quickly.
+  # Returns the total number of items the pattern would match. For
+  # patterns built around `VALUES ?type { wd:QA wd:QB ... }` (the
+  # AI's idiom for "broad concept spanning multiple Wikidata classes"
+  # — nature, transportation, sports, etc.), we run a COUNT per type
+  # and sum, because the single-query form hits WDQS's 60s timeout on
+  # broad P31/P279* walks. An items-belonging-to-multiple-types case
+  # gets counted twice; we accept the small inaccuracy for the
+  # ~20-30x speedup. Matches the per-type pattern in db/seeds.rb.
   def self.count(pattern:)
-    sparql = <<~SPARQL
+    if (types = extract_union_types(pattern))
+      return count_per_type(pattern, types: types)
+    end
+    rows = run_query(<<~SPARQL)
       SELECT (COUNT(*) AS ?c) WHERE {
         #{pattern}
         #{image_or_article_block}
       }
     SPARQL
-    rows = run_query(sparql)
     rows.first&.dig("c", "value").to_i
+  end
+
+  # If the pattern contains `VALUES ?type { wd:Q... wd:Q... }`, return
+  # the QIDs; otherwise nil. The AI is instructed to use this idiom
+  # for broad concepts (see UNIVERSAL_PROPERTIES section of system
+  # prompt); we detect it here for the count-fan-out optimization.
+  def self.extract_union_types(pattern)
+    m = pattern.match(/VALUES\s+\?type\s*\{([^}]+)\}/m)
+    return nil unless m
+    qids = m[1].scan(/wd:(Q\d+)/i).flatten
+    qids.empty? ? nil : qids
+  end
+
+  # Run a count per type by substituting the VALUES variable. Each
+  # per-type count is fast (one P31/P279* walk on a single class), and
+  # we sum. Parallelized across threads — Net::HTTP creates a separate
+  # connection per call so concurrent queries are safe, and WDQS easily
+  # handles 5 parallel reads from one client. Wall time drops from
+  # ~N×5s to ~5s for typical broad patterns.
+  #
+  # Errors on individual types are swallowed — better to under-count
+  # than fail the whole preview screen.
+  def self.count_per_type(pattern, types:)
+    stripped = pattern.sub(/VALUES\s+\?type\s*\{[^}]+\}\s*\.?\s*/m, "")
+    threads = types.map do |qid|
+      Thread.new do
+        one = stripped.gsub("?type", "wd:#{qid}")
+        sparql = <<~SPARQL
+          SELECT (COUNT(*) AS ?c) WHERE {
+            #{one}
+            #{image_or_article_block}
+          }
+        SPARQL
+        run_query(sparql).first&.dig("c", "value").to_i
+      rescue Error
+        0  # partial under-count beats blanket failure
+      end
+    end
+    threads.map(&:value).sum
   end
 
   # Returns up to `limit` rows (default 30) for preview thumbnails on
