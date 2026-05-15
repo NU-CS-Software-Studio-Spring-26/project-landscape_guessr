@@ -22,30 +22,34 @@ class Region < ApplicationRecord
     return none if words.empty?
 
     # Filter: each word must match by either (a) word-boundary prefix on name/parent/
-    # grandparent, (b) ISO code prefix, or (c) trigram similarity (for typo tolerance).
-    # The whole-query trigram threshold also catches multi-word fuzzy matches.
-    # unaccent() handles diacritics so "munchen" matches "München".
-    prefix_pattern = ->(w) { "\\y#{Regexp.escape(w)}" }
+    # grandparent, (b) ISO code prefix, or (c) trigram similarity on the full query
+    # (typo tolerance). unaccent() handles diacritics so "munchen" matches "München".
     full_query = words.join(" ")
 
     joined = joins("LEFT JOIN regions AS parents ON regions.parent_id = parents.id " \
                    "LEFT JOIN regions AS grandparents ON parents.parent_id = grandparents.id")
 
-    word_conditions = words.map do
-      "(unaccent(regions.name) ~* unaccent(?) OR unaccent(parents.name) ~* unaccent(?) " \
-        "OR unaccent(grandparents.name) ~* unaccent(?) OR regions.iso_code ILIKE ?)"
-    end.join(" AND ")
-    word_values = words.flat_map do |w|
-      pat = prefix_pattern.call(w)
-      [ pat, pat, pat, "#{sanitize_sql_like(w)}%" ]
+    # Build the "all words match" subscope by chaining one .where per word — each
+    # uses a static SQL fragment with positional `?` placeholders. Chained .where
+    # ANDs the conditions naturally and keeps every fragment static, so brakeman
+    # doesn't flag the SQL builder (it does, correctly, flag dynamic where strings).
+    all_words = words.inject(joined) do |s, w|
+      pat = "\\y#{Regexp.escape(w)}"
+      like = "#{sanitize_sql_like(w)}%"
+      s.where(
+        "unaccent(regions.name) ~* unaccent(?) " \
+          "OR unaccent(parents.name) ~* unaccent(?) " \
+          "OR unaccent(grandparents.name) ~* unaccent(?) " \
+          "OR regions.iso_code ILIKE ?",
+        pat, pat, pat, like
+      )
     end
 
-    # Trigram fallback: similarity >= 0.4 on full query name (catches typos)
-    trigram_condition = "similarity(unaccent(regions.name), unaccent(?)) >= 0.4"
+    # Trigram fallback: similarity >= 0.4 on the full query name (catches typos
+    # like "munchen" → "München" when the prefix path above misses).
+    trigram = joined.where("similarity(unaccent(regions.name), unaccent(?)) >= 0.4", full_query)
 
-    scope = joined.where("(#{word_conditions}) OR (#{trigram_condition})", *word_values, full_query)
-
-    scope = scope.limit(limit)
+    scope = all_words.or(trigram).limit(limit)
 
     # Combined relevance score:
     #   ln(pop+1)/ln(10) + continent_boost(10 if continent else 0) + similarity*5 - distance_penalty

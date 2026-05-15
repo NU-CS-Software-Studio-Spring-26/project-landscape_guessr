@@ -12,7 +12,7 @@ class CreateRegions < ActiveRecord::Migration[8.1]
 
     add_index :regions, :parent_id
     add_index :regions, :admin_level
-    add_index :regions, [:name, :admin_level]
+    add_index :regions, [ :name, :admin_level ]
     add_foreign_key :regions, :regions, column: :parent_id
   end
 end
