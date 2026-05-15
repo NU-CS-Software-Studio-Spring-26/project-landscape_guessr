@@ -1,5 +1,7 @@
 class ImageSetsController < ApplicationController
+  skip_before_action :require_email_verified, only: %i[show]
   before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image attach_blob processing_status remove_item map new_filtered edit_filter update_filter preview_filter_count]
+  before_action :require_email_verified_unless_saved_practice_set, only: %i[show]
   before_action :require_owner, only: %i[edit update destroy locations update_locations add_image attach_blob processing_status remove_item edit_filter update_filter preview_filter_count]
   # Filtered sets' items are derived from the filter — any direct edit gets
   # blown away on the next materialize. Redirect those routes to the filter
@@ -445,5 +447,17 @@ class ImageSetsController < ApplicationController
   # blocking add_image / remove_item requests on Nominatim fetches.
   def refresh_filtered_children
     RematerializeFilteredSetsJob.perform_later(@image_set.id) if @image_set.filtered_sets.exists?
+  end
+
+  def require_email_verified_unless_saved_practice_set
+    return if Current.user.email_verified?
+    return if saved_practice_set?
+
+    flash[:verify_email] = true
+    redirect_to root_path
+  end
+
+  def saved_practice_set?
+    @image_set.name == ImageSet::SAVED_FOR_PRACTICE_NAME && @image_set.owned_by?(Current.user)
   end
 end

@@ -5,6 +5,7 @@ class HomeController < ApplicationController
   def start
     if authenticated?
       @default_set = ImageSet.default
+      @saved_practice_set = Current.user.image_sets.find_by(name: ImageSet::SAVED_FOR_PRACTICE_NAME)
     else
       @game_count  = Game.count
       @image_count = Image.count

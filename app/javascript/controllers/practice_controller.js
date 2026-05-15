@@ -1,12 +1,14 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
-  static targets = ["guessBtn", "nextBtn", "result", "imageLink", "timer", "timerBar", "timerPanel", "timerOption", "attemptsOption"]
+  static targets = ["guessBtn", "nextBtn", "result", "imageLink", "timer", "timerBar", "timerPanel", "timerOption", "attemptsOption", "saveForm", "removeForm", "saveStatus"]
   static values = {
     imageId: Number,
     checkUrl: String,
     timeLimit: { type: Number, default: 0 },
-    attempts: { type: Number, default: 1 }
+    attempts: { type: Number, default: 1 },
+    signedIn: { type: Boolean, default: false },
+    initiallySaved: { type: Boolean, default: false }
   }
 
   #boundKeydown
@@ -20,12 +22,14 @@ export default class extends Controller {
     this.completed = false
     this.resolving = false
     this.attemptIndex = 0
+    this.savedForPractice = this.initiallySavedValue
     this.#boundKeydown = this.#handleKeydown.bind(this)
     document.addEventListener("keydown", this.#boundKeydown)
 
     this.#syncTimerUi()
     if (this.timeLimitValue > 0) this.#startTimer()
     this.#syncAttemptsUi()
+    this.#syncSavedControls()
   }
 
   disconnect() {
@@ -62,6 +66,80 @@ export default class extends Controller {
     this.attemptIndex = 0
     this.#syncAttemptsUi()
     this.#syncPracticeInUrl()
+  }
+
+  async saveForPractice(event) {
+    event.preventDefault()
+    if (!this.hasSaveFormTarget) return
+
+    const form = event.currentTarget
+    const submit = form.querySelector("input[type='submit'], button[type='submit']")
+    if (!submit || submit.disabled) return
+
+    submit.disabled = true
+    const isInputSubmit = submit.tagName === "INPUT"
+    const originalLabel = isInputSubmit ? submit.value : submit.textContent
+
+    try {
+      const csrf = document.querySelector("meta[name='csrf-token']")?.content
+      const res = await fetch(form.action, {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          ...(csrf ? { "X-CSRF-Token": csrf } : {})
+        },
+        body: new FormData(form),
+        credentials: "same-origin"
+      })
+
+      if (!res.ok) throw new Error("save_failed")
+
+      this.savedForPractice = true
+      this.#syncSavedControls()
+      this.#setSaveStatus("Saved", "text-green-700")
+    } catch {
+      if (isInputSubmit) submit.value = originalLabel
+      else submit.textContent = originalLabel
+      submit.disabled = false
+      this.#setSaveStatus("Couldn't save. Try again.", "text-red-600")
+    }
+  }
+
+  async removeFromSaved(event) {
+    event.preventDefault()
+    if (!this.hasRemoveFormTarget) return
+
+    const form = event.currentTarget
+    const submit = form.querySelector("input[type='submit'], button[type='submit']")
+    if (!submit || submit.disabled) return
+
+    submit.disabled = true
+    const isInputSubmit = submit.tagName === "INPUT"
+    const originalLabel = isInputSubmit ? submit.value : submit.textContent
+
+    try {
+      const csrf = document.querySelector("meta[name='csrf-token']")?.content
+      const res = await fetch(form.action, {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          ...(csrf ? { "X-CSRF-Token": csrf } : {})
+        },
+        body: new FormData(form),
+        credentials: "same-origin"
+      })
+
+      if (!res.ok) throw new Error("unsave_failed")
+
+      this.savedForPractice = false
+      this.#syncSavedControls()
+      this.#setSaveStatus("Removed", "text-green-700")
+    } catch {
+      if (isInputSubmit) submit.value = originalLabel
+      else submit.textContent = originalLabel
+      submit.disabled = false
+      this.#setSaveStatus("Couldn't remove. Try again.", "text-red-600")
+    }
   }
 
   async #resolveGuess({ timedOutWithoutPin }) {
@@ -107,6 +185,7 @@ export default class extends Controller {
     this.guessBtnTarget.classList.add("hidden")
     this.nextBtnTarget.classList.remove("hidden")
     this.imageLinkTarget.classList.remove("hidden")
+    this.#syncSavedControls()
 
     let text, color
     if (km < 50) {
@@ -273,6 +352,43 @@ export default class extends Controller {
     if (this.hasTimerBarTarget) {
       this.timerBarTarget.style.backgroundColor = "hsl(120 85% 45%)"
     }
+  }
+
+  #syncSavedControls() {
+    const showControls = this.signedInValue && this.completed
+
+    if (this.hasSaveFormTarget) {
+      this.#setSubmitLabel(this.saveFormTarget, this.savedForPractice ? "Saved" : "Add to practice image set")
+      this.#setSubmitDisabled(this.saveFormTarget, false)
+      const showSave = showControls && !this.savedForPractice
+      this.saveFormTarget.classList.toggle("hidden", !showSave)
+    }
+
+    if (this.hasRemoveFormTarget) {
+      this.#setSubmitLabel(this.removeFormTarget, "Remove from saved")
+      this.#setSubmitDisabled(this.removeFormTarget, false)
+      const showRemove = showControls && this.savedForPractice
+      this.removeFormTarget.classList.toggle("hidden", !showRemove)
+    }
+  }
+
+  #setSubmitLabel(form, label) {
+    const submit = form.querySelector("input[type='submit'], button[type='submit']")
+    if (!submit) return
+    if (submit.tagName === "INPUT") submit.value = label
+    else submit.textContent = label
+  }
+
+  #setSubmitDisabled(form, disabled) {
+    const submit = form.querySelector("input[type='submit'], button[type='submit']")
+    if (!submit) return
+    submit.disabled = disabled
+  }
+
+  #setSaveStatus(message, colorClass) {
+    if (!this.hasSaveStatusTarget) return
+    this.saveStatusTarget.textContent = message
+    this.saveStatusTarget.className = `text-sm font-medium ${colorClass}`
   }
 
   next() {

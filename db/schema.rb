@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_15_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_15_163000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -177,6 +177,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_15_120000) do
     t.index ["parent_id"], name: "index_regions_on_parent_id"
   end
 
+  create_table "saved_practice_images", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "image_id", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["image_id"], name: "index_saved_practice_images_on_image_id"
+    t.index ["user_id", "image_id"], name: "index_saved_practice_images_on_user_id_and_image_id", unique: true
+    t.index ["user_id"], name: "index_saved_practice_images_on_user_id"
+  end
+
   create_table "sessions", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "ip_address"
@@ -216,6 +226,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_15_120000) do
   add_foreign_key "image_set_items", "images"
   add_foreign_key "image_sets", "image_sets", column: "parent_image_set_id"
   add_foreign_key "image_sets", "users"
+  add_foreign_key "saved_practice_images", "images"
+  add_foreign_key "saved_practice_images", "users"
   add_foreign_key "regions", "regions", column: "parent_id"
   add_foreign_key "sessions", "users"
 end

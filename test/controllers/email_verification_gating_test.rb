@@ -36,6 +36,24 @@ class EmailVerificationGatingTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
+  test "unverified user can view their saved for practice set" do
+    sign_in_as @user
+    set = @user.image_sets.create!(
+      name: ImageSet::SAVED_FOR_PRACTICE_NAME,
+      visibility: "private",
+      map_style: "outdoor-v2"
+    )
+
+    get image_set_url(set)
+    assert_response :success
+  end
+
+  test "unverified user is blocked from viewing other sets" do
+    sign_in_as @user
+    get image_set_url(image_sets(:alice_public))
+    assert_redirected_to root_path
+  end
+
   test "verified user can access games" do
     @user.update!(email_verified_at: Time.current)
     sign_in_as @user

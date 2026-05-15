@@ -58,6 +58,94 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
     assert_includes response.body, 'data-action="practice#setAttempts"'
   end
 
+  test "signed in user can practice a saved private image by id" do
+    sign_in_as @alice
+    get practice_path(image_id: @private_image.id)
+    assert_response :success
+    assert_includes response.body, "data-practice-image-id-value=\"#{@private_image.id}\""
+  end
+
+  test "saved practice index requires authentication" do
+    get practice_saved_path
+    assert_redirected_to new_session_path
+  end
+
+  test "signed in user sees only their saved practice images" do
+    sign_in_as @alice
+    SavedPracticeImage.create!(user: @alice, image: @public_image)
+    SavedPracticeImage.create!(user: @bob, image: images(:two))
+
+    get practice_saved_path
+    assert_response :success
+    assert_includes response.body, @public_image.title
+    assert_not_includes response.body, images(:two).title
+  end
+
+  test "signed in user can save a visible image for later practice" do
+    sign_in_as @alice
+
+    assert_difference("SavedPracticeImage.count", 1) do
+      post practice_save_path, params: { image_id: @public_image.id, seconds: 60, attempts: 2 }
+    end
+
+    assert_redirected_to practice_path(image_id: @public_image.id, seconds: 60, attempts: 2)
+    assert_equal @alice.id, SavedPracticeImage.last.user_id
+    assert_equal @public_image.id, SavedPracticeImage.last.image_id
+    saved_set = @alice.image_sets.find_by(name: "Saved for Practice")
+    assert saved_set.present?
+    assert saved_set.image_set_items.exists?(image_id: @public_image.id)
+  end
+
+  test "save responds with json for async practice save" do
+    sign_in_as @alice
+
+    assert_difference("SavedPracticeImage.count", 1) do
+      post practice_save_path, params: { image_id: @public_image.id }, as: :json
+    end
+
+    assert_response :success
+    assert_equal "saved", JSON.parse(response.body)["status"]
+  end
+
+  test "save refuses a private image the user cannot access" do
+    sign_in_as @bob
+
+    assert_no_difference("SavedPracticeImage.count") do
+      post practice_save_path, params: { image_id: @private_image.id }
+    end
+
+    assert_redirected_to practice_path
+  end
+
+  test "signed in user can remove saved image from saved list flow" do
+    sign_in_as @alice
+    SavedPracticeImage.create!(user: @alice, image: @public_image)
+    saved_set = @alice.image_sets.create!(name: "Saved for Practice", visibility: "private", map_style: "outdoor-v2")
+    saved_set.image_set_items.create!(image: @public_image, latitude: @public_image.latitude, longitude: @public_image.longitude)
+
+    assert_difference("SavedPracticeImage.count", -1) do
+      delete practice_unsave_path(@public_image.id), params: { from_saved: 1 }
+    end
+
+    assert_redirected_to practice_saved_path
+    assert_not saved_set.image_set_items.exists?(image_id: @public_image.id)
+  end
+
+  test "unsave responds with json for async practice remove" do
+    sign_in_as @alice
+    SavedPracticeImage.create!(user: @alice, image: @public_image)
+    saved_set = @alice.image_sets.create!(name: "Saved for Practice", visibility: "private", map_style: "outdoor-v2")
+    saved_set.image_set_items.create!(image: @public_image, latitude: @public_image.latitude, longitude: @public_image.longitude)
+
+    assert_difference("SavedPracticeImage.count", -1) do
+      delete practice_unsave_path(@public_image.id), as: :json
+    end
+
+    assert_response :success
+    assert_equal "removed", JSON.parse(response.body)["status"]
+    assert_not saved_set.image_set_items.exists?(image_id: @public_image.id)
+  end
+
   test "check returns coords for system-default image when unauthenticated" do
     get practice_check_path, params: { image_id: @public_image.id, lat: 0, lng: 0 }, as: :json
     assert_response :success

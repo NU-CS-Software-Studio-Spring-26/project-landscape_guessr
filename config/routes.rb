@@ -52,6 +52,9 @@ Rails.application.routes.draw do
   end
   get  "practice",       to: "practice#show"
   get  "practice/check", to: "practice#check", as: :practice_check
+  get  "practice/saved", to: "practice#saved", as: :practice_saved
+  post "practice/save",  to: "practice#save", as: :practice_save
+  delete "practice/save/:image_id", to: "practice#unsave", as: :practice_unsave
   get  "scoring",        to: "home#scoring", as: :scoring
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 

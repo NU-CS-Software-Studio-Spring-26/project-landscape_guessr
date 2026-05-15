@@ -14,30 +14,38 @@
      data-practice-check-url-value="<%= practice_check_path %>"
      data-practice-time-limit-value="<%= @time_limit_seconds.to_i %>"
      data-practice-attempts-value="<%= @attempts.to_i %>"
+     data-practice-signed-in-value="<%= authenticated? %>"
+     data-practice-initially-saved-value="<%= @saved_for_practice ? true : false %>"
      class="w-full space-y-6">
 
   <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
     <h1 class="heading-page">Where is this?</h1>
-    <div class="flex flex-wrap items-center gap-2 text-xs text-gray-500">
-      <span>Timer:</span>
-      <button type="button"
-              data-practice-target="timerOption"
-              data-action="practice#setTimer"
-              data-practice-seconds-param="0"
-              aria-pressed="<%= @time_limit_seconds.nil? %>"
-              class="rounded-full border px-2.5 py-1 font-medium transition-colors cursor-pointer <%= @time_limit_seconds.nil? ? 'bg-blue-100 text-blue-800 border-blue-300 shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' %>">
-        Off
-      </button>
-      <% [30, 60, 120].each do |seconds| %>
+    <div class="flex flex-wrap items-center gap-4">
+      <% if authenticated? %>
+        <%= link_to "Saved for practice", practice_saved_path,
+              class: "text-sm font-medium text-blue-700 hover:text-blue-900 hover:underline" %>
+      <% end %>
+      <div class="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+        <span>Timer:</span>
         <button type="button"
                 data-practice-target="timerOption"
                 data-action="practice#setTimer"
-                data-practice-seconds-param="<%= seconds %>"
-                aria-pressed="<%= @time_limit_seconds == seconds %>"
-                class="rounded-full border px-2.5 py-1 font-medium transition-colors cursor-pointer <%= @time_limit_seconds == seconds ? 'bg-blue-100 text-blue-800 border-blue-300 shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' %>">
-          <%= seconds %>s
+                data-practice-seconds-param="0"
+                aria-pressed="<%= @time_limit_seconds.nil? %>"
+                class="rounded-full border px-2.5 py-1 font-medium transition-colors cursor-pointer <%= @time_limit_seconds.nil? ? 'bg-blue-100 text-blue-800 border-blue-300 shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' %>">
+          Off
         </button>
-      <% end %>
+        <% [30, 60, 120].each do |seconds| %>
+          <button type="button"
+                  data-practice-target="timerOption"
+                  data-action="practice#setTimer"
+                  data-practice-seconds-param="<%= seconds %>"
+                  aria-pressed="<%= @time_limit_seconds == seconds %>"
+                  class="rounded-full border px-2.5 py-1 font-medium transition-colors cursor-pointer <%= @time_limit_seconds == seconds ? 'bg-blue-100 text-blue-800 border-blue-300 shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' %>">
+            <%= seconds %>s
+          </button>
+        <% end %>
+      </div>
     </div>
   </div>
 
@@ -131,6 +139,28 @@
           target: "_blank",
           aria: { label: "View image details (opens in a new tab)" },
           data: { practice_target: "imageLink" },
-          class: "hidden text-blue-600 hover:underline font-medium" %>
+          class: "btn-secondary hidden" %>
+
+    <% if authenticated? %>
+      <%= form_with url: practice_save_path, method: :post,
+            data: { practice_target: "saveForm", action: "submit->practice#saveForPractice" },
+            class: "hidden" do |f| %>
+        <%= f.hidden_field :image_id, value: @image.id %>
+        <%= f.hidden_field :seconds, value: @time_limit_seconds %>
+        <%= f.hidden_field :attempts, value: @attempts %>
+        <%= f.submit "Add to practice image set", class: "btn-secondary" %>
+      <% end %>
+
+      <%= form_with url: practice_unsave_path(@image.id), method: :delete,
+            data: { practice_target: "removeForm", action: "submit->practice#removeFromSaved" },
+            class: "hidden" do |f| %>
+        <%= f.hidden_field :seconds, value: @time_limit_seconds %>
+        <%= f.hidden_field :attempts, value: @attempts %>
+        <%= f.hidden_field :from_saved, value: params[:saved].present? ? 1 : nil %>
+        <%= f.submit "Remove from saved", class: "btn-secondary" %>
+      <% end %>
+
+      <p data-practice-target="saveStatus" class="hidden text-sm font-medium"></p>
+    <% end %>
   </div>
 </div>
