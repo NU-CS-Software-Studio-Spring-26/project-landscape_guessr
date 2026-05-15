@@ -2,150 +2,287 @@ require "net/http"
 require "json"
 
 namespace :regions do
-  CONTINENT_COUNTRIES = {
-    "Africa" => %w[DZA AGO BEN BWA BFA BDI CPV CMR CAF TCD COM COD COG CIV DJI EGY GNQ ERI SWZ ETH GAB GMB GHA GIN GNB KEN LSO LBR LBY MDG MWI MLI MRT MUS MAR MOZ NAM NER NGA RWA STP SEN SYC SLE SOM ZAF SSD SDN TZA TGO TUN UGA ZMB ZWE],
-    "Asia" => %w[AFG ARM AZE BHR BGD BTN BRN KHM CHN CYP GEO IND IDN IRN IRQ ISR JPN JOR KAZ KWT KGZ LAO LBN MYS MDV MNG MMR NPL PRK OMN PAK PSE PHL QAT SAU SGP KOR LKA SYR TWN TJK THA TLS TUR TKM ARE UZB VNM YEM],
-    "Europe" => %w[ALB AND AUT BLR BEL BIH BGR HRV CZE DNK EST FIN FRA DEU GRC HUN ISL IRL ITA XKX LVA LIE LTU LUX MLT MDA MCO MNE NLD MKD NOR POL PRT ROU RUS SMR SRB SVK SVN ESP SWE CHE UKR GBR VAT],
-    "North America" => %w[ATG BHS BRB BLZ CAN CRI CUB DMA DOM SLV GRD GTM HTI HND JAM MEX NIC PAN KNA LCA VCT TTO USA],
-    "South America" => %w[ARG BOL BRA CHL COL ECU GUY PRY PER SUR URY VEN],
-    "Oceania" => %w[AUS FJI KIR MHL FSM NRU NZL PLW PNG WSM SLB TON TUV VUT],
-    "Antarctica" => %w[ATA]
+  CONTINENT_CODE_MAP = {
+    "AF" => "Africa",
+    "AS" => "Asia",
+    "EU" => "Europe",
+    "NA" => "North America",
+    "SA" => "South America",
+    "OC" => "Oceania",
+    "AN" => "Antarctica"
   }.freeze
 
-  desc "Seed continent regions"
+  CONTINENT_GEOJSON_URL = "https://gist.githubusercontent.com/hrbrmstr/91ea5cc9474286c72838/raw/continents.json"
+
+  CONTINENT_NAME_MAP = {
+    "Asia" => "Asia",
+    "North America" => "North America",
+    "Europe" => "Europe",
+    "Africa" => "Africa",
+    "South America" => "South America",
+    "Oceania" => "Oceania",
+    "Australia" => "Oceania",
+    "Antarctica" => "Antarctica"
+  }.freeze
+
+  # Buffer applied to continent polygons to catch coastal cities that fall just
+  # outside the low-res hrbrmstr boundary (e.g., Miami, Lisbon, Reykjavik).
+  # Empirically determined: 0.1° catches all major coastal cities tested without
+  # introducing false positives between continents (no overlap in inland areas).
+  CONTINENT_BUFFER_DEGREES = 0.1
+
+  desc "Seed continent regions with boundaries"
   task seed_continents: :environment do
     puts "Seeding continents..."
-    CONTINENT_COUNTRIES.each_key do |name|
+    CONTINENT_CODE_MAP.each_value do |name|
       Region.find_or_create_by!(name: name, admin_level: "continent")
     end
-    puts "  #{Region.continents.count} continents"
+
+    puts "  Fetching continent boundaries..."
+    geojson = download_geojson(CONTINENT_GEOJSON_URL, "continents")
+    factory = RGeo::Geographic.spherical_factory(srid: 4326)
+
+    # Group features by our continent name (handles Australia + Oceania merging)
+    by_name = Hash.new { |h, k| h[k] = [] }
+    geojson["features"].each do |feature|
+      our_name = CONTINENT_NAME_MAP[feature["properties"]["CONTINENT"] || feature["properties"]["continent"]]
+      by_name[our_name] << feature["geometry"] if our_name
+    end
+
+    by_name.each do |our_name, geometries|
+      region = Region.find_by(name: our_name, admin_level: "continent")
+      next unless region
+
+      # Decode all geoms, buffer each, then union into one MultiPolygon
+      buffered = geometries.filter_map do |geom|
+        g = RGeo::GeoJSON.decode(geom.to_json)
+        next nil unless g
+        g = g.make_valid rescue (g.buffer(0) rescue g)
+        g.buffer(CONTINENT_BUFFER_DEGREES)
+      end
+      next if buffered.empty?
+
+      merged = buffered.reduce { |acc, g| acc.union(g) rescue acc }
+      region.update!(boundary: RGeo::GeoJSON.encode(merged))
+    end
+
+    Region.continents.where.not(boundary: nil).each do |r|
+      bbox = Region.compute_bbox(r.boundary)
+      r.update_columns(bbox) if bbox
+    end
+
+    puts "  #{Region.continents.count} continents (#{Region.continents.where.not(boundary: nil).count} with boundaries)"
   end
 
-  desc "Seed countries from Natural Earth 10m"
+  desc "Seed countries from GeoNames countryInfo.txt"
   task seed_admin0: :environment do
-    puts "Seeding admin0 (countries) from Natural Earth..."
-    url = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_0_countries.geojson"
-    geojson = download_geojson(url, "ne_admin0")
+    puts "Seeding admin0 (countries) from GeoNames..."
+    cache_dir = Rails.root.join("tmp", "geoboundaries")
+    FileUtils.mkdir_p(cache_dir)
+    file = cache_dir.join("countryInfo.txt")
 
-    continent_map = {}
-    CONTINENT_COUNTRIES.each do |continent_name, codes|
-      continent = Region.find_by!(name: continent_name, admin_level: "continent")
-      codes.each { |c| continent_map[c] = continent.id }
+    unless file.exist?
+      puts "  Downloading countryInfo.txt..."
+      File.binwrite(file, fetch_with_redirects(URI("https://download.geonames.org/export/dump/countryInfo.txt")).body)
     end
 
-    features = geojson["features"]
-    puts "  Processing #{features.size} countries..."
+    continent_lookup = CONTINENT_CODE_MAP.transform_values do |name|
+      Region.find_by!(name: name, admin_level: "continent").id
+    end
 
-    features.each_with_index do |feature, idx|
-      props = feature["properties"]
-      iso = props["ISO_A3"] || props["ADM0_A3"]
-      name = props["NAME"] || props["ADMIN"]
-      next unless name.present? && iso.present? && iso != "-99"
+    lines = File.readlines(file, encoding: "UTF-8")
+    seeded = 0
 
-      parent_id = continent_map[iso]
-      geometry = simplify_geometry(feature["geometry"], 0.01)
+    lines.each do |line|
+      next if line.start_with?("#") || line.strip.empty?
+      fields = line.chomp.split("\t")
+      # 0=ISO, 1=ISO3, 2=ISO-Numeric, 3=fips, 4=Country, 5=Capital, 6=Area, 7=Population, 8=Continent, ...
+      iso2 = fields[0]
+      iso3 = fields[1]
+      name = fields[4]
+      population = fields[7].to_i
+      continent_code = fields[8]
+      next unless iso2.present? && iso3.present? && name.present?
 
-      region = Region.find_or_initialize_by(iso_code: iso, admin_level: "country")
-      region.assign_attributes(name: name, parent_id: parent_id, boundary: geometry)
+      parent_id = continent_lookup[continent_code]
+      next unless parent_id
+
+      region = Region.find_or_initialize_by(iso_code: iso3, admin_level: "country")
+      region.assign_attributes(name: name, parent_id: parent_id, population: population)
       region.save!
-
-      print "\r  #{idx + 1}/#{features.size}" if ((idx + 1) % 10).zero?
+      seeded += 1
     end
-    puts "\n  Done: #{Region.countries.count} countries"
+
+    puts "  Done: #{seeded} countries"
   end
 
-  desc "Seed states/provinces from Natural Earth 10m"
+  desc "Seed states/provinces from GeoNames admin1CodesASCII.txt"
   task seed_admin1: :environment do
-    puts "Seeding admin1 (states/provinces) from Natural Earth..."
-    url = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_1_states_provinces.geojson"
-    geojson = download_geojson(url, "ne_admin1")
+    puts "Seeding admin1 (states/provinces) from GeoNames..."
+    cache_dir = Rails.root.join("tmp", "geoboundaries")
+    FileUtils.mkdir_p(cache_dir)
+    file = cache_dir.join("admin1CodesASCII.txt")
 
-    country_lookup = Region.countries.index_by(&:iso_code)
-
-    features = geojson["features"]
-    puts "  Processing #{features.size} admin1 regions..."
-
-    features.each_with_index do |feature, idx|
-      props = feature["properties"]
-      name = props["name"] || props["NAME"]
-      country_iso = props["iso_a2"] ? iso_a2_to_a3(props["iso_a2"]) : props["adm0_a3"]
-      iso_code = props["iso_3166_2"]
-      next unless name.present?
-
-      parent = country_lookup[country_iso]
-      next unless parent
-
-      geometry = simplify_geometry(feature["geometry"], 0.01)
-
-      region = Region.find_or_initialize_by(name: name, admin_level: "admin1", parent_id: parent.id)
-      region.assign_attributes(iso_code: iso_code, boundary: geometry)
-      region.save!
-
-      print "\r  #{idx + 1}/#{features.size}" if ((idx + 1) % 100).zero?
+    unless file.exist?
+      puts "  Downloading admin1CodesASCII.txt..."
+      File.binwrite(file, fetch_with_redirects(URI("https://download.geonames.org/export/dump/admin1CodesASCII.txt")).body)
     end
-    puts "\n  Done: #{Region.admin1s.count} admin1 regions"
-  end
 
-  desc "Seed admin2 (counties/districts) from geoBoundaries per-country"
-  task seed_admin2: :environment do
-    puts "Seeding admin2 (counties/districts)..."
-    puts "  Fetching geoBoundaries ADM2 index..."
+    # Map ISO2 -> country region
+    country_by_iso2 = {}
+    Region.countries.find_each do |c|
+      iso2 = iso_a3_to_a2(c.iso_code)
+      country_by_iso2[iso2] = c if iso2
+    end
+    puts "  #{country_by_iso2.size} countries available for parent lookup"
 
-    index_url = "https://www.geoboundaries.org/api/current/gbOpen/ALL/ADM2/"
-    index_resp = fetch_with_redirects(URI(index_url))
-    index_data = JSON.parse(index_resp.body)
-    puts "  Found #{index_data.size} countries with ADM2 data"
+    lines = File.readlines(file, encoding: "UTF-8")
+    seeded = 0
+    skipped = 0
 
-    countries_with_images = Region.countries
-      .joins(children: { image_regions: {} })
-      .distinct
-      .pluck(:iso_code)
-      .compact
+    lines.each do |line|
+      fields = line.chomp.split("\t")
+      code = fields[0]      # "US.MA"
+      name = fields[1]      # "Massachusetts"
+      next unless code && name.present?
 
-    relevant_entries = index_data.select { |e| countries_with_images.include?(e["boundaryISO"]) }
-    puts "  Filtering to #{relevant_entries.size} countries with tagged images..."
-
-    relevant_entries.each_with_index do |entry, country_idx|
-      iso = entry["boundaryISO"]
-      download_url = entry["gjDownloadURL"]
-      next unless download_url.present?
-
-      country = Region.find_by(iso_code: iso, admin_level: "country")
-      next unless country
-
-      existing_admin2_count = Region.where(admin_level: "admin2")
-        .joins("JOIN regions AS parents ON regions.parent_id = parents.id")
-        .where("parents.parent_id = ?", country.id)
-        .count
-      if existing_admin2_count > 0
-        print "\r  [#{country_idx + 1}/#{relevant_entries.size}] #{iso}: already seeded (#{existing_admin2_count} regions)"
+      iso2 = code.split(".").first
+      parent = country_by_iso2[iso2]
+      unless parent
+        skipped += 1
         next
       end
 
-      begin
-        geojson = download_geojson(download_url, "admin2_#{iso}")
-        features = geojson["features"]
-        admin1_lookup = Region.where(admin_level: "admin1", parent_id: country.id).to_a
+      region = Region.find_or_initialize_by(iso_code: code, admin_level: "admin1")
+      region.assign_attributes(name: name, parent_id: parent.id)
+      region.save!
+      seeded += 1
+    end
 
-        features.each do |feature|
-          props = feature["properties"]
-          name = props["shapeName"]
-          next unless name.present?
+    puts "  Done: #{seeded} admin1 regions (#{skipped} skipped — no parent country)"
+  end
 
-          parent = admin1_lookup.first
-          geometry = simplify_geometry(feature["geometry"], 0.02)
+  desc "Seed admin2 (counties/districts) from GeoNames admin2Codes.txt"
+  task seed_admin2: :environment do
+    puts "Seeding admin2 (counties/districts) from GeoNames..."
 
-          region = Region.find_or_initialize_by(name: name, admin_level: "admin2", parent_id: parent&.id || country.id)
-          region.assign_attributes(boundary: geometry)
-          region.save!
-        end
+    cache_dir = Rails.root.join("tmp", "geoboundaries")
+    FileUtils.mkdir_p(cache_dir)
+    codes_file = cache_dir.join("admin2Codes.txt")
 
-        print "\r  [#{country_idx + 1}/#{relevant_entries.size}] #{iso}: #{features.size} admin2 regions"
-      rescue => e
-        puts "\n  Warning: Failed to seed admin2 for #{iso}: #{e.message}"
+    unless codes_file.exist?
+      puts "  Downloading admin2Codes.txt..."
+      uri = URI("https://download.geonames.org/export/dump/admin2Codes.txt")
+      File.binwrite(codes_file, fetch_with_redirects(uri).body)
+    end
+
+    # admin1.iso_code is now stored as GeoNames format "US.MA"
+    admin1_by_code = Region.admin1s.where.not(iso_code: nil).index_by(&:iso_code)
+    puts "  Built admin1 lookup with #{admin1_by_code.size} entries"
+
+    lines = File.readlines(codes_file, encoding: "UTF-8")
+    puts "  #{lines.size} admin2 codes to process..."
+
+    batch = []
+    seeded = 0
+    skipped_no_parent = 0
+
+    lines.each_with_index do |line, idx|
+      fields = line.chomp.split("\t")
+      code = fields[0]      # e.g., "US.MA.025"
+      name = fields[1]      # e.g., "Norfolk County"
+      next unless code && name.present?
+
+      admin1_key = code.split(".").first(2).join(".")
+      parent = admin1_by_code[admin1_key]
+      unless parent
+        skipped_no_parent += 1
+        next
+      end
+
+      batch << {
+        name: name,
+        admin_level: "admin2",
+        parent_id: parent.id,
+        iso_code: code,
+        created_at: Time.current,
+        updated_at: Time.current
+      }
+
+      if batch.size >= 500
+        Region.insert_all(batch)
+        seeded += batch.size
+        batch = []
+        print "\r  #{seeded} admin2 seeded"
       end
     end
-    puts "\n  Done: #{Region.admin2s.count} total admin2 regions"
+
+    Region.insert_all(batch) if batch.any?
+    seeded += batch.size
+    puts "\n  Done: #{seeded} admin2 regions (#{skipped_no_parent} skipped — no parent admin1)"
+  end
+
+  desc "Aggregate city populations and bboxes up to parent admin1/admin2"
+  task aggregate_populations: :environment do
+    puts "Aggregating populations and bboxes up to admin1/admin2..."
+
+    # admin2: aggregate from children cities
+    admin2_pop_sql = <<~SQL.squish
+      UPDATE regions SET
+        population = sub.total_pop,
+        min_lat = sub.min_lat, max_lat = sub.max_lat,
+        min_lng = sub.min_lng, max_lng = sub.max_lng
+      FROM (
+        SELECT parent_id,
+               SUM(population) AS total_pop,
+               MIN(min_lat) AS min_lat, MAX(max_lat) AS max_lat,
+               MIN(min_lng) AS min_lng, MAX(max_lng) AS max_lng
+        FROM regions
+        WHERE admin_level = 'city'
+        GROUP BY parent_id
+      ) sub
+      WHERE regions.id = sub.parent_id AND regions.admin_level = 'admin2'
+    SQL
+    ActiveRecord::Base.connection.execute(admin2_pop_sql)
+    puts "  admin2 populations aggregated: #{Region.admin2s.where('population > 0').count}"
+
+    # admin1: aggregate from children (cities + admin2)
+    admin1_sql = <<~SQL.squish
+      UPDATE regions SET
+        population = sub.total_pop,
+        min_lat = sub.min_lat, max_lat = sub.max_lat,
+        min_lng = sub.min_lng, max_lng = sub.max_lng
+      FROM (
+        SELECT parent_id,
+               SUM(population) AS total_pop,
+               MIN(min_lat) AS min_lat, MAX(max_lat) AS max_lat,
+               MIN(min_lng) AS min_lng, MAX(max_lng) AS max_lng
+        FROM regions
+        WHERE admin_level IN ('city', 'admin2') AND min_lat IS NOT NULL
+        GROUP BY parent_id
+      ) sub
+      WHERE regions.id = sub.parent_id AND regions.admin_level = 'admin1'
+    SQL
+    ActiveRecord::Base.connection.execute(admin1_sql)
+    puts "  admin1 populations aggregated: #{Region.admin1s.where('population > 0').count}"
+
+    # country: aggregate bbox from admin1 children (population already from GeoNames)
+    country_sql = <<~SQL.squish
+      UPDATE regions SET
+        min_lat = sub.min_lat, max_lat = sub.max_lat,
+        min_lng = sub.min_lng, max_lng = sub.max_lng
+      FROM (
+        SELECT parent_id,
+               MIN(min_lat) AS min_lat, MAX(max_lat) AS max_lat,
+               MIN(min_lng) AS min_lng, MAX(max_lng) AS max_lng
+        FROM regions
+        WHERE admin_level = 'admin1' AND min_lat IS NOT NULL
+        GROUP BY parent_id
+      ) sub
+      WHERE regions.id = sub.parent_id AND regions.admin_level = 'country'
+    SQL
+    ActiveRecord::Base.connection.execute(country_sql)
+    puts "  country bboxes aggregated: #{Region.countries.where.not(min_lat: nil).count}"
   end
 
   desc "Compute bounding boxes for all regions"
@@ -182,29 +319,12 @@ namespace :regions do
     end
 
     puts "  Reading cities..."
-    admin1_lookup = Region.where(admin_level: "admin1").select(:id, :name, :iso_code, :parent_id).to_a
     country_lookup = Region.countries.index_by(&:iso_code)
-
-    # Build admin1 lookup by country ISO + admin1 code
-    admin1_by_country = {}
-    admin1_lookup.each do |a1|
-      next unless a1.iso_code.present?
-      # iso_code format: "US-CA", so extract country part
-      country_part = a1.iso_code.split("-").first
-      admin1_by_country[a1.iso_code] = a1
-    end
-
-    # Also group admin1s by parent (country) id
-    admin1_by_parent = admin1_lookup.group_by(&:parent_id)
+    admin1_by_code = Region.admin1s.where.not(iso_code: nil).index_by(&:iso_code)
+    admin2_by_code = Region.admin2s.where.not(iso_code: nil).index_by(&:iso_code)
 
     lines = File.readlines(txt_file, encoding: "UTF-8")
     puts "  #{lines.size} cities in dataset"
-
-    # Only seed cities in countries that have tagged images
-    countries_with_images = ImageRegion.joins(:region)
-      .where(regions: { admin_level: "country" })
-      .distinct
-      .pluck("regions.iso_code")
 
     batch = []
     seeded = 0
@@ -220,40 +340,42 @@ namespace :regions do
       name = fields[1]
       lat = fields[4].to_f
       lng = fields[5].to_f
+      feature_code = fields[7]
       country_code_2 = fields[8]
       admin1_code = fields[10]
+      admin2_code = fields[11]
       population = fields[14].to_i
 
-      country_iso3 = iso_a2_to_a3(country_code_2)
-      next unless countries_with_images.include?(country_iso3)
-      next if population < 5000 # Only cities with 5k+ population
+      # Only seed actual populated places, not military bases, hospitals, etc.
+      next unless %w[PPL PPLA PPLA2 PPLA3 PPLA4 PPLC PPLG PPLL PPLR].include?(feature_code)
+      # cities1000.txt already filters to pop ≥ 1000 by definition. Reject the
+      # ~12k entries with population=0 (GeoNames placeholder for "unknown" —
+      # mostly stubs without real demographic data). Keeping pop=1000 cutoff
+      # gives us ~136k cities including small towns like Dover, MA (pop 2265).
+      next if population < 1000
+      next if name.include?(",") || name.length > 50
 
+      country_iso3 = iso_a2_to_a3(country_code_2)
       country = country_lookup[country_iso3]
       next unless country
 
-      # Find parent admin1
-      iso_3166_2 = "#{country_code_2}-#{admin1_code}"
-      parent = admin1_by_country[iso_3166_2]
-      parent ||= begin
-        candidates = admin1_by_parent[country.id] || []
-        candidates.first
-      end
+      # Prefer admin2 as parent (more specific), fall back to admin1, then country
+      admin2_key = "#{country_code_2}.#{admin1_code}.#{admin2_code}"
+      admin1_key = "#{country_code_2}.#{admin1_code}"
+      parent = admin2_by_code[admin2_key] || admin1_by_code[admin1_key]
       parent_id = parent&.id || country.id
 
-      # Create a small circular polygon around the city center
-      # Radius based on population (bigger city = bigger area)
-      radius_km = city_radius_km(population)
-      boundary = circle_polygon(lat, lng, radius_km)
-
+      # No fake boundary — real polygon is fetched from Nominatim on first use.
+      # Store the point as min_lat=max_lat=lat (and same for lng) so aggregation
+      # to parent bboxes still works, and search distance ranking has something
+      # to compare against.
       batch << {
         name: name,
         admin_level: "city",
         parent_id: parent_id,
-        boundary: boundary,
-        min_lat: lat - (radius_km / 111.0),
-        max_lat: lat + (radius_km / 111.0),
-        min_lng: lng - (radius_km / (111.0 * Math.cos(lat * Math::PI / 180))),
-        max_lng: lng + (radius_km / (111.0 * Math.cos(lat * Math::PI / 180))),
+        population: population,
+        min_lat: lat, max_lat: lat,
+        min_lng: lng, max_lng: lng,
         created_at: Time.current,
         updated_at: Time.current
       }
@@ -272,219 +394,68 @@ namespace :regions do
     puts "\n  Done: #{Region.where(admin_level: 'city').count} cities seeded"
   end
 
-  desc "Seed all region levels"
-  task seed_all: [ :seed_continents, :seed_admin0, :seed_admin1, :seed_admin2, :seed_cities, :compute_bboxes ]
+  desc "Fetch Nominatim boundaries for all countries (~4 min, rate-limited)"
+  task fetch_country_boundaries: :environment do
+    puts "Fetching Nominatim boundaries for countries..."
+    countries = Region.countries.order(:name)
+    total = countries.count
+    fetched = 0
 
-  desc "Seed base levels only (continents + countries + states + cities)"
-  task seed_base: [ :seed_continents, :seed_admin0, :seed_admin1, :seed_cities, :compute_bboxes ]
+    countries.each_with_index do |country, idx|
+      if country.boundary.present?
+        print "\r  #{idx + 1}/#{total} #{country.name} (cached)"
+        next
+      end
 
-  desc "Tag all images with their containing regions"
-  task tag_images: :environment do
-    puts "Tagging images with regions..."
-    factory = RGeo::Geographic.spherical_factory(srid: 4326)
-
-    # Load non-city regions into memory (they're small enough)
-    non_city_regions = Region.where.not(boundary: nil).where.not(admin_level: "city").filter_map do |r|
-      geom = RGeo::GeoJSON.decode(r.boundary.to_json)
-      next nil unless geom
-      geom = geom.make_valid rescue (geom.buffer(0) rescue geom)
-      [ r, geom ]
+      result = country.fetch_real_boundary!
+      fetched += 1 if result
+      status = result ? "OK (#{country.boundary_coord_count} coords)" : "FAILED"
+      print "\r  #{idx + 1}/#{total} #{country.name}: #{status}        "
     end
-    puts "  Loaded #{non_city_regions.size} non-city region geometries"
-
-    images = Image.where.not(latitude: nil).where.not(longitude: nil)
-    total = images.count
-    puts "  Processing #{total} images..."
-
-    tagged = 0
-    images.find_each(batch_size: 200).with_index do |image, idx|
-      lat = image.latitude.to_f
-      lng = image.longitude.to_f
-      point = factory.point(lng, lat)
-
-      # Check non-city regions (in memory)
-      matching_ids = non_city_regions.filter_map do |region, geom|
-        region.id if geom.contains?(point)
-      rescue
-        nil
-      end
-
-      # Check cities using bbox pre-filter (SQL)
-      city_candidates = Region.where(admin_level: "city")
-        .where("min_lat <= ? AND max_lat >= ? AND min_lng <= ? AND max_lng >= ?", lat, lat, lng, lng)
-
-      city_candidates.each do |city|
-        geom = RGeo::GeoJSON.decode(city.boundary.to_json)
-        matching_ids << city.id if geom&.contains?(point)
-      rescue
-        nil
-      end
-
-      existing_ids = image.image_regions.pluck(:region_id)
-      new_ids = matching_ids - existing_ids
-
-      if new_ids.any?
-        ImageRegion.insert_all(
-          new_ids.map { |rid| { image_id: image.id, region_id: rid, created_at: Time.current, updated_at: Time.current } }
-        )
-        tagged += new_ids.size
-      end
-
-      print "\r  #{idx + 1}/#{total} images (#{tagged} tags created)" if ((idx + 1) % 50).zero?
-    end
-    puts "\n  Done: #{ImageRegion.count} total image-region associations"
+    puts "\n  Done: #{fetched} boundaries fetched"
   end
 
-  desc "Reset all regions (destructive - clears regions and image_regions tables)"
+  # aggregate_populations is part of the chain — without it, admin1/admin2 rows
+  # have NULL population, and Region.search's log10(pop) score ranks states
+  # below their own cities. ("Massachusetts" search would return Boston before
+  # the state row.)
+  desc "Seed all region levels"
+  task seed_all: [ :seed_continents, :seed_admin0, :seed_admin1, :seed_admin2, :seed_cities, :compute_bboxes, :aggregate_populations ]
+
+  desc "Seed base levels only (continents + countries + states + cities)"
+  task seed_base: [ :seed_continents, :seed_admin0, :seed_admin1, :seed_cities, :compute_bboxes, :aggregate_populations ]
+
+  desc "Re-seed boundaries with current quality settings (clears cached GeoJSON, re-downloads)"
+  task reseed: :environment do
+    cache_dir = Rails.root.join("tmp", "geoboundaries")
+    if cache_dir.exist?
+      puts "Clearing cached GeoJSON files..."
+      FileUtils.rm_rf(cache_dir)
+    end
+    puts "Running full reset + seed pipeline..."
+    Rake::Task["regions:reset"].invoke
+    Rake::Task["regions:seed_all"].invoke
+  end
+
+  desc "Reset all regions (destructive — clears regions table)"
   task reset: :environment do
     puts "Resetting all regions..."
-    ImageRegion.delete_all
     Region.delete_all
     puts "  Done"
   end
 
   private
 
-  def city_radius_km(population)
-    case population
-    when 0..10_000 then 8
-    when 10_001..50_000 then 12
-    when 50_001..200_000 then 18
-    when 200_001..1_000_000 then 25
-    when 1_000_001..5_000_000 then 35
-    else 50
-    end
-  end
-
-  def circle_polygon(lat, lng, radius_km, segments = 16)
-    coords = (0..segments).map do |i|
-      angle = (2 * Math::PI * i) / segments
-      dlat = (radius_km / 111.0) * Math.sin(angle)
-      dlng = (radius_km / (111.0 * Math.cos(lat * Math::PI / 180))) * Math.cos(angle)
-      [ (lng + dlng).round(5), (lat + dlat).round(5) ]
-    end
-    { "type" => "Polygon", "coordinates" => [ coords ] }
-  end
-
-  def simplify_geometry(geometry, tolerance)
-    return geometry unless geometry.is_a?(Hash)
-    return geometry if tolerance <= 0
-
-    case geometry["type"]
-    when "Polygon"
-      simplified_coords = geometry["coordinates"].map { |ring| douglas_peucker(ring, tolerance) }
-      simplified_coords.reject! { |ring| ring.size < 4 }
-      return nil if simplified_coords.empty?
-      { "type" => "Polygon", "coordinates" => simplified_coords }
-    when "MultiPolygon"
-      simplified_polys = geometry["coordinates"].map do |polygon|
-        rings = polygon.map { |ring| douglas_peucker(ring, tolerance) }
-        rings.reject! { |ring| ring.size < 4 }
-        rings.empty? ? nil : rings
-      end.compact
-      return nil if simplified_polys.empty?
-      { "type" => "MultiPolygon", "coordinates" => simplified_polys }
-    else
-      geometry
-    end
-  end
-
-  def douglas_peucker(points, tolerance)
-    return points if points.size <= 2
-
-    max_dist = 0
-    max_idx = 0
-    first = points.first
-    last = points.last
-
-    (1...points.size - 1).each do |i|
-      dist = perpendicular_distance(points[i], first, last)
-      if dist > max_dist
-        max_dist = dist
-        max_idx = i
-      end
-    end
-
-    if max_dist > tolerance
-      left = douglas_peucker(points[0..max_idx], tolerance)
-      right = douglas_peucker(points[max_idx..], tolerance)
-      left[0...-1] + right
-    else
-      [ first, last ]
-    end
-  end
-
-  def perpendicular_distance(point, line_start, line_end)
-    dx = line_end[0] - line_start[0]
-    dy = line_end[1] - line_start[1]
-    if dx == 0 && dy == 0
-      Math.sqrt((point[0] - line_start[0])**2 + (point[1] - line_start[1])**2)
-    else
-      ((dy * point[0] - dx * point[1] + line_end[0] * line_start[1] - line_end[1] * line_start[0]).abs /
-        Math.sqrt(dx**2 + dy**2))
-    end
+  def iso_a3_to_a2(iso3)
+    IsoCountryCodes.alpha2(iso3)
   end
 
   def iso_a2_to_a3(iso2)
-    return nil unless iso2
-    mapping = {
-      "AF" => "AFG", "AL" => "ALB", "DZ" => "DZA", "AD" => "AND", "AO" => "AGO", "AG" => "ATG",
-      "AR" => "ARG", "AM" => "ARM", "AU" => "AUS", "AT" => "AUT", "AZ" => "AZE", "BS" => "BHS",
-      "BH" => "BHR", "BD" => "BGD", "BB" => "BRB", "BY" => "BLR", "BE" => "BEL", "BZ" => "BLZ",
-      "BJ" => "BEN", "BT" => "BTN", "BO" => "BOL", "BA" => "BIH", "BW" => "BWA", "BR" => "BRA",
-      "BN" => "BRN", "BG" => "BGR", "BF" => "BFA", "BI" => "BDI", "CV" => "CPV", "KH" => "KHM",
-      "CM" => "CMR", "CA" => "CAN", "CF" => "CAF", "TD" => "TCD", "CL" => "CHL", "CN" => "CHN",
-      "CO" => "COL", "KM" => "COM", "CG" => "COG", "CD" => "COD", "CR" => "CRI", "CI" => "CIV",
-      "HR" => "HRV", "CU" => "CUB", "CY" => "CYP", "CZ" => "CZE", "DK" => "DNK", "DJ" => "DJI",
-      "DM" => "DMA", "DO" => "DOM", "EC" => "ECU", "EG" => "EGY", "SV" => "SLV", "GQ" => "GNQ",
-      "ER" => "ERI", "EE" => "EST", "SZ" => "SWZ", "ET" => "ETH", "FJ" => "FJI", "FI" => "FIN",
-      "FR" => "FRA", "GA" => "GAB", "GM" => "GMB", "GE" => "GEO", "DE" => "DEU", "GH" => "GHA",
-      "GR" => "GRC", "GD" => "GRD", "GT" => "GTM", "GN" => "GIN", "GW" => "GNB", "GY" => "GUY",
-      "HT" => "HTI", "HN" => "HND", "HU" => "HUN", "IS" => "ISL", "IN" => "IND", "ID" => "IDN",
-      "IR" => "IRN", "IQ" => "IRQ", "IE" => "IRL", "IL" => "ISR", "IT" => "ITA", "JM" => "JAM",
-      "JP" => "JPN", "JO" => "JOR", "KZ" => "KAZ", "KE" => "KEN", "KI" => "KIR", "KP" => "PRK",
-      "KR" => "KOR", "KW" => "KWT", "KG" => "KGZ", "LA" => "LAO", "LV" => "LVA", "LB" => "LBN",
-      "LS" => "LSO", "LR" => "LBR", "LY" => "LBY", "LI" => "LIE", "LT" => "LTU", "LU" => "LUX",
-      "MG" => "MDG", "MW" => "MWI", "MY" => "MYS", "MV" => "MDV", "ML" => "MLI", "MT" => "MLT",
-      "MH" => "MHL", "MR" => "MRT", "MU" => "MUS", "MX" => "MEX", "FM" => "FSM", "MD" => "MDA",
-      "MC" => "MCO", "MN" => "MNG", "ME" => "MNE", "MA" => "MAR", "MZ" => "MOZ", "MM" => "MMR",
-      "NA" => "NAM", "NR" => "NRU", "NP" => "NPL", "NL" => "NLD", "NZ" => "NZL", "NI" => "NIC",
-      "NE" => "NER", "NG" => "NGA", "MK" => "MKD", "NO" => "NOR", "OM" => "OMN", "PK" => "PAK",
-      "PW" => "PLW", "PS" => "PSE", "PA" => "PAN", "PG" => "PNG", "PY" => "PRY", "PE" => "PER",
-      "PH" => "PHL", "PL" => "POL", "PT" => "PRT", "QA" => "QAT", "RO" => "ROU", "RU" => "RUS",
-      "RW" => "RWA", "KN" => "KNA", "LC" => "LCA", "VC" => "VCT", "WS" => "WSM", "SM" => "SMR",
-      "ST" => "STP", "SA" => "SAU", "SN" => "SEN", "RS" => "SRB", "SC" => "SYC", "SL" => "SLE",
-      "SG" => "SGP", "SK" => "SVK", "SI" => "SVN", "SB" => "SLB", "SO" => "SOM", "ZA" => "ZAF",
-      "SS" => "SSD", "ES" => "ESP", "LK" => "LKA", "SD" => "SDN", "SR" => "SUR", "SE" => "SWE",
-      "CH" => "CHE", "SY" => "SYR", "TW" => "TWN", "TJ" => "TJK", "TZ" => "TZA", "TH" => "THA",
-      "TL" => "TLS", "TG" => "TGO", "TO" => "TON", "TT" => "TTO", "TN" => "TUN", "TR" => "TUR",
-      "TM" => "TKM", "TV" => "TUV", "UG" => "UGA", "UA" => "UKR", "AE" => "ARE", "GB" => "GBR",
-      "US" => "USA", "UY" => "URY", "UZ" => "UZB", "VU" => "VUT", "VE" => "VEN", "VN" => "VNM",
-      "YE" => "YEM", "ZM" => "ZMB", "ZW" => "ZWE", "XK" => "XKX"
-    }
-    mapping[iso2.upcase]
+    IsoCountryCodes.alpha3(iso2)
   end
 
   def compute_bbox(geometry)
-    coords = extract_all_coords(geometry)
-    return nil if coords.empty?
-
-    lats = coords.map { |c| c[1] }
-    lngs = coords.map { |c| c[0] }
-    { min_lat: lats.min, max_lat: lats.max, min_lng: lngs.min, max_lng: lngs.max }
-  end
-
-  def extract_all_coords(geometry)
-    return [] unless geometry.is_a?(Hash)
-
-    case geometry["type"]
-    when "Polygon"
-      geometry["coordinates"].flatten(1)
-    when "MultiPolygon"
-      geometry["coordinates"].flatten(2)
-    else
-      []
-    end
+    Region.compute_bbox(geometry)
   end
 
   def download_geojson(url, label)

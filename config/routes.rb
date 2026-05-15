@@ -31,6 +31,7 @@ Rails.application.routes.draw do
       get  :new_filtered
       get  :edit_filter
       patch :update_filter
+      get :preview_filter_count
     end
     delete "items/:item_id", to: "image_sets#remove_item", as: :remove_item
   end
@@ -40,6 +41,10 @@ Rails.application.routes.draw do
       get :boundaries
       get :tree
       get :at_point
+      post :resolve
+    end
+    member do
+      post :fetch_boundary
     end
   end
   get  "practice",       to: "practice#show"

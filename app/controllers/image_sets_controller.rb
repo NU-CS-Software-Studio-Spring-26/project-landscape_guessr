@@ -1,6 +1,10 @@
 class ImageSetsController < ApplicationController
-  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image attach_blob processing_status remove_item map new_filtered edit_filter update_filter]
-  before_action :require_owner, only: %i[edit update destroy locations update_locations add_image attach_blob processing_status remove_item edit_filter update_filter]
+  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image attach_blob processing_status remove_item map new_filtered edit_filter update_filter preview_filter_count]
+  before_action :require_owner, only: %i[edit update destroy locations update_locations add_image attach_blob processing_status remove_item edit_filter update_filter preview_filter_count]
+  # Filtered sets' items are derived from the filter — any direct edit gets
+  # blown away on the next materialize. Redirect those routes to the filter
+  # editor instead of letting users do work that disappears.
+  before_action :block_if_filtered, only: %i[locations update_locations add_image attach_blob remove_item]
 
   # GET /image_sets
   def index
@@ -39,9 +43,23 @@ class ImageSetsController < ApplicationController
   def create
     @image_set = Current.user.image_sets.new(image_set_params)
 
+    # Filtered sets can only be built from a parent the user can play. Without
+    # this check, anyone could pass parent_image_set_id of a private set they
+    # don't own and clone its image_set_items into a set they then mark public.
+    if @image_set.parent_image_set_id.present?
+      parent = ImageSet.find_by(id: @image_set.parent_image_set_id)
+      unless parent&.playable_by?(Current.user)
+        @image_set.errors.add(:parent_image_set, "is not accessible")
+        @parent_set = parent
+        @filtered_set = @image_set
+        render :new_filtered, status: :unprocessable_entity and return
+      end
+    end
+
     if @image_set.filtered?
       if @image_set.save
-        redirect_to @image_set, notice: "Filtered set created."
+        @image_set.materialize_filtered_items!
+        redirect_to @image_set, notice: "Filtered set created (#{@image_set.image_set_items.count} images matched)."
       else
         @parent_set = @image_set.parent_image_set
         @filtered_set = @image_set
@@ -176,6 +194,7 @@ class ImageSetsController < ApplicationController
       item.latitude  = lat || image.latitude
       item.longitude = lng || image.longitude
       item.save!
+      refresh_filtered_children
       redirect_back fallback_location: locations_image_set_path(@image_set), notice: "Image added to set."
     else
       redirect_back fallback_location: locations_image_set_path(@image_set), alert: "That image is already in this set."
@@ -187,6 +206,7 @@ class ImageSetsController < ApplicationController
     item = @image_set.image_set_items.find_by(id: params[:item_id])
     if item
       item.destroy
+      refresh_filtered_children
       redirect_back fallback_location: @image_set, notice: "Image removed from set."
     else
       redirect_back fallback_location: @image_set, alert: "Image not found in this set."
@@ -234,6 +254,24 @@ class ImageSetsController < ApplicationController
     render json: { items: payload, processing_count: payload.count { |i| !i[:processed] } }
   end
 
+  # GET /image_sets/1/preview_filter_count?region_ids[]=N
+  # Returns the number of parent-set images that would match the given regions,
+  # plus the matched IDs so the builder can recolor image dots on the map.
+  def preview_filter_count
+    region_ids = Array(params[:region_ids]).map(&:to_i).reject(&:zero?)
+    if region_ids.empty?
+      render json: { count: 0, matched_ids: [] } and return
+    end
+
+    parent = @image_set.filtered? ? @image_set.parent_image_set : @image_set
+    temp = ImageSet.new(parent_image_set: parent, region_ids: region_ids)
+    matched = temp.compute_matching_image_ids
+    render json: { count: matched.size, matched_ids: matched }
+  rescue => e
+    Rails.logger.error("[image_sets#preview_filter_count] #{e.class}: #{e.message}")
+    render json: { count: nil, error: "Unable to count matching images" }, status: :unprocessable_entity
+  end
+
   # GET /image_sets/1/new_filtered
   def new_filtered
     @parent_set = @image_set
@@ -258,7 +296,8 @@ class ImageSetsController < ApplicationController
       region_ids: region_ids,
       visibility: params[:visibility] || @image_set.visibility
     )
-      redirect_to @image_set, notice: "Filter updated."
+      @image_set.materialize_filtered_items!
+      redirect_to @image_set, notice: "Filter updated (#{@image_set.image_set_items.count} images matched)."
     else
       @parent_set = @image_set.parent_image_set
       @filtered_set = @image_set
@@ -320,9 +359,36 @@ class ImageSetsController < ApplicationController
     end
   end
 
+  def block_if_filtered
+    if @image_set.filtered?
+      msg = "This is a filtered set — edit the filter instead. Direct image changes get overwritten."
+      respond_to do |format|
+        format.html { redirect_to edit_filter_image_set_path(@image_set), alert: msg }
+        format.json { render json: { error: msg }, status: :forbidden }
+      end
+    end
+  end
+
+  # On `create`, parent_image_set_id + region_ids are needed (that's how a
+  # filtered set is born). On `update`, both must be locked: the filter is
+  # only mutable through update_filter, which re-runs materialize. Allowing
+  # them through the regular update would silently desync materialized items
+  # from the recorded region_ids.
   def image_set_params
-    permitted = params.expect(image_set: [ :name, :visibility, :map_style, :parent_image_set_id, region_ids: [] ])
-    permitted[:region_ids] = permitted[:region_ids]&.map(&:to_i)&.reject(&:zero?) || []
+    allowed = [ :name, :visibility, :map_style ]
+    allowed += [ :parent_image_set_id, { region_ids: [] } ] if action_name == "create"
+    permitted = params.expect(image_set: allowed)
+    if permitted[:region_ids].present?
+      permitted[:region_ids] = permitted[:region_ids].map(&:to_i).reject(&:zero?)
+    else
+      permitted.delete(:region_ids)
+    end
     permitted
+  end
+
+  # Background — see RematerializeFilteredSetsJob. Inline rematerialization was
+  # blocking add_image / remove_item requests on Nominatim fetches.
+  def refresh_filtered_children
+    RematerializeFilteredSetsJob.perform_later(@image_set.id) if @image_set.filtered_sets.exists?
   end
 end

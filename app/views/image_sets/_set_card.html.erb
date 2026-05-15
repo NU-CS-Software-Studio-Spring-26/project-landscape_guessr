@@ -1,8 +1,8 @@
 <div class="rounded-lg border border-gray-200 px-4 py-3 flex items-center justify-between gap-3">
-  <div class="min-w-0">
+  <div class="min-w-0 flex-1">
     <%= link_to set.name, set, class: "font-medium text-gray-900 hover:text-blue-600 truncate block" %>
     <p class="text-xs text-gray-500 mt-0.5">
-      <%= set.filtered? ? set.effective_items_count : (set.respond_to?(:items_count) ? set.items_count : set.image_set_items.count) %> images &middot;
+      <%= set.respond_to?(:items_count) ? set.items_count : set.image_set_items.count %> images &middot;
       <span class="<%= set.visibility == 'public' ? 'text-green-600' : 'text-gray-500' %>"><%= set.visibility %></span>
       <% if set.filtered? %>
         &middot; <span class="text-forest-600">Filtered</span>
@@ -13,13 +13,36 @@
     <%= button_to "Play", games_path, method: :post,
           params: { image_set_id: set.id },
           class: "btn-primary text-sm py-1.5" %>
-    <%= link_to "Leaderboard", leaderboard_games_path(image_set_id: set.id),
-          class: "btn-secondary text-sm py-1.5" %>
-    <% if local_assigns[:show_owner_actions] %>
-      <% unless set.filtered? %>
-        <%= link_to "Manage images", locations_image_set_path(set), class: "btn-secondary text-sm py-1.5" %>
-      <% end %>
-      <%= link_to "Settings", edit_image_set_path(set), class: "btn-secondary text-sm py-1.5" %>
-    <% end %>
+    <div data-controller="dropdown" class="relative">
+      <button type="button" data-action="click->dropdown#toggle"
+              aria-label="More actions"
+              class="btn-secondary text-sm py-1.5 px-3 inline-flex items-center justify-center">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z"/>
+        </svg>
+      </button>
+      <div data-dropdown-target="menu"
+           class="hidden absolute right-0 top-full mt-1 z-10 min-w-[10rem] rounded-md border border-gray-200 bg-white shadow-lg py-1">
+        <%= link_to "Leaderboard", leaderboard_games_path(image_set_id: set.id),
+              class: "block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" %>
+        <%= link_to "Map", map_image_set_path(set),
+              class: "block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" %>
+        <% if local_assigns[:show_owner_actions] %>
+          <div class="border-t border-gray-100 my-1"></div>
+          <% if set.filtered? %>
+            <%= link_to "Edit filter", edit_filter_image_set_path(set),
+                  class: "block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" %>
+          <% else %>
+            <%= link_to "Manage images", locations_image_set_path(set),
+                  class: "block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" %>
+            <%= link_to "New filtered set", new_filtered_image_set_path(set),
+                  class: "block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" %>
+          <% end %>
+          <%= link_to "Settings", edit_image_set_path(set),
+                class: "block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" %>
+        <% end %>
+      </div>
+    </div>
   </div>
 </div>

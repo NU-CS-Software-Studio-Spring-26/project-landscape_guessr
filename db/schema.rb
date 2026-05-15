@@ -10,9 +10,11 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_14_000006) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_14_000012) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+  enable_extension "pg_trgm"
+  enable_extension "unaccent"
 
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
@@ -115,16 +117,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_14_000006) do
     t.index ["image_id"], name: "index_guesses_on_image_id"
   end
 
-  create_table "image_regions", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.bigint "image_id", null: false
-    t.bigint "region_id", null: false
-    t.datetime "updated_at", null: false
-    t.index ["image_id", "region_id"], name: "index_image_regions_on_image_id_and_region_id", unique: true
-    t.index ["image_id"], name: "index_image_regions_on_image_id"
-    t.index ["region_id"], name: "index_image_regions_on_region_id"
-  end
-
   create_table "image_set_items", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.bigint "image_id", null: false
@@ -172,10 +164,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_14_000006) do
     t.float "min_lat"
     t.float "min_lng"
     t.string "name", null: false
+    t.string "normalized_name"
     t.bigint "parent_id"
+    t.integer "population"
     t.datetime "updated_at", null: false
     t.index ["admin_level"], name: "index_regions_on_admin_level"
+    t.index ["iso_code"], name: "index_regions_on_iso_code"
     t.index ["name", "admin_level"], name: "index_regions_on_name_and_admin_level"
+    t.index ["parent_id", "admin_level", "normalized_name"], name: "index_regions_on_parent_level_normname"
     t.index ["parent_id"], name: "index_regions_on_parent_id"
   end
 
@@ -214,8 +210,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_14_000006) do
   add_foreign_key "games", "users"
   add_foreign_key "guesses", "games"
   add_foreign_key "guesses", "images"
-  add_foreign_key "image_regions", "images"
-  add_foreign_key "image_regions", "regions"
   add_foreign_key "image_set_items", "image_sets"
   add_foreign_key "image_set_items", "images"
   add_foreign_key "image_sets", "image_sets", column: "parent_image_set_id"

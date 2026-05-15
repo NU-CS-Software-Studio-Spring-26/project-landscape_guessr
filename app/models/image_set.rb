@@ -52,28 +52,98 @@ class ImageSet < ApplicationRecord
   end
 
   def effective_items
-    if filtered?
-      expanded_ids = Region.descendants_of(region_ids)
-      parent_image_set.image_set_items
-        .where(image_id: ImageRegion.where(region_id: expanded_ids).select(:image_id))
-    else
-      image_set_items
-    end
+    image_set_items
   end
 
   def effective_items_count
-    if filtered?
-      effective_items.count
-    else
-      image_set_items.count
-    end
+    image_set_items.count
   end
 
   def selected_regions
     Region.where(id: region_ids)
   end
 
-  private
+  def materialize_filtered_items!
+    return unless filtered?
+
+    # Allow Nominatim fetches when actually saving — it's a one-time cost
+    matched = compute_matching_image_ids(fetch_missing_boundaries: true)
+    transaction do
+      image_set_items.delete_all
+
+      if matched.any?
+        parent_items = parent_image_set.image_set_items
+          .where(image_id: matched)
+          .pluck(:image_id, :latitude, :longitude)
+
+        rows = parent_items.map do |image_id, lat, lng|
+          { image_set_id: id, image_id: image_id,
+            latitude: lat, longitude: lng,
+            created_at: Time.current, updated_at: Time.current }
+        end
+        ImageSetItem.insert_all(rows)
+      end
+    end
+  end
+
+  def compute_matching_image_ids(fetch_missing_boundaries: false)
+    regions = resolve_filter_regions(fetch_missing_boundaries: fetch_missing_boundaries)
+    return [] if regions.empty?
+
+    factory = RGeo::Geographic.spherical_factory(srid: 4326)
+    geoms = regions.filter_map do |r|
+      geom = r.rgeo_boundary
+      next nil unless geom
+      { geom: geom, min_lat: r.min_lat, max_lat: r.max_lat, min_lng: r.min_lng, max_lng: r.max_lng }
+    end
+    return [] if geoms.empty?
+
+    candidates = parent_image_set.image_set_items
+      .joins(:image)
+      .where.not(images: { latitude: nil, longitude: nil })
+      .pluck("images.id", "images.latitude", "images.longitude")
+
+    matched = []
+    candidates.each do |image_id, lat, lng|
+      lat = lat.to_f
+      lng = lng.to_f
+      point = nil
+
+      geoms.each do |g|
+        next if g[:min_lat] && (lat < g[:min_lat] || lat > g[:max_lat] ||
+                                lng < g[:min_lng] || lng > g[:max_lng])
+        point ||= factory.point(lng, lat)
+        if g[:geom].contains?(point)
+          matched << image_id
+          break
+        end
+      rescue
+        next
+      end
+    end
+
+    matched
+  end
+
+  def resolve_filter_regions(fetch_missing_boundaries: false)
+    selected = Region.where(id: region_ids).to_a
+    result = []
+
+    selected.each do |region|
+      if region.boundary.present?
+        # Continents have buffered hrbrmstr polygons (accurate enough for filtering).
+        # admin1/admin2/city use polygons we previously fetched from Nominatim.
+        result << region
+      elsif fetch_missing_boundaries
+        # admin1/admin2/city without boundary yet — fetch from Nominatim now (rate-limited).
+        # Only happens at filter save, never in the live preview path.
+        region.fetch_real_boundary!
+        result << region if region.boundary.present?
+      end
+    end
+
+    result.uniq
+  end
 
   def system_default_has_no_user
     errors.add(:user, "must be blank for system default set") if is_system_default? && user_id.present?

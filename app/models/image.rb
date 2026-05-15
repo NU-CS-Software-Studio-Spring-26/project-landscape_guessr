@@ -4,8 +4,6 @@ class Image < ApplicationRecord
   has_many :game_images, dependent: :destroy
   has_many :image_set_items, dependent: :destroy
   has_many :image_sets, through: :image_set_items
-  has_many :image_regions, dependent: :destroy
-  has_many :regions, through: :image_regions
 
   # Images visible to a given user: only those that live in at least one
   # set the user is allowed to see (system_default, public, or owned).
