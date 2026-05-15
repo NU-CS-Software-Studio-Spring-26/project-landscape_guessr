@@ -461,6 +461,11 @@ class AiImageSetGenerator
       - Plain English, friendly, no jargon.
       - Bad: "Filters wd:Q8072 via wdt:P31/wdt:P279* with wdt:P17 wd:Q17."
       - Good: "I'll find volcanoes located in Japan that have photos."
+      - If your query doesn't fully cover the user's request, name the
+        part you couldn't honor and offer to adjust. Don't silently
+        drop pieces of their ask.
+      - When cannot_answer=true, suggest the nearest workable
+        alternative if one exists. Avoid bare "I can't" dead-ends.
 
       ONE EXAMPLE FLOW — user: "volcanoes in Japan"
 
