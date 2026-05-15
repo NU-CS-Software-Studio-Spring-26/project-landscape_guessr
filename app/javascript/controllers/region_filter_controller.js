@@ -270,7 +270,7 @@ export default class extends Controller {
 
   async performSearch(query) {
     try {
-      let url = `/regions/search.json?q=${encodeURIComponent(query)}&image_set_id=${this.parentSetIdValue}`
+      let url = `/regions/search.json?q=${encodeURIComponent(query)}`
       // Only bias by location when the user has zoomed past world view —
       // at zoom 1-3 the map is at the default world center and distance is meaningless.
       const zoom = this.map?.getZoom()

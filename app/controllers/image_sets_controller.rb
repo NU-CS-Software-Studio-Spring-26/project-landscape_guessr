@@ -221,12 +221,7 @@ class ImageSetsController < ApplicationController
       lng = item.longitude || item.image.longitude
       next unless lat && lng
       img = item.image
-      display_url = if img.photo.attached?
-        url_for(img.photo)
-      elsif img.url.present?
-        img.url
-      end
-      { id: img.id, lat: lat.to_f, lng: lng.to_f, title: item.title, url: display_url }
+      { id: img.id, lat: lat.to_f, lng: lng.to_f, title: item.title, url: view_context.image_src(img) }
     end
 
     respond_to do |format|

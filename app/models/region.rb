@@ -16,7 +16,6 @@ class Region < ApplicationRecord
   scope :countries, -> { where(admin_level: "country") }
   scope :admin1s, -> { where(admin_level: "admin1") }
   scope :admin2s, -> { where(admin_level: "admin2") }
-  scope :cities, -> { where(admin_level: "city") }
 
   def self.search(query, map_center: nil, limit: 20, **_opts)
     words = query.split(/\s+/).reject { |w| w.length < 2 }
@@ -109,17 +108,6 @@ class Region < ApplicationRecord
     geom.buffer(0) rescue geom
   rescue JSON::ParserError, RGeo::Error::RGeoError
     nil
-  end
-
-  def contains_point?(lat, lng)
-    geom = rgeo_boundary
-    return false unless geom
-
-    factory = RGeo::Geographic.spherical_factory(srid: 4326)
-    point = factory.point(lng.to_f, lat.to_f)
-    geom.contains?(point)
-  rescue RGeo::Error::RGeoError
-    false
   end
 
   def needs_boundary_upgrade?

@@ -34,6 +34,14 @@ class ImageSet < ApplicationRecord
 
   scope :public_catalog, -> { where(visibility: "public") }
   scope :owned_by, ->(user) { where(user: user) }
+  # Sets a given user is allowed to see. Mirrors `playable_by?` at the
+  # query level: system_default OR public OR owned. Pass nil for the
+  # unauthenticated case — effectively system_default OR public.
+  scope :visible_to, ->(user) {
+    where(is_system_default: true)
+      .or(public_catalog)
+      .or(where(user_id: user&.id))
+  }
 
   def self.default
     find_by(is_system_default: true)

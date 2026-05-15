@@ -76,18 +76,10 @@ class GamesController < ApplicationController
 
     @game = Current.user.games.new(status: "in_progress", image_set: image_set)
 
-    # Skip image_set_items where no answer location is available — without
-    # this we'd silently include them and every guess for that round would
-    # be scored against (0, 0). The COALESCE checks the per-item override
-    # *or* the underlying image's coords (item.latitude falls back to
-    # item.image.latitude in our model).
     items = image_set.effective_items
-              .joins(:image)
-              .where("COALESCE(image_set_items.latitude,  images.latitude)  IS NOT NULL")
-              .where("COALESCE(image_set_items.longitude, images.longitude) IS NOT NULL")
-              .preload(:image)
-              .order(Arel.sql("RANDOM()"))
-              .limit(TOTAL_ROUNDS)
+                     .with_usable_coords
+                     .order(Arel.sql("RANDOM()"))
+                     .limit(TOTAL_ROUNDS)
 
     if items.size < TOTAL_ROUNDS
       redirect_to root_path, alert: "Not enough images with coordinates to start a game (need #{TOTAL_ROUNDS}, this set has #{items.size}). Set lat/lng on more images first." and return
@@ -99,8 +91,8 @@ class GamesController < ApplicationController
         @game.game_images.create!(
           image_id: item.image_id,
           position: idx + 1,
-          answer_latitude: item.latitude || item.image.latitude,
-          answer_longitude: item.longitude || item.image.longitude
+          answer_latitude:  item.answer_lat,
+          answer_longitude: item.answer_lng
         )
       end
     end
