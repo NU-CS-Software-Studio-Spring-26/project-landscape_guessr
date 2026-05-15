@@ -32,6 +32,7 @@ Rails.application.routes.draw do
       get  :edit_filter
       patch :update_filter
       get :preview_filter_count
+      post :preview_filter_count, action: :preview_filter_count
     end
     delete "items/:item_id", to: "image_sets#remove_item", as: :remove_item
   end

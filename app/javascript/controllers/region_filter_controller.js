@@ -2,24 +2,33 @@ import { Controller } from "@hotwired/stimulus"
 import { MAPTILER_KEY, ensureMaptilerSdk, hideOutdoorTrails } from "lib/maptiler"
 
 export default class extends Controller {
-  static targets = ["searchInput", "results", "pills", "hiddenFields", "map", "matchCount", "submitBtn", "nameInput", "hint"]
+  static targets = ["searchInput", "results", "pills", "hiddenFields", "customAreasField", "map", "matchCount", "submitBtn", "nameInput", "hint", "circleModeBtn", "circleStatus", "mapHint"]
   static values = {
     parentSetId: Number,
     mapStyle: { type: String, default: "outdoor-v2" },
     imagesUrl: String,
-    initialRegionIds: { type: Array, default: [] }
+    initialRegionIds: { type: Array, default: [] },
+    initialCustomAreas: { type: Array, default: [] }
   }
+
+  // Circle radii presented as round numbers in km.
+  CIRCLE_DEFAULT_KM = 25
+  CIRCLE_MIN_KM = 1
+  CIRCLE_MAX_KM = 1000
 
   connect() {
     this.selectedRegions = new Map()
+    // Custom areas (currently just circles; polygon path on the backend is
+    // ready when a drawing UI ships). Keyed by uuid.
+    this.customAreas = new Map()
     this.searchTimeout = null
-    // Track whether the user has manually edited the name. We auto-fill from
-    // selected regions until they touch it, then we leave it alone.
     this.nameUserEdited = this.hasNameInputTarget && this.nameInputTarget.value.trim().length > 0
-    // Source of the currently-displayed results — drives whether we auto-fit
-    // the map after an add. Click-add: user is already looking at the spot
-    // so don't zoom. Search-add: zoom to show what they picked.
+    // Drives auto-fit on add. Map-clicks: don't zoom (user's already there).
+    // Search adds: zoom so user can see what they picked.
     this.resultsSource = null
+    // "Draw a circle" mode — armed via the toolbar button. While armed,
+    // mousedown+drag on the map draws a circle instead of panning.
+    this.circleDropMode = false
     this.initMap()
   }
 
@@ -30,13 +39,16 @@ export default class extends Controller {
   updateAutoName() {
     if (!this.hasNameInputTarget || this.nameUserEdited) return
     const prefix = this.nameInputTarget.dataset.namePrefix
-    const regions = Array.from(this.selectedRegions.values())
-    if (regions.length === 0) {
+    const labels = [
+      ...Array.from(this.selectedRegions.values()).map(r => r.name),
+      ...Array.from(this.customAreas.values()).map(a => a.name || "custom area")
+    ]
+    if (labels.length === 0) {
       this.nameInputTarget.value = ""
       return
     }
-    const names = regions.slice(0, 3).map(r => r.name)
-    const suffix = regions.length > 3 ? `${names.join(", ")} +${regions.length - 3} more` : names.join(", ")
+    const head = labels.slice(0, 3)
+    const suffix = labels.length > 3 ? `${head.join(", ")} +${labels.length - 3} more` : head.join(", ")
     this.nameInputTarget.value = `${prefix} — ${suffix}`
   }
 
@@ -57,11 +69,70 @@ export default class extends Controller {
     this.map.on("load", () => {
       hideOutdoorTrails(this.map)
       this.addRegionLayers()
+      this.addCustomAreaLayers()
+      this.addCirclePreviewLayer()
       this.loadImageDots()
       this.loadInitialRegions()
+      this.loadInitialCustomAreas()
     })
 
+    // Plain map clicks reverse-geocode to find regions at the click point.
+    // Circle drawing uses mousedown/move/up via attachCircleDragHandlers
+    // when "Draw a circle" mode is armed.
     this.map.on("click", (e) => this.onMapClick(e))
+  }
+
+  // Live preview circle while the user drags. Same colors as the saved
+  // custom-areas layer so the preview looks like the eventual result.
+  addCirclePreviewLayer() {
+    this.map.addSource("circle-preview", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] }
+    })
+    this.map.addLayer({
+      id: "circle-preview-fill",
+      type: "fill",
+      source: "circle-preview",
+      paint: { "fill-color": "#f97316", "fill-opacity": 0.20 }
+    })
+    this.map.addLayer({
+      id: "circle-preview-line",
+      type: "line",
+      source: "circle-preview",
+      paint: { "line-color": "#f97316", "line-width": 2, "line-dasharray": [ 3, 3 ] }
+    })
+  }
+
+  addCustomAreaLayers() {
+    this.map.addSource("custom-areas", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] }
+    })
+    this.map.addLayer({
+      id: "custom-areas-fill",
+      type: "fill",
+      source: "custom-areas",
+      paint: { "fill-color": "#f97316", "fill-opacity": 0.15 }
+    })
+    this.map.addLayer({
+      id: "custom-areas-line",
+      type: "line",
+      source: "custom-areas",
+      paint: { "line-color": "#f97316", "line-width": 2, "line-opacity": 0.9 }
+    })
+  }
+
+  loadInitialCustomAreas() {
+    for (const area of this.initialCustomAreasValue || []) {
+      if (!area?.id) continue
+      this.customAreas.set(area.id, area)
+    }
+    if (this.customAreas.size) {
+      this.renderPills()
+      this.renderHiddenFields()
+      this.redrawCustomAreas()
+      this.updateMatchCount()
+    }
   }
 
   addRegionLayers() {
@@ -221,7 +292,7 @@ export default class extends Controller {
     //     → no DB row yet; button carries the candidate as a data-candidate
     //       JSON blob, and addFromResult must POST /regions/resolve first.
     // Build via DOM nodes so region names from the API can't inject HTML.
-    this.resultsTarget.replaceChildren(...items.map(r => {
+    const buttons = items.map(r => {
       const isCandidate = r.id == null
       const knownId = isCandidate ? null : r.id
       const isSelected = !isCandidate && this.selectedRegions.has(knownId)
@@ -278,7 +349,9 @@ export default class extends Controller {
       btn.appendChild(info)
       btn.appendChild(action)
       return btn
-    }))
+    })
+
+    this.resultsTarget.replaceChildren(...buttons)
   }
 
   // Two entry shapes:
@@ -372,7 +445,8 @@ export default class extends Controller {
   }
 
   renderPills() {
-    if (this.selectedRegions.size === 0) {
+    const totalSelected = this.selectedRegions.size + this.customAreas.size
+    if (totalSelected === 0) {
       this.pillsTarget.innerHTML = '<span class="text-sm text-gray-400 italic">None selected — add regions above</span>'
       return
     }
@@ -385,32 +459,56 @@ export default class extends Controller {
       city: "bg-rose-100 text-rose-700"
     }
 
-    this.pillsTarget.replaceChildren(...Array.from(this.selectedRegions.values()).map(r => {
+    const regionPills = Array.from(this.selectedRegions.values()).map(r => {
       const colors = levelColors[r.admin_level] || "bg-gray-100 text-gray-700"
-      const pill = document.createElement("span")
-      pill.className = `inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${colors}`
-      pill.appendChild(document.createTextNode(r.name + " "))
+      return this.buildPill(r.name, colors, {
+        action: "click->region-filter#removeRegion",
+        regionId: String(r.id)
+      })
+    })
 
-      const removeBtn = document.createElement("button")
-      removeBtn.type = "button"
-      removeBtn.dataset.action = "click->region-filter#removeRegion"
-      removeBtn.dataset.regionId = r.id
-      removeBtn.setAttribute("aria-label", `Remove ${r.name}`)
-      removeBtn.className = "hover:text-red-600 ml-0.5"
-      removeBtn.textContent = "×"
-      pill.appendChild(removeBtn)
-      return pill
-    }))
+    const customPills = Array.from(this.customAreas.values()).map(a => {
+      return this.buildPill(a.name || "Custom area", "bg-orange-100 text-orange-700", {
+        action: "click->region-filter#removeCustomArea",
+        customAreaId: a.id
+      })
+    })
+
+    this.pillsTarget.replaceChildren(...regionPills, ...customPills)
+  }
+
+  buildPill(name, colorClasses, dataset) {
+    const pill = document.createElement("span")
+    pill.className = `inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${colorClasses}`
+    pill.appendChild(document.createTextNode(name + " "))
+
+    const removeBtn = document.createElement("button")
+    removeBtn.type = "button"
+    Object.entries(dataset).forEach(([k, v]) => { removeBtn.dataset[k] = v })
+    removeBtn.setAttribute("aria-label", `Remove ${name}`)
+    removeBtn.className = "hover:text-red-600 ml-0.5"
+    removeBtn.textContent = "×"
+    pill.appendChild(removeBtn)
+    return pill
   }
 
   renderHiddenFields() {
-    const fieldName = this.hiddenFieldsTarget.closest("form").querySelector("[name='image_set[parent_image_set_id]']")
-      ? "image_set[region_ids][]"
-      : "region_ids[]"
+    const isNewFilteredForm = !!this.hiddenFieldsTarget.closest("form").querySelector("[name='image_set[parent_image_set_id]']")
+    const idFieldName = isNewFilteredForm ? "image_set[region_ids][]" : "region_ids[]"
+    const areasFieldName = isNewFilteredForm ? "image_set[custom_areas_json]" : "custom_areas"
 
-    this.hiddenFieldsTarget.innerHTML = Array.from(this.selectedRegions.keys())
-      .map(id => `<input type="hidden" name="${fieldName}" value="${id}">`)
+    // Region IDs go as repeated inputs (standard Rails array form). Custom
+    // areas serialize to one JSON-blob input — the server parses + validates
+    // it via ImageSetsController#sanitize_custom_areas.
+    const regionInputs = Array.from(this.selectedRegions.keys())
+      .map(id => `<input type="hidden" name="${idFieldName}" value="${id}">`)
       .join("")
+
+    const areasJson = JSON.stringify(Array.from(this.customAreas.values()))
+      .replace(/"/g, "&quot;")
+    const areasInput = `<input type="hidden" name="${areasFieldName}" value="${areasJson}">`
+
+    this.hiddenFieldsTarget.innerHTML = regionInputs + areasInput
   }
 
   // Returns a Set of region IDs that successfully got a boundary loaded.
@@ -460,15 +558,16 @@ export default class extends Controller {
 
   async updateMatchCount() {
     const ids = Array.from(this.selectedRegions.keys())
-    if (!ids.length) {
+    const areas = Array.from(this.customAreas.values())
+    const totalParts = ids.length + areas.length
+    if (totalParts === 0) {
       this.matchCountTarget.textContent = ""
       this.recolorImageDots(new Set())
-      // Cancel any in-flight count fetch so it can't paint stale data.
       this.matchCountAbort?.abort()
       return
     }
 
-    this.matchCountTarget.textContent = `${ids.length} region(s) — counting matching images...`
+    this.matchCountTarget.textContent = `${totalParts} area(s) — counting matching images...`
 
     // Cancel previous in-flight request so quick add/remove sequences don't
     // race — only the latest selection's count should ever paint.
@@ -477,24 +576,35 @@ export default class extends Controller {
     this.matchCountAbort = controller
 
     try {
-      const params = ids.map(id => `region_ids[]=${id}`).join("&")
-      const url = `/image_sets/${this.parentSetIdValue}/preview_filter_count.json?${params}`
-      const resp = await fetch(url, { signal: controller.signal })
+      // POST so we can carry the custom_areas JSON cleanly (a long blob would
+      // bloat the query string). preview_filter_count accepts both via Rails
+      // params resolution, but POST is cleaner for the typical add/remove
+      // burst.
+      const token = document.querySelector('meta[name="csrf-token"]')?.content
+      const url = `/image_sets/${this.parentSetIdValue}/preview_filter_count.json`
+      const body = new FormData()
+      ids.forEach(id => body.append("region_ids[]", String(id)))
+      body.append("custom_areas", JSON.stringify(areas))
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "X-CSRF-Token": token || "", "Accept": "application/json" },
+        credentials: "same-origin",
+        body,
+        signal: controller.signal
+      })
       const data = await resp.json().catch(() => ({}))
       if (controller.signal.aborted) return
       if (data.count != null) {
-        this.matchCountTarget.textContent = `${ids.length} region(s) — ${data.count.toLocaleString()} matching image(s)`
+        this.matchCountTarget.textContent = `${totalParts} area(s) — ${data.count.toLocaleString()} matching image(s)`
       } else {
-        this.matchCountTarget.textContent = `${ids.length} region(s) selected`
+        this.matchCountTarget.textContent = `${totalParts} area(s) selected`
       }
-      // Recolor dots if the server returned the matched image IDs (we'll add
-      // them to the response below).
       if (Array.isArray(data.matched_ids)) {
         this.recolorImageDots(new Set(data.matched_ids))
       }
     } catch (e) {
       if (e.name === "AbortError") return
-      this.matchCountTarget.textContent = `${ids.length} region(s) selected`
+      this.matchCountTarget.textContent = `${totalParts} area(s) selected`
     }
   }
 
@@ -514,13 +624,18 @@ export default class extends Controller {
 
   async onMapClick(e) {
     const { lng, lat } = e.lngLat
-    this.resultsSource = "click"
-    this.showResultsMessage('<div class="p-3 text-sm text-gray-500">Finding regions at this point...</div>')
-
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
       this.showResultsMessage('<div class="p-3 text-sm text-gray-500">No regions found at this location</div>')
       return
     }
+
+    // While circle-drag mode is armed, mousedown/move/up handle drawing —
+    // skip the reverse-geocode flow on plain clicks (which fire on mouseup
+    // even after small drags in some browsers).
+    if (this.circleDropMode) return
+
+    this.resultsSource = "click"
+    this.showResultsMessage('<div class="p-3 text-sm text-gray-500">Finding regions at this point...</div>')
 
     try {
       const candidates = await this.nominatimReverse(lat, lng)
@@ -528,10 +643,210 @@ export default class extends Controller {
         this.showResultsMessage('<div class="p-3 text-sm text-gray-500">No regions found at this location</div>')
         return
       }
+      // Just the geocoder candidates — circles are drawn via the toolbar
+      // button (one obvious entry point, drag-to-size). Two affordances
+      // for the same thing was confusing.
       this.renderResults(candidates)
     } catch (err) {
       this.showResultsMessage('<div class="p-3 text-sm text-red-500">Failed to find regions</div>')
     }
+  }
+
+  toggleCircleMode() {
+    this.armCircleMode(!this.circleDropMode)
+  }
+
+  armCircleMode(armed) {
+    this.circleDropMode = armed
+    if (this.hasCircleModeBtnTarget) {
+      this.circleModeBtnTarget.classList.toggle("bg-forest-100", armed)
+      this.circleModeBtnTarget.setAttribute("aria-pressed", armed ? "true" : "false")
+    }
+    this.setCircleStatus(armed ? "Click and drag on the map to draw" : null)
+    this.mapTarget.style.cursor = armed ? "crosshair" : ""
+
+    // Hot-swap the map's interaction model. Disable dragPan while armed so
+    // mousedown+drag is captured for circle-drawing instead of panning.
+    if (armed) {
+      this.map?.dragPan.disable()
+      this.attachCircleDragHandlers()
+    } else {
+      this.map?.dragPan.enable()
+      this.detachCircleDragHandlers()
+      this.clearCirclePreview()
+    }
+  }
+
+  attachCircleDragHandlers() {
+    if (this._circleHandlers) return
+    this._circleHandlers = {
+      down: (e) => this.onCircleMouseDown(e),
+      move: (e) => this.onCircleMouseMove(e),
+      up:   (e) => this.onCircleMouseUp(e)
+    }
+    this.map.on("mousedown", this._circleHandlers.down)
+    this.map.on("mousemove", this._circleHandlers.move)
+    this.map.on("mouseup",   this._circleHandlers.up)
+  }
+
+  detachCircleDragHandlers() {
+    if (!this._circleHandlers) return
+    this.map.off("mousedown", this._circleHandlers.down)
+    this.map.off("mousemove", this._circleHandlers.move)
+    this.map.off("mouseup",   this._circleHandlers.up)
+    this._circleHandlers = null
+  }
+
+  onCircleMouseDown(e) {
+    e.preventDefault()
+    const { lng, lat } = e.lngLat
+    this._circleDrag = { center: { lat, lng }, radiusM: 0 }
+    this.updateCirclePreview(lat, lng, 0)
+  }
+
+  onCircleMouseMove(e) {
+    if (!this._circleDrag) return
+    const { lng, lat } = e.lngLat
+    const r = this.haversineMeters(this._circleDrag.center.lat, this._circleDrag.center.lng, lat, lng)
+    this._circleDrag.radiusM = r
+    this.updateCirclePreview(this._circleDrag.center.lat, this._circleDrag.center.lng, r)
+    this.setCircleStatus(`Radius: ${this.formatKm(r)} — release to finish`)
+  }
+
+  // Show the amber status line and hide the default map hint while circle mode
+  // is active. Pass null/undefined to revert to the default hint.
+  setCircleStatus(text) {
+    if (this.hasCircleStatusTarget) {
+      this.circleStatusTarget.textContent = text || ""
+      this.circleStatusTarget.classList.toggle("hidden", !text)
+    }
+    if (this.hasMapHintTarget) {
+      this.mapHintTarget.classList.toggle("hidden", !!text)
+    }
+  }
+
+  onCircleMouseUp(_e) {
+    const drag = this._circleDrag
+    this._circleDrag = null
+    this.armCircleMode(false)
+    if (!drag) return
+    const r = Math.max(drag.radiusM, this.CIRCLE_MIN_KM * 1000)
+    const capped = Math.min(r, this.CIRCLE_MAX_KM * 1000)
+    this.addCircle(drag.center.lat, drag.center.lng, capped)
+  }
+
+  updateCirclePreview(lat, lng, radiusM) {
+    const source = this.map?.getSource("circle-preview")
+    if (!source) return
+    if (radiusM <= 0) {
+      source.setData({ type: "FeatureCollection", features: [] })
+      return
+    }
+    source.setData({
+      type: "FeatureCollection",
+      features: [ { type: "Feature", geometry: this.circleAsPolygon(lat, lng, radiusM) } ]
+    })
+  }
+
+  clearCirclePreview() {
+    this.map?.getSource("circle-preview")?.setData({ type: "FeatureCollection", features: [] })
+  }
+
+  formatKm(meters) {
+    const km = meters / 1000
+    if (km < 1) return `${Math.round(meters)} m`
+    if (km < 10) return `${km.toFixed(1)} km`
+    return `${Math.round(km)} km`
+  }
+
+  haversineMeters(lat1, lng1, lat2, lng2) {
+    const R = 6_371_000
+    const toRad = d => d * Math.PI / 180
+    const dLat = toRad(lat2 - lat1)
+    const dLng = toRad(lng2 - lng1)
+    const a = Math.sin(dLat / 2) ** 2 +
+              Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  }
+
+  addCircle(lat, lng, radiusM) {
+    const id = (crypto?.randomUUID?.() ?? `c_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`)
+    const area = {
+      id,
+      type: "circle",
+      name: `${this.formatKm(radiusM)} circle`,
+      center: { lat, lng },
+      radius_m: radiusM
+    }
+    this.customAreas.set(id, area)
+    this.renderPills()
+    this.renderHiddenFields()
+    this.redrawCustomAreas()
+    this.updateAutoName()
+    this.updateMatchCount()
+  }
+
+  removeCustomArea(event) {
+    const id = event.currentTarget.dataset.customAreaId
+    if (!id || !this.customAreas.has(id)) return
+    this.customAreas.delete(id)
+    this.renderPills()
+    this.renderHiddenFields()
+    this.redrawCustomAreas()
+    this.updateAutoName()
+    this.updateMatchCount()
+  }
+
+  // Repaint the custom-areas source from the current selection. Circles render
+  // as 64-vertex polygons computed in true-distance metres so they stay round
+  // at the rendered zoom; small distortion near the poles is acceptable for
+  // our use case.
+  redrawCustomAreas() {
+    const source = this.map?.getSource("custom-areas")
+    if (!source) return
+    const features = []
+    for (const a of this.customAreas.values()) {
+      if (a.type === "circle") {
+        features.push({
+          type: "Feature",
+          id: a.id,
+          geometry: this.circleAsPolygon(a.center.lat, a.center.lng, a.radius_m),
+          properties: { name: a.name }
+        })
+      } else if (a.type === "polygon" && a.geojson) {
+        features.push({
+          type: "Feature",
+          id: a.id,
+          geometry: a.geojson,
+          properties: { name: a.name }
+        })
+      }
+    }
+    source.setData({ type: "FeatureCollection", features })
+  }
+
+  // Generate a GeoJSON Polygon approximating a geodesic circle. 64 vertices
+  // is enough that a 5km circle in mid-latitudes looks round at street zoom.
+  // Inverse Haversine: walk `radiusM` along bearings 0..360°.
+  circleAsPolygon(lat, lng, radiusM, steps = 64) {
+    const R = 6371000.0
+    const latRad = lat * Math.PI / 180
+    const lngRad = lng * Math.PI / 180
+    const angDist = radiusM / R
+    const coords = []
+    for (let i = 0; i <= steps; i++) {
+      const bearing = (i / steps) * 2 * Math.PI
+      const lat2 = Math.asin(
+        Math.sin(latRad) * Math.cos(angDist) +
+        Math.cos(latRad) * Math.sin(angDist) * Math.cos(bearing)
+      )
+      const lng2 = lngRad + Math.atan2(
+        Math.sin(bearing) * Math.sin(angDist) * Math.cos(latRad),
+        Math.cos(angDist) - Math.sin(latRad) * Math.sin(lat2)
+      )
+      coords.push([ lng2 * 180 / Math.PI, lat2 * 180 / Math.PI ])
+    }
+    return { type: "Polygon", coordinates: [ coords ] }
   }
 
   // Client-side Nominatim reverse-geocode. Same provider as the server-side

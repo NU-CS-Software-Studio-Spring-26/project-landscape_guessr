@@ -5,7 +5,8 @@
      data-region-filter-parent-set-id-value="<%= @parent_set.id %>"
      data-region-filter-map-style-value="<%= @parent_set.map_style %>"
      data-region-filter-images-url-value="<%= map_image_set_path(@parent_set, format: :json) %>"
-     data-region-filter-initial-region-ids-value="<%= @filtered_set.region_ids.to_json %>">
+     data-region-filter-initial-region-ids-value="<%= @filtered_set.region_ids.to_json %>"
+     data-region-filter-initial-custom-areas-value="<%= (@filtered_set.custom_areas || []).to_json %>">
 
   <div>
     <h1 class="heading-page">Edit filter</h1>
@@ -44,7 +45,7 @@
           </div>
         </div>
 
-        <p class="text-xs text-gray-500" data-region-filter-target="hint">Type to search, or click the map to find regions</p>
+        <p class="text-xs text-gray-500" data-region-filter-target="hint">Type to search, or click the map to find regions at a location</p>
 
         <div data-region-filter-target="results"
              class="hidden border border-gray-200 rounded-md max-h-64 overflow-y-auto bg-white"></div>
@@ -54,16 +55,29 @@
             <span class="text-sm font-medium text-gray-700">Selected</span>
             <span class="text-xs text-gray-500" data-region-filter-target="matchCount"></span>
           </div>
-          <div data-region-filter-target="pills" class="flex flex-wrap gap-1.5 min-h-[2rem] max-h-32 overflow-y-auto">
+          <div data-region-filter-target="pills" class="flex flex-wrap gap-1.5 min-h-[2rem]">
             <span class="text-sm text-gray-400 italic">None selected — add regions above</span>
           </div>
         </div>
       </div>
 
       <div>
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-sm font-medium text-gray-700">Map preview</span>
+          <button type="button"
+                  data-region-filter-target="circleModeBtn"
+                  data-action="click->region-filter#toggleCircleMode"
+                  aria-pressed="false"
+                  class="inline-flex items-center gap-1 px-2 py-1 rounded border border-gray-300 hover:bg-orange-50 text-gray-700 text-xs font-medium">
+            ✎ Draw a circle
+          </button>
+        </div>
         <div data-region-filter-target="map"
              class="w-full h-80 lg:h-96 rounded-md border border-gray-200 cursor-crosshair"></div>
-        <p class="text-xs text-gray-500 mt-1">Click on the map to see which regions are at that location</p>
+        <p class="text-xs text-gray-500 mt-1">
+          <span data-region-filter-target="circleStatus" class="text-amber-700 italic hidden"></span>
+          <span data-region-filter-target="mapHint">Click the map to find regions, or use "Draw a circle" for a custom area</span>
+        </p>
       </div>
     </div>
 

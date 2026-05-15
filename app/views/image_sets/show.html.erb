@@ -15,12 +15,15 @@
       <p class="text-xs text-gray-500 mt-1">
         Based on: <%= link_to @image_set.parent_image_set.name, @image_set.parent_image_set, class: "text-forest-600 hover:underline" %>
       </p>
-      <% if @image_set.selected_regions.any? %>
+      <% if @image_set.selected_regions.any? || @image_set.custom_areas.any? %>
         <%# max-height + scroll keeps a 50-region filter from pushing the action
             buttons off-screen on mobile. %>
         <div class="flex flex-wrap gap-1 mt-2 max-h-24 overflow-y-auto">
           <% @image_set.selected_regions.each do |region| %>
             <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-forest-50 text-forest-700"><%= region.name %></span>
+          <% end %>
+          <% @image_set.custom_areas.each do |area| %>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-orange-50 text-orange-700"><%= area["name"].presence || "Custom area" %></span>
           <% end %>
         </div>
       <% end %>

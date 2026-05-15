@@ -254,17 +254,19 @@ class ImageSetsController < ApplicationController
     render json: { items: payload, processing_count: payload.count { |i| !i[:processed] } }
   end
 
-  # GET /image_sets/1/preview_filter_count?region_ids[]=N
-  # Returns the number of parent-set images that would match the given regions,
-  # plus the matched IDs so the builder can recolor image dots on the map.
+  # GET /image_sets/1/preview_filter_count?region_ids[]=N&custom_areas=[...]
+  # Returns the number of parent-set images that would match the given regions
+  # AND custom areas, plus the matched IDs so the builder can recolor image
+  # dots on the map.
   def preview_filter_count
     region_ids = Array(params[:region_ids]).map(&:to_i).reject(&:zero?)
-    if region_ids.empty?
+    areas = sanitize_custom_areas(params[:custom_areas])
+    if region_ids.empty? && areas.empty?
       render json: { count: 0, matched_ids: [] } and return
     end
 
     parent = @image_set.filtered? ? @image_set.parent_image_set : @image_set
-    temp = ImageSet.new(parent_image_set: parent, region_ids: region_ids)
+    temp = ImageSet.new(parent_image_set: parent, region_ids: region_ids, custom_areas: areas)
     matched = temp.compute_matching_image_ids
     render json: { count: matched.size, matched_ids: matched }
   rescue => e
@@ -294,6 +296,7 @@ class ImageSetsController < ApplicationController
     if @image_set.update(
       name: params[:name],
       region_ids: region_ids,
+      custom_areas: sanitize_custom_areas(params[:custom_areas]),
       visibility: params[:visibility] || @image_set.visibility
     )
       @image_set.materialize_filtered_items!
@@ -369,21 +372,78 @@ class ImageSetsController < ApplicationController
     end
   end
 
-  # On `create`, parent_image_set_id + region_ids are needed (that's how a
-  # filtered set is born). On `update`, both must be locked: the filter is
-  # only mutable through update_filter, which re-runs materialize. Allowing
-  # them through the regular update would silently desync materialized items
-  # from the recorded region_ids.
+  # On `create`, parent_image_set_id + region_ids + custom_areas are needed
+  # (that's how a filtered set is born). On `update`, all three must be locked:
+  # the filter is only mutable through update_filter, which re-runs materialize.
+  # Allowing them through the regular update would silently desync materialized
+  # items from the recorded filter.
   def image_set_params
     allowed = [ :name, :visibility, :map_style ]
-    allowed += [ :parent_image_set_id, { region_ids: [] } ] if action_name == "create"
+    if action_name == "create"
+      allowed += [ :parent_image_set_id, :custom_areas_json, { region_ids: [] } ]
+    end
     permitted = params.expect(image_set: allowed)
     if permitted[:region_ids].present?
       permitted[:region_ids] = permitted[:region_ids].map(&:to_i).reject(&:zero?)
     else
       permitted.delete(:region_ids)
     end
+    # The form posts custom_areas as a JSON string in a single hidden field —
+    # nested-params would require arbitrary-depth permits, but the data is
+    # client-controlled JSON anyway, so we round-trip through the sanitizer.
+    if permitted[:custom_areas_json].present?
+      permitted[:custom_areas] = sanitize_custom_areas(permitted.delete(:custom_areas_json))
+    else
+      permitted.delete(:custom_areas_json)
+    end
     permitted
+  end
+
+  # Returns an array of validated custom-area hashes — strict shape, bounded
+  # field values. Untrusted input from the client.
+  MAX_CUSTOM_AREAS = 50
+  MIN_CIRCLE_RADIUS_M = 100
+  MAX_CIRCLE_RADIUS_M = 5_000_000
+
+  def sanitize_custom_areas(raw)
+    return [] if raw.blank?
+    raw = JSON.parse(raw) if raw.is_a?(String)
+    return [] unless raw.is_a?(Array)
+    raw.first(MAX_CUSTOM_AREAS).filter_map { |a| sanitize_custom_area(a) }
+  rescue JSON::ParserError
+    []
+  end
+
+  def sanitize_custom_area(a)
+    return nil unless a.is_a?(Hash) || a.is_a?(ActionController::Parameters)
+    h = a.respond_to?(:to_unsafe_h) ? a.to_unsafe_h : a.transform_keys(&:to_s)
+    case h["type"]
+    when "circle"
+      lat = h.dig("center", "lat")&.to_f
+      lng = h.dig("center", "lng")&.to_f
+      rad = h["radius_m"]&.to_f
+      return nil unless lat && lng && rad
+      return nil unless lat.between?(-90, 90) && lng.between?(-180, 180)
+      return nil unless rad.between?(MIN_CIRCLE_RADIUS_M, MAX_CIRCLE_RADIUS_M)
+      {
+        "id" => h["id"].to_s.presence || SecureRandom.uuid,
+        "type" => "circle",
+        "name" => h["name"].to_s.first(120).presence,
+        "center" => { "lat" => lat, "lng" => lng },
+        "radius_m" => rad
+      }
+    when "polygon"
+      # Polygon support: drawing UI not yet shipped, but data path is in place.
+      g = h["geojson"]
+      return nil unless g.is_a?(Hash) && %w[Polygon MultiPolygon].include?(g["type"])
+      return nil unless g["coordinates"].is_a?(Array)
+      {
+        "id" => h["id"].to_s.presence || SecureRandom.uuid,
+        "type" => "polygon",
+        "name" => h["name"].to_s.first(120).presence,
+        "geojson" => g
+      }
+    end
   end
 
   # Background — see RematerializeFilteredSetsJob. Inline rematerialization was

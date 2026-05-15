@@ -86,18 +86,17 @@ class ImageSet < ApplicationRecord
     end
   end
 
+  # Earth radius in metres — used for haversine distance in circle matching.
+  EARTH_RADIUS_M = 6_371_000.0
+
   def compute_matching_image_ids(fetch_missing_boundaries: false)
     regions = resolve_filter_regions(fetch_missing_boundaries: fetch_missing_boundaries)
-    return [] if regions.empty?
+    region_geoms = build_region_geoms(regions)
+    circles = parsed_circle_areas
+    polygons = parsed_polygon_areas
+    return [] if region_geoms.empty? && circles.empty? && polygons.empty?
 
     factory = RGeo::Geographic.spherical_factory(srid: 4326)
-    geoms = regions.filter_map do |r|
-      geom = r.rgeo_boundary
-      next nil unless geom
-      { geom: geom, min_lat: r.min_lat, max_lat: r.max_lat, min_lng: r.min_lng, max_lng: r.max_lng }
-    end
-    return [] if geoms.empty?
-
     candidates = parent_image_set.image_set_items
       .joins(:image)
       .where.not(images: { latitude: nil, longitude: nil })
@@ -107,19 +106,11 @@ class ImageSet < ApplicationRecord
     candidates.each do |image_id, lat, lng|
       lat = lat.to_f
       lng = lng.to_f
-      point = nil
 
-      geoms.each do |g|
-        next if g[:min_lat] && (lat < g[:min_lat] || lat > g[:max_lat] ||
-                                lng < g[:min_lng] || lng > g[:max_lng])
-        point ||= factory.point(lng, lat)
-        if g[:geom].contains?(point)
-          matched << image_id
-          break
-        end
-      rescue
-        next
-      end
+      # Cheap bbox-then-poly check for each region, fall through to circle/polygon
+      # custom areas if no region matched. Any match short-circuits to next image.
+      hit = image_matches_any?(image_id, lat, lng, region_geoms, circles, polygons, factory)
+      matched << image_id if hit
     end
 
     matched
@@ -144,6 +135,90 @@ class ImageSet < ApplicationRecord
 
     result.uniq
   end
+
+  # Parsed view of custom_areas where type=="circle". Each entry:
+  #   { lat:, lng:, radius_m:, radius_lat_deg:, radius_lng_deg: }
+  # The "radius in degrees" fields are pre-computed for a cheap bbox pre-filter
+  # before paying for haversine; lng-radius widens at high latitudes by 1/cos(lat).
+  def parsed_circle_areas
+    Array(custom_areas).filter_map do |a|
+      next nil unless a.is_a?(Hash) && a["type"] == "circle"
+      center = a["center"] || {}
+      lat = center["lat"]&.to_f
+      lng = center["lng"]&.to_f
+      rad = a["radius_m"]&.to_f
+      next nil unless lat && lng && rad && rad.positive?
+      next nil unless lat.between?(-90, 90) && lng.between?(-180, 180)
+      rad_lat = rad / 111_320.0  # metres per degree of latitude (constant)
+      rad_lng = rad / (111_320.0 * Math.cos(lat * Math::PI / 180).abs.clamp(0.000001, 1))
+      { lat: lat, lng: lng, radius_m: rad, radius_lat_deg: rad_lat, radius_lng_deg: rad_lng }
+    end
+  end
+
+  # Parsed view of custom_areas where type=="polygon", decoded to RGeo geometry.
+  # Not user-facing yet (no drawing UI), but the data path is in place so we
+  # can ship the UI without touching matching.
+  def parsed_polygon_areas
+    Array(custom_areas).filter_map do |a|
+      next nil unless a.is_a?(Hash) && a["type"] == "polygon"
+      geom = RGeo::GeoJSON.decode(a["geojson"].to_json) rescue nil
+      next nil unless geom
+      bbox = Region.compute_bbox(a["geojson"])
+      { geom: geom, **bbox.to_h.transform_keys(&:to_sym) }
+    end
+  end
+
+  private
+
+  def build_region_geoms(regions)
+    regions.filter_map do |r|
+      geom = r.rgeo_boundary
+      next nil unless geom
+      { geom: geom, min_lat: r.min_lat, max_lat: r.max_lat, min_lng: r.min_lng, max_lng: r.max_lng }
+    end
+  end
+
+  def image_matches_any?(_image_id, lat, lng, region_geoms, circles, polygons, factory)
+    point = nil
+
+    region_geoms.each do |g|
+      next if g[:min_lat] && outside_bbox?(lat, lng, g)
+      point ||= factory.point(lng, lat)
+      return true if (g[:geom].contains?(point) rescue false)
+    end
+
+    circles.each do |c|
+      # Cheap bbox pre-filter before paying for haversine.
+      next if (lat - c[:lat]).abs > c[:radius_lat_deg]
+      next if (lng - c[:lng]).abs > c[:radius_lng_deg]
+      return true if haversine_m(c[:lat], c[:lng], lat, lng) <= c[:radius_m]
+    end
+
+    polygons.each do |p|
+      next if p[:min_lat] && outside_bbox?(lat, lng, p)
+      point ||= factory.point(lng, lat)
+      return true if (p[:geom].contains?(point) rescue false)
+    end
+
+    false
+  end
+
+  def outside_bbox?(lat, lng, area)
+    lat < area[:min_lat] || lat > area[:max_lat] ||
+      lng < area[:min_lng] || lng > area[:max_lng]
+  end
+
+  # Great-circle distance in metres between two lat/lng points.
+  def haversine_m(lat1, lng1, lat2, lng2)
+    rad_per_deg = Math::PI / 180.0
+    dlat = (lat2 - lat1) * rad_per_deg
+    dlng = (lng2 - lng1) * rad_per_deg
+    a = Math.sin(dlat / 2)**2 +
+        Math.cos(lat1 * rad_per_deg) * Math.cos(lat2 * rad_per_deg) * Math.sin(dlng / 2)**2
+    2 * EARTH_RADIUS_M * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  end
+
+  public
 
   def system_default_has_no_user
     errors.add(:user, "must be blank for system default set") if is_system_default? && user_id.present?

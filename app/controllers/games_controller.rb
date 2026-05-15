@@ -50,6 +50,12 @@ class GamesController < ApplicationController
     if @image.nil?
       redirect_to results_game_path(@game) and return
     end
+
+    # bbox of all images in the set, used to fit the guess map at round start
+    # so the user starts looking at the relevant region (e.g., a US-only set
+    # opens centered on the US instead of the world). One COALESCE'd SQL pass
+    # — much cheaper than loading the items into Ruby.
+    @set_image_bbox = compute_set_image_bbox(@game.image_set)
   end
 
   # GET /games/new
@@ -217,5 +223,24 @@ class GamesController < ApplicationController
       else
         ImageSet.default
       end
+    end
+
+    # Returns { min_lat:, max_lat:, min_lng:, max_lng: } over the set's items,
+    # or nil if the set has no item with coords. Image lat/lng falls back to
+    # the underlying image's GPS via COALESCE. One scan over the set's items.
+    def compute_set_image_bbox(image_set)
+      return nil unless image_set
+      row = image_set.image_set_items
+                     .joins(:image)
+                     .pick(
+                       Arel.sql("MIN(COALESCE(image_set_items.latitude,  images.latitude))  AS min_lat"),
+                       Arel.sql("MAX(COALESCE(image_set_items.latitude,  images.latitude))  AS max_lat"),
+                       Arel.sql("MIN(COALESCE(image_set_items.longitude, images.longitude)) AS min_lng"),
+                       Arel.sql("MAX(COALESCE(image_set_items.longitude, images.longitude)) AS max_lng")
+                     )
+      return nil unless row && row.compact.any?
+      min_lat, max_lat, min_lng, max_lng = row
+      return nil unless min_lat && max_lat && min_lng && max_lng
+      { min_lat: min_lat.to_f, max_lat: max_lat.to_f, min_lng: min_lng.to_f, max_lng: max_lng.to_f }
     end
 end

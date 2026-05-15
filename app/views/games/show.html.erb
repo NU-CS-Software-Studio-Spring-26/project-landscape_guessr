@@ -71,7 +71,7 @@
         </div>
       </div>
       <div class="space-y-3">
-        <%= render "shared/guess_map", style: @game.image_set&.map_style || "outdoor-v2" %>
+        <%= render "shared/guess_map", style: @game.image_set&.map_style || "outdoor-v2", bbox: @set_image_bbox %>
         <%= form_with url: guesses_path, local: true, class: "flex items-center gap-2" do |f| %>
           <%= hidden_field_tag "guess[game_id]", @game.id %>
           <%= hidden_field_tag "guess[image_id]", @image.id %>

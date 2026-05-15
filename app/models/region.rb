@@ -63,13 +63,15 @@ class Region < ApplicationRecord
 
     scope = scope.limit(limit)
 
-    # Combined relevance score: importance (level + population) minus distance penalty.
-    # Higher score = more relevant. log10(pop) keeps populous places competitive even when far.
-    # Score = log10(population) + continent_boost + trigram_similarity*5 - distance_penalty
-    # - log10(pop): population dominance
-    # - continent_boost: keeps continents near top
-    # - trigram*5: rewards exact name matches over partial ("Paris" beats "Parish")
-    # - distance: tiebreaker for nearby places when zoomed in
+    # Combined relevance score:
+    #   ln(pop+1)/ln(10) + continent_boost(10 if continent else 0) + similarity*5 - distance_penalty
+    # The first term is mathematically log10(pop+1) — written via natural log
+    # so it works without any Postgres extension. Higher score = more relevant.
+    # - ln(pop)/ln(10): population dominance, log-scaled so a 100M city doesn't
+    #   crush a 1M city by 100×
+    # - continent boost: keeps the 7 continent rows near the top
+    # - similarity*5: rewards exact name matches over partial ("Paris" > "Parish")
+    # - distance penalty (only when map_center given): tiebreaker for nearby places
     full_query = words.join(" ")
     similarity_sql = sanitize_sql_array([
       "GREATEST(similarity(unaccent(regions.name), unaccent(?)), " \
