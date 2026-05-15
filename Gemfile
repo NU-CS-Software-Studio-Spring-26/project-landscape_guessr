@@ -81,3 +81,7 @@ group :test do
   gem "selenium-webdriver"
 end
 gem "aws-sdk-s3", require: false
+
+# Geographic region filtering (point-in-polygon via RGeo)
+gem "rgeo", "~> 3.0"
+gem "rgeo-geojson", "~> 2.0"

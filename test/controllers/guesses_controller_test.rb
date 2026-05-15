@@ -28,10 +28,26 @@ class GuessesControllerTest < ActionDispatch::IntegrationTest
 
   test "should create guess on own game" do
     sign_in_as @alice
+    # Use a fresh (game, image) — fixture :one already guessed image one,
+    # and Guess uniqueness on (game_id, image_id) blocks duplicates.
     assert_difference("Guess.count") do
-      post guesses_url, params: { guess: { game_id: @alice_guess.game_id, image_id: @alice_guess.image_id, latitude: 1.0, longitude: 2.0 } }
+      post guesses_url, params: { guess: { game_id: @alice_guess.game_id, image_id: images(:two).id, latitude: 1.0, longitude: 2.0 } }
     end
     assert_redirected_to game_url(@alice_guess.game)
+  end
+
+  test "rejects guess with missing latitude" do
+    sign_in_as @alice
+    assert_no_difference("Guess.count") do
+      post guesses_url, params: { guess: { game_id: @alice_guess.game_id, image_id: images(:two).id, latitude: "", longitude: 2.0 } }
+    end
+  end
+
+  test "rejects duplicate guess for same (game, image)" do
+    sign_in_as @alice
+    assert_no_difference("Guess.count") do
+      post guesses_url, params: { guess: { game_id: @alice_guess.game_id, image_id: @alice_guess.image_id, latitude: 1.0, longitude: 2.0 } }
+    end
   end
 
   test "cannot create guess on another user's game" do

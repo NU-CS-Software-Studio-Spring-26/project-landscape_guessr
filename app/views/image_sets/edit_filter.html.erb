@@ -1,0 +1,100 @@
+<% content_for :title, "Edit filter — #{@filtered_set.name}" %>
+
+<div class="w-full max-w-6xl mx-auto space-y-6 py-6"
+     data-controller="region-filter"
+     data-region-filter-parent-set-id-value="<%= @parent_set.id %>"
+     data-region-filter-map-style-value="<%= @parent_set.map_style %>"
+     data-region-filter-images-url-value="<%= map_image_set_path(@parent_set, format: :json) %>"
+     data-region-filter-initial-region-ids-value="<%= @filtered_set.region_ids.to_json %>"
+     data-region-filter-initial-custom-areas-value="<%= (@filtered_set.custom_areas || []).to_json %>">
+
+  <div>
+    <h1 class="heading-page">Edit filter</h1>
+    <p class="muted mt-1">Based on: <%= link_to @parent_set.name, @parent_set, class: "text-forest-600 hover:underline" %></p>
+  </div>
+
+  <%= form_with url: update_filter_image_set_path(@filtered_set), method: :patch, class: "space-y-5" do |f| %>
+    <div id="region-ids-container" data-region-filter-target="hiddenFields">
+      <% @filtered_set.region_ids.each do |rid| %>
+        <input type="hidden" name="region_ids[]" value="<%= rid %>">
+      <% end %>
+    </div>
+
+    <div>
+      <label for="name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+      <input type="text" name="name" id="name"
+             value="<%= @filtered_set.name %>"
+             class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-forest-500 focus:ring-forest-500"
+             required>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      <div class="space-y-3">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Regions</label>
+          <div class="relative">
+            <input type="text"
+                   placeholder="Search countries, states, counties..."
+                   aria-label="Search regions"
+                   data-region-filter-target="searchInput"
+                   data-action="input->region-filter#onSearchInput"
+                   class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-forest-500 focus:ring-forest-500 pr-8">
+            <svg class="absolute right-2.5 top-2.5 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+          </div>
+        </div>
+
+        <p class="text-xs text-gray-500" data-region-filter-target="hint">Type to search, or click the map to find regions at a location</p>
+
+        <div data-region-filter-target="results"
+             class="hidden border border-gray-200 rounded-md max-h-64 overflow-y-auto bg-white"></div>
+
+        <div>
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-sm font-medium text-gray-700">Selected</span>
+            <span class="text-xs text-gray-500" data-region-filter-target="matchCount"></span>
+          </div>
+          <div data-region-filter-target="pills" class="flex flex-wrap gap-1.5 min-h-[2rem]">
+            <span class="text-sm text-gray-400 italic">None selected — add regions above</span>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-sm font-medium text-gray-700">Map preview</span>
+          <button type="button"
+                  data-region-filter-target="circleModeBtn"
+                  data-action="click->region-filter#toggleCircleMode"
+                  aria-pressed="false"
+                  class="inline-flex items-center gap-1 px-2 py-1 rounded border border-gray-300 hover:bg-orange-50 text-gray-700 text-xs font-medium">
+            ✎ Draw a circle
+          </button>
+        </div>
+        <div data-region-filter-target="map"
+             class="w-full h-80 lg:h-96 rounded-md border border-gray-200"></div>
+        <p class="text-xs text-gray-500 mt-1">
+          <span data-region-filter-target="circleStatus" class="text-amber-700 italic hidden"></span>
+          <span data-region-filter-target="mapHint">Click the map to find regions, or use "Draw a circle" for a custom area</span>
+        </p>
+      </div>
+    </div>
+
+    <div>
+      <label for="visibility" class="block text-sm font-medium text-gray-700 mb-1">Visibility</label>
+      <select name="visibility" id="visibility"
+              class="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-forest-500 focus:ring-forest-500">
+        <option value="private" <%= "selected" if @filtered_set.visibility == "private" %>>Private</option>
+        <option value="public" <%= "selected" if @filtered_set.visibility == "public" %>>Public</option>
+      </select>
+    </div>
+
+    <div class="flex items-center gap-3">
+      <button type="submit" class="btn-primary" data-region-filter-target="submitBtn">
+        Save changes
+      </button>
+      <%= link_to "Cancel", @filtered_set, class: "btn-ghost" %>
+    </div>
+  <% end %>
+</div>

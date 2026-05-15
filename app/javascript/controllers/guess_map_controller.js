@@ -5,7 +5,11 @@ export default class extends Controller {
   static targets = ["container"]
   static values = {
     answer: { type: Array,  default: [] },
-    style:  { type: String, default: "outdoor-v2" }
+    style:  { type: String, default: "outdoor-v2" },
+    // {min_lat, max_lat, min_lng, max_lng} — when set, the map fits to it on
+    // load so each round starts focused on the area the set's images cover.
+    // Empty object means "no bbox known," in which case we keep the world view.
+    bbox:   { type: Object, default: {} }
   }
 
   async connect() {
@@ -17,11 +21,10 @@ export default class extends Controller {
       zoom: 1.5
     })
 
-    // outdoor-v2 paints colored hiking / bicycle / via-ferrata trails on
-    // top of everything — useful for hikers, distracting for a guessing
-    // game. They all live in source "outdoor", source-layer "trail";
-    // hide the whole layer set in one pass after the style loads.
-    this.map.on("load", () => hideOutdoorTrails(this.map))
+    this.map.on("load", () => {
+      hideOutdoorTrails(this.map)
+      this.fitToBbox()
+    })
 
     this.marker = null
     this.otherGuessLayers = []
@@ -34,6 +37,23 @@ export default class extends Controller {
 
       this.dispatch("pinned", { detail: { lat, lng } })
     })
+  }
+
+  fitToBbox() {
+    const { min_lat, max_lat, min_lng, max_lng } = this.bboxValue || {}
+    if ([min_lat, max_lat, min_lng, max_lng].some(v => typeof v !== "number")) return
+    if (min_lat === max_lat && min_lng === max_lng) {
+      // Single point — center on it at a moderate zoom rather than fitBounds
+      // (which would zoom in past usefulness on a degenerate rectangle).
+      this.map.jumpTo({ center: [min_lng, min_lat], zoom: 5 })
+      return
+    }
+    // Cap maxZoom so a tightly-clustered set (one city) doesn't open zoomed
+    // so deep that the user can't move around comfortably.
+    this.map.fitBounds(
+      [ [min_lng, min_lat], [max_lng, max_lat] ],
+      { padding: 60, maxZoom: 6, animate: false }
+    )
   }
 
   placePin(lat, lng) {

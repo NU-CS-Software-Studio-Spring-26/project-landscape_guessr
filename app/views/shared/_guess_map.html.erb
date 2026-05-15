@@ -1,5 +1,8 @@
+<%# Optional bbox: when present, the map fits to it on round start so the
+    user opens looking at the relevant region rather than the whole world. %>
 <div data-controller="guess-map"
      data-guess-map-style-value="<%= local_assigns[:style] || 'outdoor-v2' %>"
+     <% if local_assigns[:bbox] %>data-guess-map-bbox-value="<%= local_assigns[:bbox].to_json %>"<% end %>
      class="<%= local_assigns[:class] || 'w-full h-[60vh]' %>">
   <div data-guess-map-target="container" class="w-full h-full rounded-md border border-gray-200"></div>
 </div>
