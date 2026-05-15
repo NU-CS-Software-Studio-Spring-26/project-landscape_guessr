@@ -1,29 +1,31 @@
 <% content_for :title, "Sign in" %>
 
-<div class="mx-auto md:w-2/3 w-full">
-  <h1 class="heading-page">Sign in</h1>
-
-  <%= form_with url: session_url, class: "contents" do |form| %>
-    <div class="my-5">
-      <%= form.label :login, "Email or username", class: "block text-sm font-medium text-gray-700" %>
-      <%= form.text_field :login, required: true, autofocus: true, autocomplete: "username", placeholder: "Email or username", value: params[:login], class: "form-input" %>
+<div class="min-h-[calc(100vh-12rem)] flex items-center justify-center py-12">
+  <div class="w-full max-w-sm space-y-6">
+    <div class="text-center space-y-1">
+      <h1 class="heading-page">Welcome back</h1>
+      <p class="muted">Sign in to your account</p>
     </div>
 
-    <div class="my-5">
-      <%= form.label :password, class: "block text-sm font-medium text-gray-700" %>
-      <%= form.password_field :password, required: true, autocomplete: "current-password", placeholder: "Enter your password", maxlength: 72, class: "form-input" %>
+    <div class="card p-8 space-y-5">
+      <%= form_with url: session_url do |form| %>
+        <div>
+          <%= form.label :login, "Email or username", class: "block text-sm font-medium text-forest-800" %>
+          <%= form.text_field :login, required: true, autofocus: true, autocomplete: "username",
+                placeholder: "Email or username", value: params[:login], class: "form-input" %>
+        </div>
+        <div>
+          <%= form.label :password, class: "block text-sm font-medium text-forest-800" %>
+          <%= form.password_field :password, required: true, autocomplete: "current-password",
+                placeholder: "Your password", maxlength: 72, class: "form-input" %>
+        </div>
+        <%= form.submit "Sign in", class: "btn-primary w-full mt-2" %>
+        <p class="text-center text-sm text-gray-400">
+          <%= link_to "Forgot password?", new_password_path,
+                class: "text-forest-600 hover:text-forest-800 underline-offset-2 hover:underline" %>
+        </p>
+      <% end %>
     </div>
-
-    <div class="col-span-6 sm:flex sm:items-center sm:gap-4">
-      <div class="inline">
-        <%= form.submit "Sign in", class: "btn-primary w-full sm:w-auto" %>
-      </div>
-
-      <div class="mt-4 text-sm text-gray-500 sm:mt-0">
-        <%= link_to "Forgot password?", new_password_path, class: "text-gray-700 underline hover:no-underline" %>
-      </div>
-    </div>
-  <% end %>
 
   <div class="my-6 flex items-center gap-3 text-xs uppercase text-gray-400">
     <span class="h-px flex-1 bg-gray-200"></span>
@@ -37,4 +39,10 @@
     Don't have an account?
     <%= link_to "Sign up", new_registration_path, class: "text-blue-600 underline hover:no-underline" %>
   </p>
+    <p class="text-center text-sm text-gray-500">
+      Don't have an account?
+      <%= link_to "Sign up free", new_registration_path,
+            class: "text-forest-600 font-medium hover:text-forest-800 underline-offset-2 hover:underline" %>
+    </p>
+  </div>
 </div>

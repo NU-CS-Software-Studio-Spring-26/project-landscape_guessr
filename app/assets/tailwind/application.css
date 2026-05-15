@@ -1,41 +1,51 @@
 @import "tailwindcss";
 
+@theme {
+  /* Forest green palette */
+  --color-forest-50:  #f3f8f4;
+  --color-forest-100: #e3eee5;
+  --color-forest-200: #c4d9c8;
+  --color-forest-300: #96bc9d;
+  --color-forest-400: #5d9469;
+  --color-forest-500: #3a7a52;
+  --color-forest-600: #2a6642;
+  --color-forest-700: #1f5234;
+  --color-forest-800: #163a24;
+  --color-forest-900: #0e2417;
+
+  /* Fonts */
+  --font-display: "Fraunces", Georgia, serif;
+  --font-sans: "DM Sans", system-ui, sans-serif;
+}
+
 @layer components {
   /* ------------------------------------------------------------------
      Buttons
-     Use on either <%= link_to ..., class: "btn-primary" %> or
-     <%= button_to ..., class: "btn-primary" %>. Variants share padding,
-     radius, and font weight; only color changes.
   ------------------------------------------------------------------ */
   .btn-primary {
-    @apply inline-block text-center rounded-md px-3.5 py-2.5 font-medium cursor-pointer
-           bg-blue-600 hover:bg-blue-500 text-white;
+    @apply inline-block text-center rounded-lg px-4 py-2.5 font-medium cursor-pointer
+           bg-forest-600 hover:bg-forest-700 text-white shadow-sm transition-colors duration-150;
   }
   .btn-secondary {
-    @apply inline-block text-center rounded-md px-3.5 py-2.5 font-medium cursor-pointer
-           bg-gray-100 hover:bg-gray-50 text-gray-800 border border-gray-200;
+    @apply inline-block text-center rounded-lg px-4 py-2.5 font-medium cursor-pointer
+           bg-white hover:bg-forest-50 text-forest-800 border border-forest-200 shadow-sm transition-colors duration-150;
   }
   .btn-danger {
-    @apply inline-block text-center rounded-md px-3.5 py-2.5 font-medium cursor-pointer
-           bg-red-600 hover:bg-red-500 text-white;
+    @apply inline-block text-center rounded-lg px-4 py-2.5 font-medium cursor-pointer
+           bg-red-600 hover:bg-red-700 text-white shadow-sm transition-colors duration-150;
   }
-  /* For "Cancel" / subtle inline links — text only, no background. */
   .btn-ghost {
-    @apply text-sm text-gray-500 hover:text-gray-700 cursor-pointer;
+    @apply text-sm text-forest-600 hover:text-forest-800 cursor-pointer transition-colors duration-150;
   }
 
   /* ------------------------------------------------------------------
-     Select with always-visible custom arrow.
-     Native <select> arrows can vanish under some browser/Turbo combos
-     (we saw this on the games index dropdown) so we strip the native
-     chevron with appearance:none and render our own SVG via background-
-     image. Pair with `pr-8` so option text clears the arrow.
+     Select arrow
   ------------------------------------------------------------------ */
   .select-with-arrow {
     appearance: none;
     -webkit-appearance: none;
     -moz-appearance: none;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%236b7280'><path d='M5.5 7.5l4.5 4.5 4.5-4.5z'/></svg>");
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%232a6642'><path d='M5.5 7.5l4.5 4.5 4.5-4.5z'/></svg>");
     background-repeat: no-repeat;
     background-position: right 0.5rem center;
     background-size: 1rem 1rem;
@@ -43,53 +53,49 @@
 
   /* ------------------------------------------------------------------
      Form inputs
-     Apply to <input>/<select>/<textarea>. Use form-input-error when a
-     field has validation errors so the border + focus ring turn red.
   ------------------------------------------------------------------ */
   .form-input {
-    @apply block w-full mt-2 px-3 py-2 rounded-md border border-gray-400
-           shadow-sm focus:outline-blue-600;
+    @apply block w-full mt-2 px-3.5 py-2.5 rounded-lg border border-forest-200
+           shadow-sm text-forest-900 placeholder-gray-400 bg-white
+           focus:outline-none focus:ring-2 focus:ring-forest-200 focus:border-forest-600
+           transition-all duration-150;
   }
   .form-input-error {
-    @apply block w-full mt-2 px-3 py-2 rounded-md shadow-sm
-           border border-red-400 focus:outline-red-600;
+    @apply block w-full mt-2 px-3.5 py-2.5 rounded-lg shadow-sm bg-white
+           border border-red-400 text-forest-900
+           focus:outline-none focus:ring-2 focus:ring-red-200 focus:border-red-500;
   }
 
   /* ------------------------------------------------------------------
-     Page container — wraps top-level page content with sensible width.
+     Layout
   ------------------------------------------------------------------ */
   .page-container {
-    @apply w-full max-w-3xl mx-auto py-6 space-y-6;
+    @apply w-full max-w-3xl mx-auto py-8 space-y-8;
   }
 
   /* ------------------------------------------------------------------
-     Typography — role-based (what it's FOR, not what size it is). To
-     re-theme: change values here and every usage updates. Naming kept
-     short so usages read naturally in markup.
+     Typography
   ------------------------------------------------------------------ */
-
-  /* Big landing hero title (home page) */
   .heading-hero {
-    @apply text-4xl font-bold;
+    @apply text-5xl font-bold font-display tracking-tight leading-tight;
   }
-
-  /* Regular page title — top of an interior page */
   .heading-page {
-    @apply text-3xl font-bold;
+    @apply text-3xl font-bold font-display tracking-tight;
   }
-
-  /* Section header inside a page */
   .heading-section {
-    @apply text-lg font-semibold text-gray-700;
+    @apply text-base font-semibold text-forest-800 tracking-tight;
   }
-
-  /* All-caps small label above a value (used in stat tiles) */
   .eyebrow {
-    @apply text-xs font-medium text-gray-500 uppercase tracking-wide;
+    @apply text-xs font-semibold text-forest-600 uppercase tracking-widest;
   }
-
-  /* Small gray subtitle / caption text */
   .muted {
     @apply text-sm text-gray-500;
+  }
+
+  /* ------------------------------------------------------------------
+     Card
+  ------------------------------------------------------------------ */
+  .card {
+    @apply bg-white rounded-2xl border border-forest-100 shadow-sm;
   }
 }

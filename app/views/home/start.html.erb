@@ -1,85 +1,106 @@
-<% content_for :title, "Landscape Guessr" %>
+<% content_for :title, "Play" %>
 
 <% if authenticated? %>
-  <div class="w-full max-w-lg mx-auto space-y-8 text-center">
-    <div class="space-y-2">
-      <h1 class="heading-hero">Landscape Guessr</h1>
-      <p class="text-gray-600">Guess the location of natural landmarks around the world.</p>
-    </div>
+  <div class="space-y-10">
 
-    <div class="flex flex-col gap-3 items-center">
-      <div class="flex flex-col items-center gap-1">
+    <%# Greeting + primary CTA %>
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-6 pb-8 border-b border-forest-100">
+      <div>
+        <p class="eyebrow mb-1">Welcome back</p>
+        <h1 class="heading-hero text-4xl sm:text-5xl"><%= Current.user.username %></h1>
+      </div>
+      <div class="flex flex-col gap-1 sm:items-end">
         <%= button_to "Start new game", games_path, method: :post,
-              class: "btn-primary w-56" %>
+              class: "btn-primary text-base px-8 py-3 w-full sm:w-auto" %>
         <% if @default_set %>
-          <p class="text-xs text-gray-500">
-            on <%= @default_set.name %> &middot;
-            <%= link_to "pick another", image_sets_path, class: "underline hover:text-blue-600" %>
+          <p class="text-xs text-gray-400 text-center sm:text-right">
+            <%= @default_set.name %> &middot;
+            <%= link_to "pick another set", image_sets_path, class: "underline hover:text-forest-600" %>
           </p>
         <% end %>
       </div>
-      <%= link_to "Previous games", games_path,       class: "btn-secondary w-56" %>
-      <%= link_to "Challenges",     challenges_path, class: "btn-secondary w-56" %>
-      <%= link_to "Practice",       practice_path,   class: "btn-secondary w-56" %>
-      <%= link_to "Image Sets",     image_sets_path, class: "btn-secondary w-56" %>
     </div>
+
+    <%# Quick access cards %>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <% [
+        { label: "My Games",   sub: "View past results",    path: games_path },
+        { label: "Challenges", sub: "Play against friends",  path: challenges_path },
+        { label: "Practice",   sub: "No saving, just play", path: practice_path },
+        { label: "Image Sets", sub: "Browse & manage sets", path: image_sets_path }
+      ].each do |item| %>
+        <%= link_to item[:path],
+              class: "card px-5 py-6 hover:shadow-md hover:border-forest-200 transition-all group" do %>
+          <p class="font-semibold text-forest-900 group-hover:text-forest-600 transition-colors"><%= item[:label] %></p>
+          <p class="text-xs text-gray-400 mt-1.5 leading-snug"><%= item[:sub] %></p>
+        <% end %>
+      <% end %>
+    </div>
+
   </div>
 
 <% else %>
 
   <%# Hero %>
-  <div class="text-center space-y-6 py-8">
+  <div class="text-center space-y-8 py-12 sm:py-16 max-w-2xl mx-auto">
     <div class="space-y-4">
-      <h1 class="text-5xl font-bold tracking-tight">Landscape Guessr</h1>
-      <p class="text-xl text-gray-600 max-w-xl mx-auto">
-        You're shown a photo of a natural landmark. Drop a pin on the world map and see how close you can get.
+      <p class="eyebrow">Geography guessing game</p>
+      <h1 class="font-display font-bold tracking-tight leading-tight text-5xl sm:text-6xl">
+        Guess the world.<br>
+        <span class="text-forest-600 italic">One landscape at a time.</span>
+      </h1>
+      <p class="text-base sm:text-lg text-gray-500 max-w-lg mx-auto leading-relaxed">
+        You're shown a photograph of a natural landmark. Drop a pin on the map and see how close you can get.
       </p>
     </div>
-    <div class="flex flex-col sm:flex-row gap-3 justify-center items-center pt-2">
-      <%= link_to "Sign up free", new_registration_path, class: "btn-primary text-base px-6 py-3" %>
-      <%= link_to "Sign in", new_session_path, class: "btn-secondary text-base px-6 py-3" %>
+    <div class="flex flex-col sm:flex-row gap-3 justify-center items-center">
+      <%= link_to "Create a free account", new_registration_path, class: "btn-primary text-base px-6 py-3 w-full sm:w-auto" %>
+      <%= link_to "Sign in", new_session_path, class: "btn-secondary text-base px-6 py-3 w-full sm:w-auto" %>
     </div>
-    <p class="text-sm text-gray-500">
-      No account? <%= link_to "Try practice mode", practice_path, class: "underline hover:text-blue-600" %>
+    <p class="text-sm text-gray-400">
+      Just exploring?
+      <%= link_to "Try practice mode — no account needed", practice_path,
+            class: "text-forest-600 hover:text-forest-800 underline underline-offset-2" %>
     </p>
   </div>
 
   <%# How it works %>
-  <div class="mt-10 py-10 border-t border-gray-100">
-    <h2 class="heading-section text-center mb-10">How it works</h2>
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-10 max-w-2xl mx-auto text-center">
-      <div class="space-y-3">
-        <div class="w-10 h-10 rounded-full bg-blue-100 text-blue-700 font-bold text-lg flex items-center justify-center mx-auto">1</div>
-        <h3 class="font-semibold">See a photo</h3>
-        <p class="muted">You're shown a photograph of a natural landscape &mdash; a mountain, lake, canyon, or coastline.</p>
-      </div>
-      <div class="space-y-3">
-        <div class="w-10 h-10 rounded-full bg-blue-100 text-blue-700 font-bold text-lg flex items-center justify-center mx-auto">2</div>
-        <h3 class="font-semibold">Drop your pin</h3>
-        <p class="muted">Click anywhere on a world map to place your best guess for where the photo was taken.</p>
-      </div>
-      <div class="space-y-3">
-        <div class="w-10 h-10 rounded-full bg-blue-100 text-blue-700 font-bold text-lg flex items-center justify-center mx-auto">3</div>
-        <h3 class="font-semibold">See your score</h3>
-        <p class="muted">The closer your guess, the higher you score. Up to 5,000 points per round across 5 rounds.</p>
-      </div>
+  <div class="py-12 sm:py-16 border-t border-forest-100">
+    <div class="text-center mb-10 space-y-2">
+      <p class="eyebrow">How it works</p>
+      <h2 class="text-2xl font-bold font-display text-forest-900">Three steps to explore the world</h2>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 max-w-3xl mx-auto">
+      <% [
+        { n: "1", title: "See a photo",    body: "A photograph of a natural landmark — mountain, lake, canyon, or coastline. Study it for clues." },
+        { n: "2", title: "Drop your pin",  body: "Click anywhere on an interactive world map to place your best guess for the location." },
+        { n: "3", title: "See your score", body: "Up to 5,000 points per round across 5 rounds. The closer your guess, the higher you score." }
+      ].each do |step| %>
+        <div class="bg-forest-50 rounded-2xl border border-forest-100 p-6 space-y-3">
+          <div class="w-9 h-9 rounded-full bg-forest-600 text-white font-bold text-sm flex items-center justify-center">
+            <%= step[:n] %>
+          </div>
+          <h3 class="font-semibold text-forest-900"><%= step[:title] %></h3>
+          <p class="text-sm text-gray-500 leading-relaxed"><%= step[:body] %></p>
+        </div>
+      <% end %>
     </div>
   </div>
 
-  <%# Stats strip %>
+  <%# Stats %>
   <% if @game_count > 0 || @image_count > 0 %>
-    <div class="py-10 border-t border-gray-100">
-      <div class="flex flex-wrap justify-center gap-16 text-center">
+    <div class="py-12 border-t border-forest-100">
+      <div class="flex flex-wrap justify-center gap-12 sm:gap-16 text-center">
         <% if @game_count > 0 %>
           <div>
-            <div class="text-3xl font-bold text-blue-600"><%= number_with_delimiter(@game_count) %></div>
-            <div class="eyebrow mt-1">Games played</div>
+            <div class="text-4xl font-bold font-display text-amber-500"><%= number_with_delimiter(@game_count) %></div>
+            <div class="eyebrow mt-2">Games played</div>
           </div>
         <% end %>
         <% if @image_count > 0 %>
           <div>
-            <div class="text-3xl font-bold text-blue-600"><%= number_with_delimiter(@image_count) %></div>
-            <div class="eyebrow mt-1">Landscapes</div>
+            <div class="text-4xl font-bold font-display text-amber-500"><%= number_with_delimiter(@image_count) %></div>
+            <div class="eyebrow mt-2">Landscapes</div>
           </div>
         <% end %>
       </div>
