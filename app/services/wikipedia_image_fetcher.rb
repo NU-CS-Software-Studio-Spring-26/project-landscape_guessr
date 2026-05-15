@@ -59,6 +59,7 @@ class WikipediaImageFetcher
   end
 
   def self.fetch_pageimages(titles)
+    t0 = Time.now
     params = {
       action: "query",
       format: "json",
@@ -76,15 +77,32 @@ class WikipediaImageFetcher
     response = Net::HTTP.start(API.hostname, API.port, use_ssl: true, read_timeout: READ_TIMEOUT) do |h|
       h.request(req)
     end
+    duration = Time.now - t0
 
-    return { pages: [], normalized: {} } unless response.code == "200"
+    # `titles_list` logs the full pipe-joined batch so a failing call
+    # can be reproduced verbatim by pasting it into the MediaWiki API
+    # sandbox. Batches are bounded at BATCH_SIZE (50) — ~3 KB worst
+    # case, fine for log volume.
+    titles_list = titles.join("|")
+    unless response.code == "200"
+      WikidataQueryLog.log(action: :pageimages, status: response.code, duration: duration,
+                            batch: titles.size, titles: titles_list,
+                            error: response.body.to_s.slice(0, 200))
+      return { pages: [], normalized: {} }
+    end
 
     data = JSON.parse(response.body)
+    pages = (data.dig("query", "pages") || {}).values
+    with_image = pages.count { |p| p["pageimage"].present? }
+    WikidataQueryLog.log(action: :pageimages, status: response.code, duration: duration,
+                          batch: titles.size, with_image: with_image, titles: titles_list)
     {
-      pages: (data.dig("query", "pages") || {}).values,
+      pages: pages,
       normalized: (data.dig("query", "normalized") || []).each_with_object({}) { |n, h| h[n["from"]] = n["to"] }
     }
-  rescue StandardError
+  rescue StandardError => e
+    WikidataQueryLog.log(action: :pageimages, status: "exception", duration: Time.now - t0,
+                          batch: titles.size, error: "#{e.class}: #{e.message.slice(0, 200)}")
     { pages: [], normalized: {} }
   end
 

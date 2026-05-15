@@ -1,6 +1,6 @@
 class ImageSetsController < ApplicationController
-  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image attach_blob processing_status remove_item map new_filtered edit_filter update_filter preview_filter_count import_status]
-  before_action :require_owner, only: %i[edit update destroy locations update_locations add_image attach_blob processing_status remove_item edit_filter update_filter preview_filter_count]
+  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image attach_blob processing_status remove_item map new_filtered edit_filter update_filter preview_filter_count import_status retry_import]
+  before_action :require_owner, only: %i[edit update destroy locations update_locations add_image attach_blob processing_status remove_item edit_filter update_filter preview_filter_count retry_import]
   # Filtered sets' items are derived from the filter — any direct edit gets
   # blown away on the next materialize. Redirect those routes to the filter
   # editor instead of letting users do work that disappears.
@@ -338,21 +338,21 @@ class ImageSetsController < ApplicationController
   end
 
   # GET /image_sets/ai_new
-  # Empty AI form — user types a prompt, posts to ai_generate.
+  # Renders either the fresh form, an in-progress poll banner, or the
+  # completed/failed result — branched on the optional ?generation_id
+  # param. Each `Send` click creates a NEW AiGeneration record and
+  # redirects here with its id; the page state is entirely driven by
+  # that record.
   def ai_new
-    @ai_conversation = []
-    @ai_result = nil
-    @ai_preview = nil
-    @ai_count = nil
+    @ai_generation = load_ai_generation(params[:generation_id])
   end
 
   # POST /image_sets/ai_generate
   #
-  # Multi-turn conversation: client posts the prior conversation as a
-  # serialized hidden field plus the new user message. We call Gemini,
-  # then auto-run the resulting pattern as a COUNT + 30-row preview so
-  # the user immediately sees what the AI matched. On Flash 0-results we
-  # silently escalate to Pro for one retry.
+  # Creates one AiGeneration record per submit, enqueues the
+  # AiGenerationJob to actually run Gemini + Wikidata off-thread, then
+  # redirects to ai_new with the new record's id. The browser polls
+  # /ai_generations/:id/status and reloads when the job finishes.
   def ai_generate
     if ai_rate_limited?
       @ai_daily_limit = AI_DAILY_LIMIT
@@ -360,78 +360,92 @@ class ImageSetsController < ApplicationController
       render :ai_rate_limited, status: :too_many_requests and return
     end
 
-    prior_conv = parse_conversation(params[:conversation_json])
-    user_msg   = params[:user_message].to_s.strip
+    user_msg = params[:user_message].to_s.strip
     if user_msg.empty?
       redirect_to ai_new_image_sets_path, alert: "Type a prompt first." and return
     end
 
-    conv = prior_conv + [ { role: "user", text: user_msg } ]
+    prior_conv = parse_conversation(params[:conversation_json])
+    bounded_msg = user_msg.first(8000)
 
-    begin
-      @ai_result, model_used = generate_with_fallback(conv)
-    rescue AiImageSetGenerator::InvalidResponseError, AiImageSetGenerator::Error => e
-      # Gemini sometimes returns malformed responses (MALFORMED_FUNCTION_CALL)
-      # or is briefly down (503). Show a friendly retry message instead of
-      # leaking the stacktrace. The conversation_json hidden field has the
-      # prior turn so the user can retry from the same state.
-      Rails.logger.warn "[ai_generate] #{e.class}: #{e.message.slice(0, 300)}"
-      @ai_conversation = conv
-      @ai_result = nil
-      @ai_preview = nil
-      @ai_count = nil
-      @model_used = nil
-      flash.now[:alert] = "Something went wrong with the AI. Try sending your message again."
-      render :ai_new, status: :unprocessable_entity and return
-    end
-    @ai_conversation = conv + [ { role: "model", text: @ai_result.to_json } ]
+    # Bump BEFORE enqueue (changed from prior post-success bump).
+    # Async architecture needs queue-flood protection, and Gemini bills
+    # us per attempt regardless of success — counting attempts is more
+    # honest. A user who hits a transient failure can retry within
+    # their remaining quota; transient failures are rare in practice.
     bump_ai_rate_limit_counter
 
-    if @ai_result[:cannot_answer]
-      @ai_preview = nil
-      @ai_count = nil
-    else
-      @ai_count   = safe_count(@ai_result[:sparql_pattern])
-      @ai_preview = safe_sample(@ai_result[:sparql_pattern], image_source: @ai_result[:image_source])
+    # Include the new user turn in conversation_json AT CREATE TIME, not
+    # in the job. Otherwise the brief pending/running window between
+    # redirect and the job's first tick would show the thread missing
+    # the message the user just typed.
+    new_conv = prior_conv + [ { role: "user", text: bounded_msg } ]
 
-      # Flash 0-results → silently retry on Pro. Non-technical UX —
-      # the user shouldn't have to know about model choice; we just
-      # try harder behind the scenes when the first answer is empty.
-      if @ai_count.to_i.zero? && model_used == :flash
-        retry_result = retry_on_pro(conv)
-        if retry_result && !retry_result[:cannot_answer]
-          @ai_result = retry_result
-          @ai_conversation = conv + [ { role: "model", text: retry_result.to_json } ]
-          @ai_count = safe_count(@ai_result[:sparql_pattern])
-          @ai_preview = safe_sample(@ai_result[:sparql_pattern], image_source: @ai_result[:image_source])
-          flash.now[:notice] = "Tried harder on the second attempt."
-        end
-      end
-    end
+    gen = Current.user.ai_generations.create!(
+      status:            "pending",
+      conversation_json: new_conv.to_json,
+      user_message:      bounded_msg
+    )
+    AiGenerationJob.perform_later(gen.id)
+    redirect_to ai_new_image_sets_path(generation_id: gen.id)
+  end
 
-    @model_used = model_used
-    render :ai_new
+  # GET /ai_generations/:id/status
+  #
+  # Lightweight JSON the poll controller hits every ~1.5s while the
+  # AiGenerationJob runs. Scoped to current user via the association
+  # — cross-user IDs 404 by way of ActiveRecord::RecordNotFound. The
+  # `stale?` check downgrades stuck-running records (worker crash, queue
+  # offline) to a synthetic `failed` so the UI eventually unfreezes.
+  def ai_generation_status
+    gen = Current.user.ai_generations.find(params[:id])
+    effective = gen.stale? ? "failed" : gen.status
+    render json: {
+      status:           effective,
+      phase:            gen.phase,
+      progress_message: gen.progress_message,
+      result_count:     gen.result_count, # known once counting phase finishes
+      error:            gen.stale? ? "Generation timed out — try again." : gen.error
+    }
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: "not found" }, status: :not_found
   end
 
   # POST /image_sets/ai_create
   #
-  # User has approved the preview. Create the ImageSet immediately (so
-  # they have somewhere to land) and kick off AiImportImagesJob to run
-  # the full SPARQL + image attachment in the background.
+  # User has approved the preview. We source the AI fields (sparql
+  # pattern, explanation, model, default image source) from the
+  # AiGeneration record — not from hidden form fields — so a user
+  # can't bypass parse_submit's SPARQL validation by editing the
+  # hidden `ai_query` in devtools. The only AI field the user can
+  # override via the form is `ai_image_source` (Wikidata vs Wikipedia
+  # photos), which is bounded by an explicit allow-list anyway.
   def ai_create
-    pattern = params[:ai_query].to_s.strip
-    if pattern.empty?
-      redirect_to ai_new_image_sets_path, alert: "No query to import." and return
+    gen = Current.user.ai_generations.find_by(id: params[:generation_id])
+    if gen.nil? || gen.status != "completed" || gen.result.nil? ||
+       gen.result[:cannot_answer] ||
+       gen.result[:sparql_pattern].to_s.strip.empty?
+      # Last condition guards against a generation that completed but
+      # whose result has no usable pattern (would create a set whose
+      # import job runs nil SPARQL).
+      redirect_to ai_new_image_sets_path, alert: "No AI proposal to import." and return
+    end
+
+    result = gen.result
+    image_source = if %w[wikidata_p18 wikipedia_pageimages].include?(params[:ai_image_source])
+      params[:ai_image_source]
+    else
+      result[:image_source]
     end
 
     image_set = Current.user.image_sets.new(
-      name:            params[:name].to_s.strip.presence || "Untitled AI Set",
+      name:            params[:name].to_s.strip.presence || result[:set_name].presence || "Untitled AI Set",
       visibility:      %w[public private].include?(params[:visibility]) ? params[:visibility] : "private",
-      ai_prompt:       params[:ai_prompt].to_s.strip,
-      ai_query:        pattern,
-      ai_explanation:  params[:ai_explanation].to_s.strip,
-      ai_model:        params[:ai_model].to_s.strip.presence || "flash",
-      ai_image_source: %w[wikidata_p18 wikipedia_pageimages].include?(params[:ai_image_source]) ? params[:ai_image_source] : "wikidata_p18",
+      ai_prompt:       gen.user_message.to_s,
+      ai_query:        result[:sparql_pattern],
+      ai_explanation:  result[:explanation].to_s,
+      ai_model:        gen.model_used.presence || "flash",
+      ai_image_source: image_source,
       import_state:    "pending"
     )
 
@@ -441,6 +455,32 @@ class ImageSetsController < ApplicationController
     else
       redirect_to ai_new_image_sets_path, alert: image_set.errors.full_messages.join("; ")
     end
+  end
+
+  # POST /image_sets/1/retry_import
+  #
+  # Re-runs the import for an AI set whose previous import failed —
+  # typically a transient WDQS hiccup that outlasted run_query's 3-attempt
+  # internal retry. The set already has ai_query + ai_image_source from
+  # the original creation, so we just reset the progress columns and
+  # re-enqueue. Owner-only (require_owner) and only on actually-failed
+  # AI sets (guarded below) so this can't be used to spam jobs.
+  def retry_import
+    if @image_set.ai_query.blank?
+      redirect_to @image_set, alert: "This isn't an AI-generated set, nothing to retry." and return
+    end
+    unless @image_set.import_state == "failed"
+      redirect_to @image_set, alert: "Import isn't in a failed state." and return
+    end
+
+    @image_set.update_columns(
+      import_state:    "pending",
+      import_error:    nil,
+      import_progress: 0,
+      import_total:    0
+    )
+    AiImportImagesJob.perform_later(@image_set.id)
+    redirect_to @image_set, notice: "Re-importing images in the background."
   end
 
   # GET /image_sets/1/import_status
@@ -604,47 +644,11 @@ class ImageSetsController < ApplicationController
     []
   end
 
-  # On the first turn, use Flash. On subsequent turns within a
-  # conversation, keep using Flash unless the user (via the next
-  # message) explicitly asked to escalate (handled separately).
-  def generate_with_fallback(conv)
-    gen = AiImageSetGenerator.new(model: :flash)
-    [ gen.generate(conversation: conv), :flash ]
-  rescue AiImageSetGenerator::Error => e
-    Rails.logger.warn "[ai_generate flash] #{e.class}: #{e.message}"
-    pro = AiImageSetGenerator.new(model: :pro)
-    [ pro.generate(conversation: conv), :pro ]
-  end
-
-  def retry_on_pro(conv)
-    AiImageSetGenerator.new(model: :pro).generate(conversation: conv)
-  rescue AiImageSetGenerator::Error => e
-    Rails.logger.warn "[ai_generate pro-retry] #{e.class}: #{e.message}"
-    nil
-  end
-
-  # Wikidata can return HTTP errors / timeouts; surface 0/[] so the
-  # view renders gracefully instead of 500ing the whole flow.
-  # Logs timing so we can see which leg (Gemini vs count vs sample) is
-  # the bottleneck for any given user prompt — grep bin/dev for [ai_gen]
-  # / [ai_count] / [ai_sample].
-  def safe_count(pattern)
-    t0 = Time.now
-    n = WikidataImporter.count(pattern: pattern)
-    Rails.logger.info "[ai_count] #{(Time.now - t0).round(2)}s -> #{n}"
-    n
-  rescue WikidataImporter::Error => e
-    Rails.logger.warn "[ai_count] #{(Time.now - t0).round(2)}s ERR #{e.class}: #{e.message.slice(0, 200)}"
-    nil
-  end
-
-  def safe_sample(pattern, image_source:)
-    t0 = Time.now
-    rows = WikidataImporter.sample(pattern: pattern, image_source: image_source, limit: 30)
-    Rails.logger.info "[ai_sample] #{(Time.now - t0).round(2)}s -> #{rows.size} rows (src=#{image_source})"
-    rows
-  rescue WikidataImporter::Error => e
-    Rails.logger.warn "[ai_sample] #{(Time.now - t0).round(2)}s ERR #{e.class}: #{e.message.slice(0, 200)}"
-    []
+  # Look up the AiGeneration the view should render. Scoped to
+  # current_user so a forged ?generation_id pointing at another user's
+  # record degrades to "no generation" rather than leaking content.
+  def load_ai_generation(id)
+    return nil if id.blank?
+    Current.user.ai_generations.find_by(id: id)
   end
 end

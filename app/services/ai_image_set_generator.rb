@@ -120,11 +120,16 @@ class AiImageSetGenerator
     ]
   } ].freeze
 
-  def initialize(api_key: ENV["GEMINI_API_KEY"], model: :flash, timeout: 60)
+  # `progress_callback` (optional): a callable that gets a human-readable
+  # string ("Searching Wikidata for 'volcano'…") before each tool call
+  # is dispatched. Used by AiGenerationPipeline to surface live progress
+  # to the polling UI; tests + callers that don't care can omit it.
+  def initialize(api_key: ENV["GEMINI_API_KEY"], model: :flash, timeout: 60, progress_callback: nil)
     raise Error, "GEMINI_API_KEY not configured" if api_key.blank?
     @api_key = api_key
     @model = model_id_for(model)
     @timeout = timeout
+    @progress_callback = progress_callback
   end
 
   # `conversation` is an array of {role: "user"|"model", text: "..."} hashes
@@ -220,6 +225,7 @@ class AiImageSetGenerator
         name = fc.dig("functionCall", "name")
         args = fc.dig("functionCall", "args") || {}
         tool_counts[name] += 1
+        report_progress(describe_tool_call(name, args))
         result = run_tool(name, args)
         { functionResponse: { name: name, response: { content: result } } }
       end
@@ -297,8 +303,23 @@ class AiImageSetGenerator
       req["x-goog-api-key"] = @api_key
       req.body = JSON.generate(body)
 
-      response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true, read_timeout: @timeout) do |h|
-        h.request(req)
+      begin
+        response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true, read_timeout: @timeout) do |h|
+          h.request(req)
+        end
+      rescue Net::ReadTimeout, Net::OpenTimeout, EOFError, Errno::ECONNRESET => e
+        # Connection-level failures are retryable just like 5xx. Without
+        # this, a Gemini read-timeout (Pro warm-start can be slow) bubbles
+        # raw Net::ReadTimeout past the pipeline's `rescue Error` clauses
+        # and falsely marks the whole generation as failed. Wrap in our
+        # own Error class on the last attempt so callers' rescue clauses
+        # actually catch it.
+        if attempts < max_attempts
+          Rails.logger.warn "[ai_gen] #{e.class} on attempt #{attempts}, retrying…" if defined?(Rails)
+          sleep 2 * attempts
+          next
+        end
+        raise Error, "Gemini API connection timed out (#{e.class}: #{e.message})"
       end
 
       return response if response.code == "200"
@@ -311,6 +332,30 @@ class AiImageSetGenerator
 
       raise RateLimitError, "Gemini rate-limited (#{response.code})" if response.code == "429"
       raise Error, "Gemini API #{response.code}: #{response.body.to_s[0, 300]}"
+    end
+  end
+
+  # Best-effort progress notification. Swallow errors — the callback
+  # is purely informational; an exception writing a status field should
+  # never break the AI run.
+  def report_progress(message)
+    @progress_callback&.call(message)
+  rescue StandardError => e
+    Rails.logger.warn "[ai_gen progress] #{e.class}: #{e.message}" if defined?(Rails)
+  end
+
+  def describe_tool_call(name, args)
+    case name
+    when "search_wikidata"
+      q = args["query"].to_s.strip
+      q.empty? ? "Searching Wikidata…" : "Searching Wikidata for \"#{q.slice(0, 60)}\"…"
+    when "inspect_entity"
+      qid = args["qid"].to_s
+      qid.empty? ? "Inspecting a Wikidata entity…" : "Inspecting #{qid}…"
+    when "submit_answer"
+      "Composing the final query…"
+    else
+      "Thinking…"
     end
   end
 

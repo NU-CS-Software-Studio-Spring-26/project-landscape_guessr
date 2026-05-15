@@ -47,24 +47,37 @@ class WikidataEntityInspect
     req["User-Agent"] = USER_AGENT
     req["Accept"]     = "application/json"
 
+    t0 = Time.now
     response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true, read_timeout: READ_TIMEOUT) do |h|
       h.request(req)
     end
+    duration = Time.now - t0
 
-    return nil unless response.code == "200"
+    unless response.code == "200"
+      WikidataQueryLog.log(action: :wbgetent, status: response.code, duration: duration, qid: qid)
+      return nil
+    end
 
     json = JSON.parse(response.body)
     entity = json.dig("entities", qid)
-    return nil unless entity
+    unless entity
+      WikidataQueryLog.log(action: :wbgetent, status: response.code, duration: duration,
+                            qid: qid, found: false)
+      return nil
+    end
 
+    claims = summarize_claims(entity["claims"] || {})
+    WikidataQueryLog.log(action: :wbgetent, status: response.code, duration: duration,
+                          qid: qid, properties: claims.size)
     {
       qid:         qid,
       label:       entity.dig("labels", "en", "value"),
       description: entity.dig("descriptions", "en", "value"),
-      claims:      summarize_claims(entity["claims"] || {})
+      claims:      claims
     }
   rescue StandardError => e
-    Rails.logger.warn "[WikidataEntityInspect] #{e.class}: #{e.message}" if defined?(Rails)
+    WikidataQueryLog.log(action: :wbgetent, status: "exception", duration: Time.now - t0,
+                          qid: qid, error: "#{e.class}: #{e.message.slice(0, 200)}")
     nil
   end
 

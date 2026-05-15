@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_15_000004) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_15_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -44,6 +44,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_15_000004) do
     t.index ["blob_id", "variation_digest"], name: "index_active_storage_variant_records_uniqueness", unique: true
   end
 
+  create_table "ai_generations", force: :cascade do |t|
+    t.text "conversation_json"
+    t.datetime "created_at", null: false
+    t.text "error"
+    t.string "model_used"
+    t.string "phase"
+    t.text "preview_json"
+    t.string "progress_message"
+    t.bigint "result_count"
+    t.text "result_json"
+    t.string "status", default: "pending", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.text "user_message"
+    t.index ["user_id", "created_at"], name: "index_ai_generations_on_user_id_and_created_at"
+    t.index ["user_id"], name: "index_ai_generations_on_user_id"
+  end
+
   create_table "ai_usages", force: :cascade do |t|
     t.integer "count", default: 0, null: false
     t.datetime "created_at", null: false
@@ -75,6 +93,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_15_000004) do
     t.index ["challenger_id"], name: "index_challenges_on_challenger_id"
     t.index ["image_set_id"], name: "index_challenges_on_image_set_id"
     t.index ["token"], name: "index_challenges_on_token", unique: true
+  end
+
+  create_table "connected_services", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "email"
+    t.string "provider", null: false
+    t.string "uid", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["provider", "uid"], name: "index_connected_services_on_provider_and_uid", unique: true
+    t.index ["user_id"], name: "index_connected_services_on_user_id"
   end
 
   create_table "game_images", force: :cascade do |t|
@@ -197,6 +226,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_15_000004) do
     t.boolean "admin", default: false, null: false
     t.datetime "created_at", null: false
     t.string "email_address", null: false
+    t.datetime "email_verified_at"
     t.string "password_digest", null: false
     t.datetime "updated_at", null: false
     t.string "username"
@@ -206,11 +236,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_15_000004) do
 
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
+  add_foreign_key "ai_generations", "users"
   add_foreign_key "ai_usages", "users"
   add_foreign_key "challenge_images", "challenges"
   add_foreign_key "challenge_images", "images"
   add_foreign_key "challenges", "image_sets"
   add_foreign_key "challenges", "users", column: "challenger_id"
+  add_foreign_key "connected_services", "users"
   add_foreign_key "game_images", "games"
   add_foreign_key "game_images", "images"
   add_foreign_key "games", "challenges"

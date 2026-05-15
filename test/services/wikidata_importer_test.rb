@@ -52,4 +52,93 @@ class WikidataImporterTest < ActiveSupport::TestCase
     refute WikidataImporter.photo_url?(long_url)
     refute WikidataImporter.photo_url?(nil)
   end
+
+  # === run_query retry behavior ===
+
+  test "run_query retries on 502 and succeeds when the retry works" do
+    bindings_json = { results: { bindings: [ { "c" => { "value" => "5" } } ] } }.to_json
+
+    # Sequence of HTTP responses: 502, then 200. The retry loop should
+    # surface the bindings from the second response without raising.
+    queue_http_responses([
+      stubbed_response("502", "Bad Gateway"),
+      stubbed_response("200", bindings_json)
+    ]) do
+      assert_no_raise { WikidataImporter.run_query("SELECT ...") }
+    end
+  end
+
+  test "run_query raises after MAX_RETRIES consecutive 5xx" do
+    queue_http_responses([
+      stubbed_response("502", "first"),
+      stubbed_response("502", "second"),
+      stubbed_response("502", "third")
+    ]) do
+      err = assert_raises(WikidataImporter::Error) { WikidataImporter.run_query("SELECT ...") }
+      assert_match(/3 attempts/, err.message)
+    end
+  end
+
+  test "run_query retries on Net::ReadTimeout" do
+    bindings_json = { results: { bindings: [] } }.to_json
+
+    # First call raises timeout, second succeeds.
+    call_count = 0
+    fake_request = lambda do
+      call_count += 1
+      raise Net::ReadTimeout, "fake timeout" if call_count == 1
+      stubbed_response("200", bindings_json)
+    end
+
+    Net::HTTP.stub_any_instance(:request, fake_request) do
+      assert_no_raise { WikidataImporter.run_query("SELECT ...") }
+    end
+    assert_equal 2, call_count
+  end
+
+  test "run_query does not retry on 4xx" do
+    queue_http_responses([ stubbed_response("400", "bad query") ]) do
+      assert_raises(WikidataImporter::Error) { WikidataImporter.run_query("SELECT ...") }
+    end
+  end
+
+  private
+
+  def stubbed_response(code, body)
+    resp = Net::HTTPResponse.send(:response_class, code.to_s).new("1.1", code.to_s, "OK")
+    resp.define_singleton_method(:body) { body }
+    resp.define_singleton_method(:code) { code.to_s }
+    resp
+  end
+
+  def queue_http_responses(responses)
+    queue = responses.dup
+    fake = lambda { queue.shift }
+    Net::HTTP.stub_any_instance(:request, fake) { yield }
+  end
+
+  def assert_no_raise
+    yield
+    pass
+  rescue StandardError => e
+    flunk "Expected no raise, got #{e.class}: #{e.message}"
+  end
+end
+
+# Mirror of the helper used in ai_image_set_generator_test.rb. Lets a
+# test substitute a fixed value or a lambda for Net::HTTP#request.
+class Net::HTTP
+  def self.stub_any_instance(method, value)
+    aliased = "_pre_stub_#{method}"
+    alias_method(aliased, method) unless method_defined?(aliased)
+    define_method(method) do |*_args, **_kw|
+      value.respond_to?(:call) ? value.call : value
+    end
+    yield
+  ensure
+    if method_defined?(aliased)
+      alias_method(method, aliased)
+      remove_method(aliased)
+    end
+  end
 end

@@ -39,6 +39,7 @@ Rails.application.routes.draw do
       get :preview_filter_count
       post :preview_filter_count, action: :preview_filter_count
       get :import_status
+      post :retry_import
     end
     delete "items/:item_id", to: "image_sets#remove_item", as: :remove_item
   end
@@ -49,6 +50,11 @@ Rails.application.routes.draw do
       post :resolve
     end
   end
+  # AI-generation progress poll (read-only JSON). Lives outside the
+  # image_sets resource because an AiGeneration isn't tied to a specific
+  # set — it's the AI's PROPOSAL, before any ImageSet has been created.
+  get "/ai_generations/:id/status", to: "image_sets#ai_generation_status", as: :ai_generation_status
+
   get  "practice",       to: "practice#show"
   get  "practice/check", to: "practice#check", as: :practice_check
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html

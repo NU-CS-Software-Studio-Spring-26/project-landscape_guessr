@@ -234,24 +234,67 @@ class WikidataImporter
 
   # === HTTP ===
 
+  # Retries on transient WDQS failures (5xx, connection-level errors).
+  # WDQS is fronted by a load balancer that returns 502/503 under load
+  # spikes; a single retry-after-backoff typically clears those. Without
+  # this, ONE flaky moment kills an import that took the user 90s of AI
+  # work to set up.
+  #
+  # Retry budget: 3 attempts with 1s → 2s backoff. WDQS itself has a 60s
+  # internal timeout so the worst-case wall time for the entire retry
+  # loop is ~3×90s + 3s = ~273s — bounded.
+  MAX_RETRIES = 3
+
   def self.run_query(sparql)
-    req = Net::HTTP::Post.new(ENDPOINT)
-    req["Accept"]       = "application/sparql-results+json"
-    req["Content-Type"] = "application/x-www-form-urlencoded"
-    req["User-Agent"]   = USER_AGENT
-    req.body = URI.encode_www_form(query: sparql)
+    attempts = 0
+    summary = WikidataQueryLog.summarize_sparql(sparql)
 
-    response = Net::HTTP.start(ENDPOINT.hostname, ENDPOINT.port, use_ssl: true, read_timeout: READ_TIMEOUT) do |h|
-      h.request(req)
+    loop do
+      attempts += 1
+      t0 = Time.now
+
+      response =
+        begin
+          req = Net::HTTP::Post.new(ENDPOINT)
+          req["Accept"]       = "application/sparql-results+json"
+          req["Content-Type"] = "application/x-www-form-urlencoded"
+          req["User-Agent"]   = USER_AGENT
+          req.body = URI.encode_www_form(query: sparql)
+          Net::HTTP.start(ENDPOINT.hostname, ENDPOINT.port, use_ssl: true, read_timeout: READ_TIMEOUT) do |h|
+            h.request(req)
+          end
+        rescue Net::ReadTimeout, Net::OpenTimeout, EOFError, Errno::ECONNRESET => e
+          WikidataQueryLog.log(action: :sparql, status: "timeout", duration: Time.now - t0,
+                                attempt: attempts, error: "#{e.class}: #{e.message}", q: summary)
+          if attempts < MAX_RETRIES
+            sleep(attempts) # 1s, 2s
+            next
+          end
+          raise TimeoutError, "Wikidata query timed out after #{attempts} attempts: #{e.class}: #{e.message}"
+        end
+
+      duration = Time.now - t0
+
+      if response.code.start_with?("5") && attempts < MAX_RETRIES
+        # Transient — retry. Don't retry 4xx (our bug, not theirs) or
+        # the final 5xx (caller decides what to do with the failure).
+        WikidataQueryLog.log(action: :sparql, status: response.code, duration: duration,
+                              attempt: attempts, retrying: true, q: summary)
+        sleep(attempts) # 1s, 2s
+        next
+      end
+
+      if response.code != "200"
+        WikidataQueryLog.log(action: :sparql, status: response.code, duration: duration,
+                              attempt: attempts, error: response.body.to_s.slice(0, 200), q: summary)
+        raise Error, "Wikidata returned HTTP #{response.code} after #{attempts} attempts: #{response.body.to_s[0, 300]}"
+      end
+
+      bindings = JSON.parse(response.body).dig("results", "bindings") || []
+      WikidataQueryLog.log(action: :sparql, status: response.code, duration: duration,
+                            attempt: attempts, bindings: bindings.size, q: summary)
+      return bindings
     end
-
-    if response.code != "200"
-      raise Error, "Wikidata returned HTTP #{response.code}: #{response.body.to_s[0, 300]}"
-    end
-
-    JSON.parse(response.body).dig("results", "bindings") || []
-  rescue Net::ReadTimeout, Net::OpenTimeout, EOFError => e
-    raise TimeoutError, "Wikidata query timed out: #{e.class}: #{e.message}"
   end
 
   # SPARQL binding -> plain hash. Dedupes by ?item: when an item has

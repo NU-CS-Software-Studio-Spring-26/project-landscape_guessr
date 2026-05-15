@@ -58,14 +58,20 @@ class WikidataEntitySearch
     req["User-Agent"] = USER_AGENT
     req["Accept"]     = "application/json"
 
+    t0 = Time.now
     response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true, read_timeout: READ_TIMEOUT) do |h|
       h.request(req)
     end
+    duration = Time.now - t0
 
-    return [] unless response.code == "200"
+    unless response.code == "200"
+      WikidataQueryLog.log(action: :wbsearch, status: response.code, duration: duration,
+                            q: query.to_s.slice(0, 80), type: type)
+      return []
+    end
 
     json = JSON.parse(response.body)
-    (json["search"] || []).map do |hit|
+    hits = (json["search"] || []).map do |hit|
       match = hit["match"] || {}
       matched_via =
         if match["type"] == "alias" && match["text"].present?
@@ -80,8 +86,12 @@ class WikidataEntitySearch
         matched_via: matched_via
       }
     end
+    WikidataQueryLog.log(action: :wbsearch, status: response.code, duration: duration,
+                          q: query.to_s.slice(0, 80), type: type, hits: hits.size)
+    hits
   rescue StandardError => e
-    Rails.logger.warn "[WikidataEntitySearch] #{e.class}: #{e.message}" if defined?(Rails)
+    WikidataQueryLog.log(action: :wbsearch, status: "exception", duration: Time.now - t0,
+                          q: query.to_s.slice(0, 80), error: "#{e.class}: #{e.message.slice(0, 200)}")
     []
   end
 end

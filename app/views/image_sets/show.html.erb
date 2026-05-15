@@ -75,9 +75,18 @@
       </p>
     </div>
   <% elsif @image_set.import_state == "failed" %>
-    <div class="rounded-xl border border-red-300 bg-red-50 px-6 py-5 space-y-2">
+    <div class="rounded-xl border border-red-300 bg-red-50 px-6 py-5 space-y-3">
       <p class="text-sm text-red-800 font-medium">Import failed</p>
       <p class="text-xs text-red-700"><%= @image_set.import_error.presence || "Unknown error" %></p>
+      <% if @image_set.owned_by?(Current.user) && @image_set.ai_query.present? %>
+        <%# Most failures here are transient (Wikidata 5xx, network blip).
+            run_query already retries 3× internally; this button covers
+            the case where Wikidata was down for >5s. Reuses ai_query +
+            ai_image_source from the original creation — no re-prompting
+            the AI, no extra Gemini cost. %>
+        <%= button_to "Retry import", retry_import_image_set_path(@image_set),
+              method: :post, class: "btn-secondary text-sm" %>
+      <% end %>
     </div>
   <% end %>
 

@@ -1,0 +1,18 @@
+<%# Polling banner shown while AiGenerationJob is running. The Stimulus
+    controller fetches /ai_generations/:id/status every ~1.5s and
+    reloads the page on completion. Until the job sets `phase`, we show
+    a generic "Starting…" so the user sees motion immediately. %>
+<div class="rounded-xl border border-forest-200 bg-forest-50 px-6 py-5 space-y-3"
+     data-controller="ai-generation-poll"
+     data-ai-generation-poll-url-value="<%= ai_generation_status_path(generation.id) %>">
+  <p class="text-sm text-forest-800 flex items-center gap-2">
+    <svg class="animate-spin h-4 w-4 text-forest-700 flex-shrink-0" viewBox="0 0 24 24" fill="none">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4zm2 5.3A8 8 0 014 12H0c0 3 1.1 5.8 3 8l3-2.7z"></path>
+    </svg>
+    <span data-ai-generation-poll-target="status">Starting…</span>
+  </p>
+  <p class="muted text-xs">
+    The AI is generating your set. This can take 30-90 seconds for broad prompts.
+  </p>
+</div>
