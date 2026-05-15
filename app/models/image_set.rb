@@ -13,6 +13,11 @@ class ImageSet < ApplicationRecord
   has_many :image_set_items, dependent: :delete_all
   has_many :images, through: :image_set_items
   has_many :games, dependent: :nullify
+  # Challenges have their own materialized challenge_images, so they
+  # can survive after the source set is deleted — just nil out the FK.
+  # Without this `dependent: :nullify`, deleting an image_set with any
+  # challenge attached raises PG::ForeignKeyViolation.
+  has_many :challenges, dependent: :nullify
   has_many :filtered_sets, class_name: "ImageSet", foreign_key: :parent_image_set_id, dependent: :destroy
 
   # MapTiler basemap styles available per set. Used by the guess /
