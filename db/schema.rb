@@ -59,7 +59,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_12_000005) do
     t.bigint "challenger_id", null: false
     t.datetime "created_at", null: false
     t.bigint "image_set_id"
-    t.string "token", default: "", null: false
+    t.string "token", null: false
     t.datetime "updated_at", null: false
     t.index ["challenger_id"], name: "index_challenges_on_challenger_id"
     t.index ["image_set_id"], name: "index_challenges_on_image_set_id"
@@ -84,7 +84,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_12_000005) do
     t.datetime "completed_at"
     t.datetime "created_at", null: false
     t.bigint "image_set_id"
-    t.float "score"
+    t.integer "score"
     t.string "status"
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
