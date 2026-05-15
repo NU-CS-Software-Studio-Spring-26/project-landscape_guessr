@@ -1,0 +1,17 @@
+<div class="mx-auto md:w-2/3 w-full">
+  <h1 class="heading-page">Pick a username</h1>
+
+  <p class="muted mb-4">
+    Almost there — choose a username to finish setting up your account.
+  </p>
+
+  <%= form_with model: @user, url: setup_username_profile_path, method: :patch, class: "contents" do |form| %>
+    <div class="my-5">
+      <%= form.text_field :username, required: true, autofocus: true, autocomplete: "username", placeholder: "3-20 chars: letters, digits, _ or -", class: "form-input" %>
+    </div>
+
+    <div class="inline">
+      <%= form.submit "Save", class: "btn-primary w-full sm:w-auto" %>
+    </div>
+  <% end %>
+</div>

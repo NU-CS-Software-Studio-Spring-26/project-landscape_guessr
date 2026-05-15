@@ -65,6 +65,10 @@ In development, seeds also create three demo accounts so the leaderboard isn't e
 
 To manage the image library or edit past guesses through the UI, you need an admin account. Sign up normally, then promote yourself via `bin/rails c`: `User.find_by(email_address: "you@x").update(admin: true)`. On Heroku: `heroku run rails console`.
 
+### Google sign-in (optional)
+
+Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env` (loaded by `dotenv-rails` in dev). Get them from Google Cloud Console → Google Auth Platform → Clients → Web application; add `http://localhost:3000/auth/google_oauth2/callback` as an authorized redirect URI. Without them, the "Sign in with Google" button errors but password sign-in still works.
+
 ### S3 / Active Storage setup (for user uploads)
 
 User-uploaded images go through Active Storage's direct-upload flow. Development defaults to local disk (`storage/`) — no AWS setup required. Production uses S3.
@@ -82,8 +86,9 @@ export AWS_REGION=us-east-2
 
 | Model | Belongs to | Has many | Key columns |
 |---|---|---|---|
-| `User` | — | `sessions`, `games`, `image_sets` | `email_address`, `username`, `password_digest`, `admin` |
+| `User` | — | `sessions`, `games`, `image_sets`, `connected_services` | `email_address`, `username` (nullable while OAuth users pick one), `password_digest`, `admin` |
 | `Session` | `User` | — | `ip_address`, `user_agent` |
+| `ConnectedService` | `User` | — | `provider`, `uid`, `email` (unique on `[provider, uid]`; maps OAuth identities to users) |
 | `Game` | `User`, `ImageSet?` | `game_images`, `guesses`, `images` (through `game_images`) | `status`, `score`, `completed_at` |
 | `GameImage` | `Game`, `Image` | — | `position` (1–5), `answer_latitude`, `answer_longitude` (snapshot at game-creation time) |
 | `Image` | — | `guesses`, `game_images`, `image_set_items`, `image_sets` (through items) | `url`, `latitude`, `longitude`, `title`; optional `photo` Active Storage attachment |
@@ -105,7 +110,9 @@ The `Image.visible_to(user)` scope (in `app/models/image.rb`) is the canonical w
 |---|---|
 | `/` | Landing page; primary CTA = "Start new game" on the system-default set |
 | `/registration/new`, `/session/new`, `/passwords/new` | Sign up, sign in, password reset |
-| `/profile` | Current user's profile |
+| `/auth/google_oauth2`, `/auth/google_oauth2/callback` | OAuth sign-in entry + callback |
+| `/profile/setup_username` | Where OAuth-created users pick a username before they can do anything else |
+| `/profile` | Current user's profile (also exposes account deletion — `DELETE /profile`) |
 | `/games` | Paginated list of your games (filter by status, sort by date or score) |
 | `/games/:id` | Play the next round of an in-progress game |
 | `/games/:id/results` | Per-round breakdown + summary map after game finishes |
@@ -148,6 +155,7 @@ heroku addons:create heroku-postgresql:essential-0
 heroku buildpacks:add --index 1 heroku-community/apt   # pulls libvips42 via Aptfile
 heroku buildpacks:add heroku/ruby
 heroku config:set AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... S3_BUCKET=... AWS_REGION=...
+heroku config:set GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=...   # required for Sign in with Google in prod
 heroku config:set MALLOC_ARENA_MAX=2 ACTIVE_JOB_ASYNC_MAX_THREADS=1   # caps glibc heap fragmentation + concurrent libvips decodes; needed on 512MB dynos
 git push heroku main:main
 heroku run rails db:migrate db:seed

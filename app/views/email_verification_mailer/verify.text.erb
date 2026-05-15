@@ -1,0 +1,4 @@
+Verify your email address by visiting this link:
+<%= email_verification_url(token: @user.email_verification_token) %>
+
+This link will expire in 24 hours.

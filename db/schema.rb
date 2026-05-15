@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_12_000005) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_13_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -64,6 +64,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_12_000005) do
     t.index ["challenger_id"], name: "index_challenges_on_challenger_id"
     t.index ["image_set_id"], name: "index_challenges_on_image_set_id"
     t.index ["token"], name: "index_challenges_on_token", unique: true
+  end
+
+  create_table "connected_services", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "email"
+    t.string "provider", null: false
+    t.string "uid", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["provider", "uid"], name: "index_connected_services_on_provider_and_uid", unique: true
+    t.index ["user_id"], name: "index_connected_services_on_user_id"
   end
 
   create_table "game_images", force: :cascade do |t|
@@ -150,9 +161,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_12_000005) do
     t.boolean "admin", default: false, null: false
     t.datetime "created_at", null: false
     t.string "email_address", null: false
+    t.datetime "email_verified_at"
     t.string "password_digest", null: false
     t.datetime "updated_at", null: false
-    t.string "username", null: false
+    t.string "username"
     t.index "lower((username)::text)", name: "index_users_on_lower_username", unique: true
     t.index ["email_address"], name: "index_users_on_email_address", unique: true
   end
@@ -163,6 +175,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_12_000005) do
   add_foreign_key "challenge_images", "images"
   add_foreign_key "challenges", "image_sets"
   add_foreign_key "challenges", "users", column: "challenger_id"
+  add_foreign_key "connected_services", "users"
   add_foreign_key "game_images", "games"
   add_foreign_key "game_images", "images"
   add_foreign_key "games", "challenges"

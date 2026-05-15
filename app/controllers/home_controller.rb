@@ -1,5 +1,6 @@
 class HomeController < ApplicationController
   allow_unauthenticated_access only: %i[ start about legal ]
+  skip_before_action :require_email_verified
 
   def start
     if authenticated?
