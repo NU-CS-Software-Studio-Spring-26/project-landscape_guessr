@@ -48,6 +48,7 @@ A GeoGuessr-style web game: players see a landscape photograph (mountain, lake, 
 - Ruby 4.0.2 — install via your version manager (rbenv, asdf, mise, rvm). `.ruby-version` is honored by all of them.
 - PostgreSQL 14+ running locally. On macOS: `brew install postgresql@16 && brew services start postgresql@16`.
 - libvips for image processing. On macOS: `brew install vips`. On Linux: `apt-get install libvips42`. (Heroku gets it via `Aptfile`.)
+- libgeos for region polygon operations (used by `regions:seed_all` and the filter-set matcher). On macOS: `brew install geos`. On Linux: `apt-get install libgeos-dev`. The `rgeo` gem compiles its C extension against libgeos at install time, so make sure libgeos is present **before** running `bundle install`. (Heroku gets it via `Aptfile`.)
 
 ## Setup
 
