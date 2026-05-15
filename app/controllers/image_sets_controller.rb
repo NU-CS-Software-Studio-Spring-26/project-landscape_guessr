@@ -354,7 +354,11 @@ class ImageSetsController < ApplicationController
   # the user immediately sees what the AI matched. On Flash 0-results we
   # silently escalate to Pro for one retry.
   def ai_generate
-    return render plain: "Rate limit: try again tomorrow.", status: :too_many_requests if ai_rate_limited?
+    if ai_rate_limited?
+      @ai_daily_limit = AI_DAILY_LIMIT
+      @ai_used_today  = AiUsage.today_count(user: Current.user)
+      render :ai_rate_limited, status: :too_many_requests and return
+    end
 
     prior_conv = parse_conversation(params[:conversation_json])
     user_msg   = params[:user_message].to_s.strip
@@ -565,22 +569,20 @@ class ImageSetsController < ApplicationController
 
   # === AI helpers ===
 
-  # Per-user daily cap. With $0.01-0.03 per call on Flash, 20 calls/day
-  # caps a single user at ~$0.60/day worst case. Cache key rolls over at
-  # midnight (Date#to_s yields YYYY-MM-DD).
+  # Per-user daily cap. With $0.01-0.05 per call on Flash, 20 calls/day
+  # caps a single user at ~$1/day worst case. Persisted in postgres
+  # (AiUsage) — earlier version stored counts in Rails.cache, but the
+  # configured :memory_store is process-local, so multi-worker puma
+  # counted separately per worker (effectively 2-4x the limit), and
+  # dyno restarts wiped the count entirely.
   AI_DAILY_LIMIT = 20
 
   def ai_rate_limited?
-    Rails.cache.read(ai_rate_limit_key).to_i >= AI_DAILY_LIMIT
+    AiUsage.exceeded?(user: Current.user, daily_limit: AI_DAILY_LIMIT)
   end
 
   def bump_ai_rate_limit_counter
-    Rails.cache.increment(ai_rate_limit_key, 1, expires_in: 24.hours, raw: true) ||
-      Rails.cache.write(ai_rate_limit_key, 1, expires_in: 24.hours, raw: true)
-  end
-
-  def ai_rate_limit_key
-    "ai_image_set:#{Current.user.id}:#{Date.current}"
+    AiUsage.bump!(user: Current.user)
   end
 
   # Parse the hidden conversation field. Bounded length so a giant

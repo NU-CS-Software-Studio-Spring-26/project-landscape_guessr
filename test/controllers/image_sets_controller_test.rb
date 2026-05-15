@@ -146,16 +146,12 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "ai_generate enforces daily rate limit" do
-    # Test env defaults to :null_store, which silently drops writes. Swap
-    # to a memory store for the duration of this one test so the rate-
-    # limit counter actually persists across the read.
-    original = Rails.cache
-    Rails.cache = ActiveSupport::Cache::MemoryStore.new
-    Rails.cache.write("ai_image_set:#{@alice.id}:#{Date.current}", 20, expires_in: 1.hour, raw: true)
+    # Burn the daily quota directly in the AiUsage table — the rate
+    # limit is now AR-backed (not cache-backed), so this is enough.
+    AiUsage.create!(user: @alice, day: Date.current, count: 20)
     post ai_generate_image_sets_path, params: { user_message: "volcanoes" }
     assert_response :too_many_requests
-  ensure
-    Rails.cache = original if original
+    assert_match(/Daily AI limit reached/, response.body)
   end
 
   test "ai_create rejects empty query" do
