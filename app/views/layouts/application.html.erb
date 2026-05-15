@@ -23,28 +23,6 @@
     <%= javascript_importmap_tags %>
   </head>
 
-  <body>
-    <nav aria-label="Primary" class="container mx-auto px-5 pt-5 flex justify-between items-center text-sm">
-      <div class="flex items-center gap-5">
-        <%= link_to "Landscape Guessr", root_path, class: "font-bold" %>
-        <% if authenticated? %>
-          <%= link_to "Games", games_path, class: "text-gray-700 hover:text-blue-600 font-medium" %>
-          <%= link_to "Image Sets", image_sets_path, class: "text-gray-700 hover:text-blue-600 font-medium" %>
-          <%= link_to "Challenges", challenges_path, class: "text-gray-700 hover:text-blue-600 font-medium" %>
-        <% end %>
-      </div>
-      <div class="flex items-center gap-3">
-        <% if authenticated? %>
-          <% if Current.user.username.present? %>
-            <%= link_to Current.user.username, profile_path, class: "text-gray-700 hover:text-blue-600 font-medium hidden sm:inline" %>
-          <% else %>
-            <%= link_to "Finish setup", setup_username_profile_path, class: "text-gray-700 hover:text-blue-600 font-medium hidden sm:inline" %>
-          <% end %>
-          <%= button_to "Sign out", session_path, method: :delete, class: "btn-secondary text-sm py-1.5" %>
-        <% else %>
-          <%= link_to "Sign in", new_session_path, class: "btn-secondary text-sm py-1.5" %>
-          <%= link_to "Sign up", new_registration_path, class: "btn-primary text-sm py-1.5" %>
-        <% end %>
   <body class="font-sans antialiased bg-white text-forest-900 min-h-screen flex flex-col">
 
     <header class="sticky top-0 z-20 bg-white/95 backdrop-blur-sm border-b border-forest-100"
