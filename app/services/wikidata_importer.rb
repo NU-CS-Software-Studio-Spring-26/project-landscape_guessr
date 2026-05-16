@@ -36,7 +36,13 @@ require "concurrent/atomic/atomic_fixnum"
 class WikidataImporter
   ENDPOINT   = URI("https://query.wikidata.org/sparql").freeze
   USER_AGENT = WikimediaUserAgent::STRING
-  READ_TIMEOUT = 90
+  # Per-query timeout. WDQS's own hard ceiling is 60s; we set ours below
+  # that so we die first and surface a clean error rather than wedging
+  # behind WDQS's slower failure path. p99 of *healthy* queries is ~34s
+  # in our data, so 45s leaves comfortable headroom — and queries that
+  # actually need >45s are almost always too expensive to ever finish
+  # cleanly under fan-out anyway.
+  READ_TIMEOUT = 45
 
   HARD_CAP = 10_000
 
@@ -44,7 +50,11 @@ class WikidataImporter
   RANDOM_SAMPLE = "random_sample".freeze
   STRATEGIES    = [ EXHAUSTIVE, RANDOM_SAMPLE ].freeze
 
-  MAX_RETRIES = 3
+  # Two attempts per query (1 retry). WDQS timeouts are almost never
+  # transient — when a pattern is too expensive once, a retry hits the
+  # same shape and times out again. One retry covers genuine network
+  # flap; more just multiplies the wasted wall time.
+  MAX_RETRIES = 2
 
   # Non-photo filename patterns lifted from db/seeds.rb. No \b word
   # boundaries — Ruby's \b treats `_` as a word char, so \bMODIS\b
@@ -93,7 +103,7 @@ class WikidataImporter
   # random sample for exhaustive strategy (LIMIT gives alphabetical order
   # since WDQS doesn't push LIMIT into the walk). For random_sample,
   # bd:sample really does return random rows.
-  def self.sample(pattern:, image_source: "wikidata_p18", limit: 30, fetch_strategy: EXHAUSTIVE, on_progress: nil)
+  def self.sample(pattern:, limit: 30, fetch_strategy: EXHAUSTIVE, on_progress: nil)
     strategy = effective_strategy(pattern, fetch_strategy)
     types    = extract_types(pattern)
 
@@ -118,7 +128,13 @@ class WikidataImporter
     end
 
     rows = normalize_rows(rows)
-    WikipediaImageFetcher.refresh_images!(rows: rows) if image_source == "wikipedia_pageimages"
+    # Always enrich via Wikipedia pageimages. WikipediaImageFetcher's
+    # `next if filename.blank?` preserves any P18 URL we already have
+    # when MediaWiki returns no pageimage — so pageimages mode is a
+    # strict superset of the old P18-only mode (fresher infobox photo
+    # when available, P18 fallback otherwise). No reason to ever skip
+    # this step.
+    WikipediaImageFetcher.refresh_images!(rows: rows)
     candidates = dedupe_by_url(rows.select { |r| r[:url].present? && r[:lat] && r[:lng] })
     # No server-side existence check. Broken thumbnails (deleted/renamed
     # files on Commons) are handled at render time by hide_broken_image
@@ -131,9 +147,9 @@ class WikidataImporter
 
   # Full import. Reports progress through sub-states:
   #   "fetching"           — per-type SPARQL queries (progress = types done / total)
-  #   "looking_up_images"  — Wikipedia pageimages batch (pageimages mode only)
+  #   "looking_up_images"  — Wikipedia pageimages batch
   #   "inserting"          — INSERT phase (progress = rows inserted / total)
-  def self.import!(image_set:, pattern:, image_source: "wikidata_p18", fetch_strategy: EXHAUSTIVE)
+  def self.import!(image_set:, pattern:, fetch_strategy: EXHAUSTIVE)
     strategy = effective_strategy(pattern, fetch_strategy)
     types    = extract_types(pattern)
 
@@ -163,18 +179,19 @@ class WikidataImporter
 
     rows = normalize_rows(rows)
 
-    if image_source == "wikipedia_pageimages"
-      image_set.update_columns(import_state: "looking_up_images", import_progress: 0, import_total: 0)
-      WikipediaImageFetcher.refresh_images!(
-        rows: rows,
-        on_progress: ->(done, total) {
-          # Wikipedia phase can be 30-90s for a 9k-item set (sequential
-          # 50-batch calls + 0.2s courtesy sleep). Without this counter
-          # the banner sits silent and users assume it's hung.
-          image_set.update_columns(import_progress: done, import_total: total)
-        }
-      )
-    end
+    # Always enrich via Wikipedia pageimages — preserves any P18 URL we
+    # already have when MediaWiki returns no pageimage (see sample/
+    # WikipediaImageFetcher comments).
+    image_set.update_columns(import_state: "looking_up_images", import_progress: 0, import_total: 0)
+    WikipediaImageFetcher.refresh_images!(
+      rows: rows,
+      on_progress: ->(done, total) {
+        # Wikipedia phase can be 30-90s for a 9k-item set (sequential
+        # 50-batch calls + 0.2s courtesy sleep). Without this counter
+        # the banner sits silent and users assume it's hung.
+        image_set.update_columns(import_progress: done, import_total: total)
+      }
+    )
 
     keepable = rows.select { |r| r[:url].present? && r[:lat] && r[:lng] && photo_url?(r[:url]) }
     keepable = dedupe_by_url(keepable)

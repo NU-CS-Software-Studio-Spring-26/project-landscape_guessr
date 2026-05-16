@@ -210,11 +210,10 @@ class WikidataImporterTest < ActiveSupport::TestCase
   test "run_query raises after MAX_RETRIES consecutive 5xx" do
     queue_http_responses([
       stubbed_response("502", "first"),
-      stubbed_response("502", "second"),
-      stubbed_response("502", "third")
+      stubbed_response("502", "second")
     ]) do
       err = assert_raises(WikidataImporter::Error) { WikidataImporter.run_query("SELECT ...") }
-      assert_match(/3 attempts/, err.message)
+      assert_match(/2 attempts/, err.message)
     end
   end
 

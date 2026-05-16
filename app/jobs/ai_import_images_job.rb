@@ -4,9 +4,9 @@ class AiImportImagesJob < ApplicationJob
   # Runs an AI-generated SPARQL pattern against Wikidata and imports
   # the resulting items into the given ImageSet. Off the request thread
   # because (a) the SPARQL query itself can take up to 60s on big
-  # categories, and (b) for image_source=wikipedia_pageimages, we batch-
-  # call the MediaWiki API at ~200ms per 50-title batch, which for a
-  # 10k-row import takes ~40s. Either of those blows request timeouts.
+  # categories, and (b) we always batch-call the MediaWiki pageimages
+  # API at ~200ms per 50-title batch, which for a 10k-row import takes
+  # ~40s. Either of those blows request timeouts.
   #
   # Progress is reported by mutating image_set.import_progress /
   # import_total; the show page polls /processing_status (we extend it
@@ -20,7 +20,6 @@ class AiImportImagesJob < ApplicationJob
     WikidataImporter.import!(
       image_set:      image_set,
       pattern:        image_set.ai_query,
-      image_source:   image_set.ai_image_source.presence || "wikidata_p18",
       fetch_strategy: image_set.ai_fetch_strategy.presence || "exhaustive"
     )
 

@@ -3,7 +3,16 @@
 <div class="w-full max-w-2xl mx-auto py-6 space-y-6">
   <div class="flex items-center justify-between">
     <h1 class="heading-page">AI Image Set</h1>
-    <%= link_to "Cancel", image_sets_path, class: "btn-ghost" %>
+    <% if @ai_generation&.in_progress? %>
+      <%# Real cancel: POSTs to the cancel endpoint so the pipeline bails
+          at its next checkpoint. The browser back arrow remains a plain
+          navigation (does NOT cancel) — by design, so users can leave
+          and come back. %>
+      <%= button_to "Cancel", ai_generation_cancel_path(@ai_generation),
+            method: :post, class: "btn-ghost" %>
+    <% else %>
+      <%= link_to "Cancel", image_sets_path, class: "btn-ghost" %>
+    <% end %>
   </div>
 
   <% if @ai_generation.nil? %>
@@ -35,6 +44,15 @@
       <%= render "ai_thread", conversation: @ai_generation.conversation, hide_latest_model: true %>
       <%= render "ai_result", generation: @ai_generation %>
     <% end %>
+    <%= render "ai_prompt_form", conversation: @ai_generation.conversation %>
+
+  <% elsif @ai_generation.canceled? %>
+    <%# User explicitly canceled — show the conversation so they can
+        refine without losing context. No error card. %>
+    <%= render "ai_thread", conversation: @ai_generation.conversation %>
+    <section class="card p-4 border-amber-200 bg-amber-50">
+      <p class="text-sm text-amber-800">Generation canceled.</p>
+    </section>
     <%= render "ai_prompt_form", conversation: @ai_generation.conversation %>
 
   <% else %>

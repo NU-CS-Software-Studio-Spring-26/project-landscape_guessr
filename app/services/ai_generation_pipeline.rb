@@ -13,11 +13,23 @@
 # ActiveJob's perform_enqueued_jobs harness, and isolates the
 # Flash→Pro fallback + 0-result retry logic in one place.
 class AiGenerationPipeline
+  class Canceled < StandardError; end
+
+  # Total wall-clock budget for one generation. Belt-and-suspenders on
+  # top of the per-query timeouts in WikidataImporter — if a phase blows
+  # past its bounds and the pipeline reaches its next checkpoint after
+  # this much elapsed time, it fails the generation cleanly rather than
+  # letting the user wait silently for many more minutes. Sized so the
+  # worst realistic case (Flash + count fan-out + Pro retry + recount +
+  # sample) fits, but a runaway doesn't.
+  MAX_DURATION = 180
+
   def initialize(generation:)
     @generation = generation
   end
 
   def run
+    @start_time = Time.current
     @generation.update!(status: "running", phase: "thinking", progress_message: nil)
 
     # conversation_json already includes the new user turn — the
@@ -27,6 +39,7 @@ class AiGenerationPipeline
     conversation = @generation.conversation
 
     ai_result, model = generate_with_fallback(conversation)
+    bail_if_canceled!
     conversation << { role: "model", text: ai_result.to_json }
     @generation.update!(
       model_used:        model.to_s,
@@ -39,23 +52,21 @@ class AiGenerationPipeline
       return
     end
 
+    check_deadline!
     @generation.update!(phase: "counting", progress_message: nil)
     count = safe_count(ai_result[:sparql_pattern], fetch_strategy: ai_result[:fetch_strategy])
+    bail_if_canceled!
     @generation.update!(result_count: count)
 
-    # Flash 0-results OR couldn't-count → silently retry on Pro. The
-    # user's prompt is unchanged; the prior conversation already shows
-    # Flash's attempt. We REPLACE the conversation's last model turn
-    # with Pro's answer so the refinement form posts the upgraded
-    # conversation forward.
-    #
-    # `count.to_i.zero?` matches both `0` (genuine no-match — maybe
-    # Pro can compose a less-restrictive pattern) and `nil` (WDQS
-    # timeout/5xx on Flash's pattern — Pro might compose a simpler
-    # pattern that WDQS can actually execute, e.g. dropping a costly
-    # property path). Either way, paying the Pro cost is the right
-    # call before giving the user an empty/error result.
-    if count.to_i.zero? && model == :flash
+    # Pro retry ONLY on count == 0, NOT on nil.
+    #   count == 0 means Flash's SPARQL ran fine and genuinely returned
+    #     no matches — Pro might compose a less-restrictive pattern.
+    #   count == nil means every per-type query errored or timed out
+    #     against WDQS (catastrophic case: P131* + broad classes). Pro
+    #     re-running the same shape just doubles the wasted wall time.
+    #     Surface the failure so the user can simplify.
+    if count == 0 && model == :flash
+      check_deadline!
       # We're going back to Gemini, so the phase label needs to flip
       # away from "counting" — otherwise the polling UI shows "Counting
       # matches in Wikidata…" for the 30-60s the Pro call takes, which
@@ -66,12 +77,15 @@ class AiGenerationPipeline
         progress_message: "Flash matched 0 — trying again with a stronger model…"
       )
       pro_result = retry_on_pro(conversation[0..-2])
+      bail_if_canceled!
       if pro_result && !pro_result[:cannot_answer]
         ai_result = pro_result
         conversation[-1] = { role: "model", text: ai_result.to_json }
+        check_deadline!
         # Re-enter the counting phase for the Pro answer's recount.
         @generation.update!(phase: "counting", progress_message: nil)
         count = safe_count(ai_result[:sparql_pattern], fetch_strategy: ai_result[:fetch_strategy])
+        bail_if_canceled!
         @generation.update!(
           model_used:        "pro",
           conversation_json: conversation.to_json,
@@ -81,21 +95,62 @@ class AiGenerationPipeline
       end
     end
 
+    # Count failed entirely (every per-type query errored/timed out).
+    # Don't pay another fan-out wall for a sample that will fail the
+    # same way. Mark failed with an actionable message.
+    if count.nil?
+      @generation.update!(
+        status:           "failed",
+        phase:            nil,
+        progress_message: nil,
+        error:            "Wikidata is too busy or this query is too expensive. Try simplifying your prompt (narrower region, fewer categories), or wait a minute and try again."
+      )
+      return
+    end
+
+    check_deadline!
     @generation.update!(phase: "sampling", progress_message: nil)
     preview = safe_sample(
       ai_result[:sparql_pattern],
-      image_source: ai_result[:image_source],
       fetch_strategy: ai_result[:fetch_strategy]
     )
+    bail_if_canceled!
 
     @generation.update!(
       status:       "completed",
       phase:        nil,
       preview_json: preview.to_json
     )
+  rescue Canceled
+    # User-initiated cancel hit a checkpoint. Leave status as "canceled"
+    # (set by the cancel endpoint); just clear the per-phase noise.
+    @generation.update_columns(phase: nil, progress_message: nil)
   end
 
   private
+
+  # Re-reads status from DB; raises Canceled if the cancel endpoint
+  # has flipped the row to "canceled". The rescue Canceled at the
+  # bottom of run handles cleanup (clearing phase/progress_message).
+  def bail_if_canceled!
+    raise Canceled if @generation.reload.status == "canceled"
+  end
+
+  # Belt-and-suspenders deadline guard. If the wall budget is blown,
+  # mark failed with a clear message and raise Canceled to short-
+  # circuit through the same exit path. The rescue's update_columns
+  # leaves status="failed" intact (only touches phase/progress_message).
+  def check_deadline!
+    return unless @start_time && (Time.current - @start_time) > MAX_DURATION
+    @generation.update!(
+      status:           "failed",
+      phase:            nil,
+      progress_message: nil,
+      error:            "Generation took too long (#{MAX_DURATION}s budget). Try simplifying your prompt."
+    )
+    raise Canceled
+  end
+
 
   # Same fallback shape as the prior synchronous controller helper:
   # try Flash first; if Flash throws (rate limit / malformed beyond
@@ -141,11 +196,10 @@ class AiGenerationPipeline
     nil
   end
 
-  def safe_sample(pattern, image_source:, fetch_strategy:)
+  def safe_sample(pattern, fetch_strategy:)
     t0 = Time.now
     rows = WikidataImporter.sample(
-      pattern: pattern, image_source: image_source,
-      limit: 30, fetch_strategy: fetch_strategy
+      pattern: pattern, limit: 30, fetch_strategy: fetch_strategy
     )
     Rails.logger.info "[ai_sample] #{(Time.now - t0).round(2)}s -> #{rows.size} rows"
     rows

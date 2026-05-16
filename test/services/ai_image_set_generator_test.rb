@@ -30,13 +30,11 @@ class AiImageSetGeneratorTest < ActiveSupport::TestCase
       sparql_pattern: "?item wdt:P31 wd:Q8072 .",
       set_name:       "Volcanoes",
       explanation:    "Finding volcanoes.",
-      image_source:   "wikipedia_pageimages",
       cannot_answer:  false
     }
     queue_gemini_responses([ submit_answer_envelope(args) ]) do
       r = gen.generate(conversation: [ { role: "user", text: "volcanoes" } ])
       assert_equal "Volcanoes", r[:set_name]
-      assert_equal "wikipedia_pageimages", r[:image_source]
       refute r[:cannot_answer]
     end
   end
@@ -54,7 +52,6 @@ class AiImageSetGeneratorTest < ActiveSupport::TestCase
           sparql_pattern: "?item wdt:P31/wdt:P279* wd:Q8072 ; wdt:P625 ?coord .",
           set_name:       "Volcanoes",
           explanation:    "Finding volcanoes.",
-          image_source:   "wikipedia_pageimages",
           cannot_answer:  false
         )
       ]) do
@@ -78,8 +75,7 @@ class AiImageSetGeneratorTest < ActiveSupport::TestCase
     gen = AiImageSetGenerator.new(api_key: "stub")
     args = {
       sparql_pattern: "SELECT * WHERE { ?item wdt:P31 wd:Q8072 . }",
-      set_name: "X", explanation: "x",
-      image_source: "wikipedia_pageimages", cannot_answer: false
+      set_name: "X", explanation: "x", cannot_answer: false
     }
     queue_gemini_responses([ submit_answer_envelope(args) ]) do
       assert_raises(AiImageSetGenerator::InvalidResponseError) do
@@ -93,7 +89,7 @@ class AiImageSetGeneratorTest < ActiveSupport::TestCase
     args = {
       sparql_pattern: "?item wdt:P31 wd:Q46831 ; wdt:P2043 ?len ; wdt:P625 ?coord . FILTER(?len > 500)",
       set_name: "Major Mountain Ranges", explanation: "Ranges over 500 km.",
-      image_source: "wikipedia_pageimages", cannot_answer: false
+      cannot_answer: false
     }
     queue_gemini_responses([ submit_answer_envelope(args) ]) do
       r = gen.generate(conversation: [ { role: "user", text: "major mountain ranges" } ])
@@ -107,7 +103,6 @@ class AiImageSetGeneratorTest < ActiveSupport::TestCase
       sparql_pattern: "",
       set_name: "Ramen Shops",
       explanation: "Wikidata doesn't list restaurants.",
-      image_source: "wikipedia_pageimages",
       cannot_answer: true
     }
     queue_gemini_responses([ submit_answer_envelope(args) ]) do
@@ -124,19 +119,6 @@ class AiImageSetGeneratorTest < ActiveSupport::TestCase
       assert_raises(AiImageSetGenerator::RateLimitError) do
         gen.generate(conversation: [ { role: "user", text: "x" } ])
       end
-    end
-  end
-
-  test "image_source falls back to pageimages on unknown value" do
-    gen = AiImageSetGenerator.new(api_key: "stub")
-    args = {
-      sparql_pattern: "?item wdt:P31 wd:Q8072 .",
-      set_name: "x", explanation: "x",
-      image_source: "garbage", cannot_answer: false
-    }
-    queue_gemini_responses([ submit_answer_envelope(args) ]) do
-      r = gen.generate(conversation: [ { role: "user", text: "x" } ])
-      assert_equal "wikipedia_pageimages", r[:image_source]
     end
   end
 

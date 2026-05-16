@@ -14,7 +14,6 @@ class AiGenerationPipelineTest < ActiveSupport::TestCase
     sparql_pattern: "?item wdt:P31 wd:Q8072 ; wdt:P625 ?coord .",
     set_name:       "Volcanoes",
     explanation:    "Volcanoes worldwide.",
-    image_source:   "wikipedia_pageimages",
     cannot_answer:  false
   }.freeze
 
@@ -97,13 +96,38 @@ class AiGenerationPipelineTest < ActiveSupport::TestCase
     assert_equal "Volcanoes (better)", gen.result[:set_name]
   end
 
-  test "Wikidata count failure leaves result_count nil but generation completes" do
+  test "Wikidata count failure marks generation failed with actionable message; skips sample" do
     gen = AiGeneration.create!(
       user: @user, status: "pending", user_message: "volcanoes",
       conversation_json: [ { role: "user", text: "volcanoes" } ].to_json
     )
+    sample_called = false
 
     with_stubbed_generator(returns: AI_RESULT) do
+      raising = ->(*_a, **_k) { raise WikidataImporter::Error, "WDQS 500" }
+      stub_class_method(WikidataImporter, :count, raising) do
+        record_sample = ->(*_a, **_k) { sample_called = true; [] }
+        stub_class_method(WikidataImporter, :sample, record_sample) do
+          AiGenerationPipeline.new(generation: gen).run
+        end
+      end
+    end
+
+    gen.reload
+    assert_equal "failed", gen.status
+    assert_nil gen.result_count
+    assert_match(/too busy|too expensive/i, gen.error.to_s)
+    refute sample_called, "sample should not be attempted when count fails"
+  end
+
+  test "nil count does NOT trigger Pro retry (only count == 0 does)" do
+    gen = AiGeneration.create!(
+      user: @user, status: "pending", user_message: "volcanoes",
+      conversation_json: [ { role: "user", text: "volcanoes" } ].to_json
+    )
+    generator_calls = 0
+
+    with_stubbed_generator_counting(returns: AI_RESULT, counter: -> { generator_calls += 1 }) do
       raising = ->(*_a, **_k) { raise WikidataImporter::Error, "WDQS 500" }
       stub_class_method(WikidataImporter, :count, raising) do
         stub_class_method(WikidataImporter, :sample, []) do
@@ -112,12 +136,55 @@ class AiGenerationPipelineTest < ActiveSupport::TestCase
       end
     end
 
+    assert_equal 1, generator_calls, "Pro retry should NOT fire on nil count"
     gen.reload
-    assert_equal "completed", gen.status
-    assert_nil gen.result_count
+    assert_equal "failed", gen.status
+  end
+
+  test "cancel before run bails immediately at the first checkpoint" do
+    gen = AiGeneration.create!(
+      user: @user, status: "canceled", user_message: "volcanoes",
+      conversation_json: [ { role: "user", text: "volcanoes" } ].to_json
+    )
+    # Even though pipeline.run will set status:"running" first, the
+    # first reload-based checkpoint after the generator call will see
+    # status:"canceled" written by another request (simulated by the
+    # generator stub flipping the row).
+    flip_to_canceled = lambda do |conversation:|
+      gen.update_columns(status: "canceled")
+      AI_RESULT
+    end
+    original = AiImageSetGenerator.instance_method(:generate)
+    AiImageSetGenerator.define_method(:generate, &flip_to_canceled)
+    begin
+      count_called = false
+      stub_class_method(WikidataImporter, :count, ->(*_a, **_k) { count_called = true; 0 }) do
+        AiGenerationPipeline.new(generation: gen).run
+      end
+      refute count_called, "count should not run after cancel"
+    ensure
+      AiImageSetGenerator.define_method(:generate, original)
+    end
+
+    gen.reload
+    assert_equal "canceled", gen.status
+    assert_nil gen.phase
   end
 
   private
+
+  # Variant of with_stubbed_generator that also counts invocations.
+  def with_stubbed_generator_counting(returns:, counter:)
+    original = AiImageSetGenerator.instance_method(:generate)
+    AiImageSetGenerator.define_method(:generate) do |conversation:|
+      counter.call
+      returns
+    end
+    yield
+  ensure
+    AiImageSetGenerator.define_method(:generate, original)
+  end
+
 
   def sample_row(title)
     {

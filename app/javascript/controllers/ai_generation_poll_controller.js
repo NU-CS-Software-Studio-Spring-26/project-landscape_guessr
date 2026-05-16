@@ -52,10 +52,10 @@ export default class extends Controller {
       this.errorCount = 0
       this.#render(data)
 
-      // Terminal states: hand off to a full server-side render. Both
-      // completed and failed reload so the user sees the failure card
-      // or the result card depending on what happened.
-      if (data.status === "completed" || data.status === "failed") {
+      // Terminal states: hand off to a full server-side render so the
+      // user sees the right card (result / failure / canceled) for
+      // whatever happened.
+      if (data.status === "completed" || data.status === "failed" || data.status === "canceled") {
         window.location.reload()
         return
       }

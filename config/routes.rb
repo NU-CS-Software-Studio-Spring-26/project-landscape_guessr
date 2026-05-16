@@ -54,6 +54,7 @@ Rails.application.routes.draw do
   # image_sets resource because an AiGeneration isn't tied to a specific
   # set — it's the AI's PROPOSAL, before any ImageSet has been created.
   get "/ai_generations/:id/status", to: "image_sets#ai_generation_status", as: :ai_generation_status
+  post "/ai_generations/:id/cancel", to: "image_sets#ai_generation_cancel", as: :ai_generation_cancel
 
   get  "practice",       to: "practice#show"
   get  "practice/check", to: "practice#check", as: :practice_check

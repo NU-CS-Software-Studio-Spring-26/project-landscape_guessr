@@ -111,11 +111,10 @@ class AiImageSetGenerator
             sparql_pattern: { type: "STRING" },
             set_name:       { type: "STRING" },
             explanation:    { type: "STRING" },
-            image_source:   { type: "STRING" },
             fetch_strategy: { type: "STRING" },
             cannot_answer:  { type: "BOOLEAN" }
           },
-          required: %w[sparql_pattern set_name explanation image_source fetch_strategy cannot_answer]
+          required: %w[sparql_pattern set_name explanation fetch_strategy cannot_answer]
         }
       }
     ]
@@ -139,7 +138,7 @@ class AiImageSetGenerator
   # element with role: "user".
   #
   # Returns a parsed hash with keys :sparql_pattern, :set_name,
-  # :explanation, :image_source, :cannot_answer. Function-call loop is
+  # :explanation, :fetch_strategy, :cannot_answer. Function-call loop is
   # internal; the returned hash is what submit_answer received.
   #
   # Logs per-round elapsed time + tool name on every round, plus a
@@ -385,14 +384,9 @@ class AiImageSetGenerator
       sparql_pattern: args["sparql_pattern"].to_s,
       set_name:       args["set_name"].to_s.strip.presence || "Untitled AI Set",
       explanation:    args["explanation"].to_s.strip,
-      image_source:   args["image_source"].to_s,
       fetch_strategy: args["fetch_strategy"].to_s,
       cannot_answer:  args["cannot_answer"] == true
     }
-
-    unless %w[wikidata_p18 wikipedia_pageimages].include?(payload[:image_source])
-      payload[:image_source] = "wikipedia_pageimages"
-    end
 
     # Default to exhaustive if unrecognized — safe (matches pre-strategy
     # behavior). The WikidataImporter ALSO validates and may override
@@ -436,6 +430,20 @@ class AiImageSetGenerator
 
       UNIVERSAL PROPERTIES (no need to search for these):
       #{UNIVERSAL_PROPERTIES}
+
+      REFINEMENT TURNS:
+      If the conversation has prior turns, the user is refining a
+      previous answer of yours. PRESERVE every constraint from earlier
+      turns unless the user explicitly removes one. Constraints
+      include: region/country filters, class/category filters, time-
+      period filters, count caps, attribute thresholds. Silently
+      dropping a constraint is a failure mode — if you can't tell
+      whether the user meant to drop a constraint, keep it.
+
+      Example: turn 1 = "volcanoes in Japan" → you generated wd:Q8072
+      + wd:Q17. Turn 2 = "include extinct ones too" → keep Japan AND
+      the volcano class, add the extinct-volcano alternative. Do NOT
+      regenerate as "volcanoes worldwide".
 
       WORKFLOW:
       1. Identify the entities and relationships in the user's request.
@@ -490,8 +498,6 @@ class AiImageSetGenerator
         a recorded length > 500 km. Want a different cutoff?"
       - set_name: 4-6 words, Title Case ("Volcanoes of Japan").
       - explanation: 1-2 plain-English sentences, no jargon.
-      - image_source: MUST be exactly "wikipedia_pageimages" (default)
-        or "wikidata_p18". No other values.
       - fetch_strategy: MUST be exactly "exhaustive" or "random_sample".
         See the FETCH STRATEGY section below for which to pick.
       - cannot_answer: boolean. true to refuse, false to provide a pattern.
@@ -564,18 +570,25 @@ class AiImageSetGenerator
         small private buildings, individual residences, local
         businesses, social media accounts, recent events, people below
         encyclopedic-celebrity threshold.
+      - The request is about ONE specific named subject — "photos of
+        the Eiffel Tower", "Mt. Fuji from different angles", "the
+        Statue of Liberty". Our pipeline returns ONE photo per matched
+        Wikidata item, so a single-subject request only yields 1
+        image. Refuse and suggest a category alternative ("photos of
+        famous towers worldwide?").
+
+        Do NOT misapply this to "category in region" requests, which
+        DO fit fine — they fan out across many items. Examples that
+        should NOT trigger this refusal: "nature in Massachusetts"
+        (lakes, mountains, parks — many items), "buildings by Frank
+        Lloyd Wright" (many items, each a building), "lighthouses
+        worldwide" (many items), "street scenes in Tokyo" if
+        interpreted as famous-streets-in-Tokyo (each is its own item).
       - The user's request is too vague to model ("stuff", "things",
         "some images").
       - Search results don't give you a confident Q-ID for the
         CATEGORY (i.e. the kind of thing you'd P31-match) after 2-3
         rephrasings. Don't guess.
-
-      IMAGE SOURCE:
-      - Default "wikipedia_pageimages" — fresher, editorially-curated
-        infobox photo from the English Wikipedia article.
-      - Use "wikidata_p18" only for very obscure long-tail categories
-        where most items won't have English Wikipedia articles, OR if
-        the user explicitly asks for "fast".
 
       FETCH STRATEGY (required field):
 
@@ -653,6 +666,44 @@ class AiImageSetGenerator
       50m, population > 100k), the property alone matches too many
       items — keep P31.
 
+      PERFORMANCE — Sub-national region filters with broad classes:
+
+      Country-level filters (`wdt:P17 wd:Q##`) are direct and cheap —
+      use them freely.
+
+      But for region filters SMALLER than a country (US states,
+      French départements, counties, cities), the standard
+      `wdt:P131* wd:Q##` containment pattern combined with broad or
+      umbrella class lists consistently times out WDQS. WDQS has to
+      walk the recursive P131 chain for every candidate item, which
+      explodes when the candidate set is large.
+
+      For sub-national region filters, do ONE of these:
+
+      1. **Narrow the classes.** Pick 1-3 specific classes rather
+         than a broad umbrella. For "nature in Massachusetts": just
+         lakes + state parks, not 15 nature sub-types. Acknowledge
+         the trade-off in your explanation ("I focused on lakes and
+         state parks — let me know if you want other features").
+
+      2. **Coordinate bounding box** (for famously-bounded regions
+         where you can recall an approximate BBOX from common
+         knowledge — US states, large countries, well-known cities).
+         Drop the P131 triple entirely and FILTER on coordinates:
+
+           ?item wdt:P31/wdt:P279* wd:Q##### ; wdt:P625 ?coord .
+           BIND(geof:latitude(?coord) AS ?lat)
+           BIND(geof:longitude(?coord) AS ?lng)
+           FILTER(?lat >= 41.0 && ?lat <= 43.0 &&
+                  ?lng >= -73.5 && ?lng <= -69.9)
+
+         Don't fabricate BBOX numbers for regions you don't know.
+         When in doubt, prefer option 1.
+
+      NEVER combine `wdt:P131*` with 5+ classes in a UNION for a
+      sub-national region — that pattern is the catastrophic failure
+      case we've measured.
+
       EXPLANATION STYLE:
       - Plain English, friendly, no jargon.
       - Bad: "Filters wd:Q8072 via wdt:P31/wdt:P279* with wdt:P17 wd:Q17."
@@ -671,7 +722,6 @@ class AiImageSetGenerator
           sparql_pattern: "?item wdt:P31/wdt:P279* wd:Q8072 ; wdt:P17 wd:Q17 ; wdt:P625 ?coord .",
           set_name: "Volcanoes of Japan",
           explanation: "I'll find volcanoes located in Japan that have photos.",
-          image_source: "wikipedia_pageimages",
           fetch_strategy: "exhaustive",
           cannot_answer: false
         )

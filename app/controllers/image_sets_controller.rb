@@ -414,12 +414,9 @@ class ImageSetsController < ApplicationController
   # POST /image_sets/ai_create
   #
   # User has approved the preview. We source the AI fields (sparql
-  # pattern, explanation, model, default image source) from the
-  # AiGeneration record — not from hidden form fields — so a user
-  # can't bypass parse_submit's SPARQL validation by editing the
-  # hidden `ai_query` in devtools. The only AI field the user can
-  # override via the form is `ai_image_source` (Wikidata vs Wikipedia
-  # photos), which is bounded by an explicit allow-list anyway.
+  # pattern, explanation, model) from the AiGeneration record — not
+  # from hidden form fields — so a user can't bypass parse_submit's
+  # SPARQL validation by editing the hidden `ai_query` in devtools.
   def ai_create
     gen = Current.user.ai_generations.find_by(id: params[:generation_id])
     if gen.nil? || gen.status != "completed" || gen.result.nil? ||
@@ -432,11 +429,6 @@ class ImageSetsController < ApplicationController
     end
 
     result = gen.result
-    image_source = if %w[wikidata_p18 wikipedia_pageimages].include?(params[:ai_image_source])
-      params[:ai_image_source]
-    else
-      result[:image_source]
-    end
     fetch_strategy = if %w[exhaustive random_sample].include?(result[:fetch_strategy])
       result[:fetch_strategy]
     else
@@ -450,7 +442,6 @@ class ImageSetsController < ApplicationController
       ai_query:          result[:sparql_pattern],
       ai_explanation:    result[:explanation].to_s,
       ai_model:          gen.model_used.presence || "flash",
-      ai_image_source:   image_source,
       ai_fetch_strategy: fetch_strategy,
       import_state:      "pending"
     )
@@ -461,6 +452,23 @@ class ImageSetsController < ApplicationController
     else
       redirect_to ai_new_image_sets_path, alert: image_set.errors.full_messages.join("; ")
     end
+  end
+
+  # POST /ai_generations/:id/cancel
+  #
+  # Flip the row to "canceled" so the polling UI stops + the pipeline
+  # bails at its next phase checkpoint. In-flight Wikidata threads
+  # finish on their own (we can't interrupt mid-Net::HTTP cleanly) but
+  # their results are discarded. Idempotent: cancelling an already-
+  # completed/failed generation is a no-op.
+  def ai_generation_cancel
+    gen = Current.user.ai_generations.find(params[:id])
+    if gen.in_progress?
+      gen.update!(status: "canceled", phase: nil, progress_message: nil)
+    end
+    redirect_to ai_new_image_sets_path
+  rescue ActiveRecord::RecordNotFound
+    redirect_to ai_new_image_sets_path
   end
 
   # POST /image_sets/1/retry_import

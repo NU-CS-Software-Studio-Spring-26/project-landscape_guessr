@@ -237,7 +237,6 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
         sparql_pattern: "?item wdt:P31 wd:Q8072 .",
         set_name:       "Volcanoes of Japan",
         explanation:    "Finding volcanoes.",
-        image_source:   "wikipedia_pageimages",
         cannot_answer:  false
       }.to_json
     )
@@ -247,15 +246,13 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
         post ai_create_image_sets_path, params: {
           generation_id: gen.id,
           name:          "Volcanoes of Japan",
-          visibility:    "private",
-          ai_image_source: "wikidata_p18"
+          visibility:    "private"
         }
       end
     end
     set = ImageSet.last
     assert_equal "Volcanoes of Japan", set.name
     assert_equal "?item wdt:P31 wd:Q8072 .", set.ai_query
-    assert_equal "wikidata_p18", set.ai_image_source # user toggle honored
     assert_equal "flash", set.ai_model
     assert_equal "pending", set.import_state
     assert_redirected_to set
@@ -266,7 +263,7 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
       user: @alice, status: "completed", user_message: "x",
       result_json: { sparql_pattern: "?item wdt:P31 wd:Q8072 .",
                      set_name: "X", explanation: "x",
-                     image_source: "wikidata_p18", cannot_answer: false }.to_json
+                     cannot_answer: false }.to_json
     )
     post ai_create_image_sets_path, params: {
       generation_id: gen.id, name: "X", visibility: "wide-open"
@@ -279,7 +276,7 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
       user: @bob, status: "completed", user_message: "x",
       result_json: { sparql_pattern: "?item wdt:P31 wd:Q1 .",
                      set_name: "X", explanation: "x",
-                     image_source: "wikidata_p18", cannot_answer: false }.to_json
+                     cannot_answer: false }.to_json
     )
     assert_no_difference("ImageSet.count") do
       post ai_create_image_sets_path, params: { generation_id: gen.id, name: "X" }
@@ -385,5 +382,32 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
     get import_status_image_set_path(set), headers: { "Accept" => "application/json" }
     assert_response :forbidden
     assert_equal "application/json", response.media_type
+  end
+
+  # === Cancel an in-flight AI generation ===
+
+  test "ai_generation_cancel flips an in-progress record to canceled and redirects" do
+    gen = AiGeneration.create!(user: @alice, status: "running", phase: "counting",
+                                user_message: "x")
+    post ai_generation_cancel_path(gen.id)
+    assert_redirected_to ai_new_image_sets_path
+    gen.reload
+    assert_equal "canceled", gen.status
+    assert_nil gen.phase
+  end
+
+  test "ai_generation_cancel is a no-op on already-completed records" do
+    gen = AiGeneration.create!(user: @alice, status: "completed", user_message: "x")
+    post ai_generation_cancel_path(gen.id)
+    gen.reload
+    assert_equal "completed", gen.status
+  end
+
+  test "ai_generation_cancel 404s (silently redirects) for another user's record" do
+    gen = AiGeneration.create!(user: @bob, status: "running", user_message: "x")
+    post ai_generation_cancel_path(gen.id)
+    assert_redirected_to ai_new_image_sets_path
+    # Bob's record was NOT canceled — alice can't cancel it.
+    assert_equal "running", gen.reload.status
   end
 end

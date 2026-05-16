@@ -8,7 +8,7 @@
 class AiGeneration < ApplicationRecord
   belongs_to :user
 
-  STATUSES = %w[pending running completed failed].freeze
+  STATUSES = %w[pending running completed failed canceled].freeze
   PHASES   = %w[thinking counting sampling].freeze
 
   validates :status, inclusion: { in: STATUSES }
@@ -24,6 +24,10 @@ class AiGeneration < ApplicationRecord
 
   def in_progress?
     %w[pending running].include?(status) && !stale?
+  end
+
+  def canceled?
+    status == "canceled"
   end
 
   # JSON accessors. Round-trip the text columns through JSON so the
