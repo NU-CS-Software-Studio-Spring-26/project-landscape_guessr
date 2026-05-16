@@ -26,22 +26,17 @@ export default class extends Controller {
   }
 
   submit(_event) {
-    if (this.hasSubmitTarget) {
-      this.submitTarget.disabled = true
-      this.submitTarget.setAttribute("aria-busy", "true")
-    }
-    // Reset the textarea synchronously so the Turbo snapshot taken on
-    // navigation already has empty fields. before-cache is the backstop
-    // for the no-submit case (user types, navigates away without
-    // submitting); submit-time clear handles the submit→back path.
-    this.#clearTextFields()
+    if (!this.hasSubmitTarget) return
+    this.submitTarget.disabled = true
+    this.submitTarget.setAttribute("aria-busy", "true")
+    // DON'T reset textareas here. The browser collects form data AFTER
+    // the submit-event handler chain, so a synchronous reset blanks
+    // the values the browser then sends — server gets user_message=""
+    // and rejects with "type a prompt first." Cache cleanup happens
+    // later via turbo:before-cache.
   }
 
   #clearForCache() {
-    this.#clearTextFields()
-  }
-
-  #clearTextFields() {
     this.element.querySelectorAll("textarea, input[type='text']").forEach((el) => {
       el.value = el.defaultValue
     })
