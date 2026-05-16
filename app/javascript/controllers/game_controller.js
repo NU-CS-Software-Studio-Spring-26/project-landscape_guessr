@@ -9,6 +9,9 @@ export default class extends Controller {
     this.guessLng = null
     this.#pendingNavigation = null
     this.#isBypassingGuard = false
+    this.#prefetchedNextUrl = null
+    this.#prefetchedImage = null
+    this.#nextPrefetchController = null
     this.timerHandle = null
     this.secondsRemaining = 0
     this.#boundKeydown = this.#handleKeydown.bind(this)
@@ -33,6 +36,7 @@ export default class extends Controller {
     window.removeEventListener("beforeunload", this.#boundBeforeUnload)
     document.body.classList.remove("overflow-hidden")
     this.#stopTimer()
+    this.#clearNextPrefetch()
   }
 
   pinChanged(event) {
@@ -121,6 +125,8 @@ export default class extends Controller {
       mapCtrl.showOtherGuesses(data.other_guesses, answerLat, answerLng)
       this.#renderOtherGuesses(data.other_guesses, answerLat, answerLng)
     }
+
+    this.#prefetchNextRound()
   }
 
   nextRound() {
@@ -128,7 +134,9 @@ export default class extends Controller {
     // Turbo.visit (not window.location.href) so the JS context survives
     // and the MapTiler session stays the same across rounds — a hard nav
     // would mint a new mtsid per round and burn 5× the session quota.
-    Turbo.visit(this.gamePathValue)
+    const url = this.#prefetchedNextUrl || this.gamePathValue
+    this.#clearNextPrefetch()
+    Turbo.visit(url)
   }
 
   #boundKeydown
@@ -138,6 +146,9 @@ export default class extends Controller {
   #boundBeforeUnload
   #pendingNavigation
   #isBypassingGuard
+  #nextPrefetchController
+  #prefetchedNextUrl
+  #prefetchedImage
 
   #handleKeydown(event) {
     if (this.#modalOpen()) {
@@ -235,6 +246,53 @@ export default class extends Controller {
 
   #storeTimerPreference() {
     window.localStorage.setItem("landscape-guessr:round-timer", this.timerSelectTarget.value)
+  }
+
+  async #prefetchNextRound() {
+    this.#clearNextPrefetch()
+    const controller = new AbortController()
+    this.#nextPrefetchController = controller
+
+    try {
+      const res = await fetch(this.gamePathValue, {
+        headers: { "Accept": "text/html" },
+        credentials: "same-origin",
+        signal: controller.signal
+      })
+      if (!res.ok) return
+
+      const html = await res.text()
+      if (controller.signal.aborted) return
+
+      const nextUrl = res.url || this.gamePathValue
+      this.#prefetchedNextUrl = nextUrl
+
+      // Warm image cache only when the next response is another round page.
+      const doc = new DOMParser().parseFromString(html, "text/html")
+      const image = doc.querySelector("img[data-zoomable-target='image']")
+      const imageSrc = image?.getAttribute("src")
+      if (!imageSrc) return
+
+      this.#prefetchedImage = new Image()
+      this.#prefetchedImage.decoding = "async"
+      this.#prefetchedImage.src = imageSrc
+    } catch (error) {
+      if (error?.name !== "AbortError") this.#clearNextPrefetch()
+      return
+    } finally {
+      if (this.#nextPrefetchController === controller) {
+        this.#nextPrefetchController = null
+      }
+    }
+  }
+
+  #clearNextPrefetch() {
+    if (this.#nextPrefetchController) {
+      this.#nextPrefetchController.abort()
+      this.#nextPrefetchController = null
+    }
+    this.#prefetchedNextUrl = null
+    this.#prefetchedImage = null
   }
 
   #renderOtherGuesses(guesses, answerLat, answerLng) {
