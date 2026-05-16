@@ -146,14 +146,32 @@ export default class extends Controller {
       return
     }
 
-    if (event.code !== "Space") return
-    event.preventDefault()
+    if (event.defaultPrevented) return
+    if (event.altKey || event.ctrlKey || event.metaKey) return
+    if (this.#isEditableTarget(event.target)) return
 
-    if (!this.submitTarget.classList.contains("hidden") && !this.submitTarget.disabled) {
-      this.submitTarget.click()
-    } else if (!this.nextTarget.classList.contains("hidden")) {
-      this.nextRound()
+    const key = String(event.key || "").toLowerCase()
+    const canSubmit = !this.submitTarget.classList.contains("hidden") && !this.submitTarget.disabled
+    const canNext = !this.nextTarget.classList.contains("hidden")
+
+    if (event.code === "Space" || event.key === "Enter") {
+      event.preventDefault()
+      if (canSubmit) this.submitTarget.click()
+      else if (canNext) this.nextRound()
+      return
     }
+
+    if (key === "n" && canNext) {
+      event.preventDefault()
+      this.nextRound()
+      return
+    }
+  }
+
+  #isEditableTarget(target) {
+    if (!(target instanceof Element)) return false
+    if (target.closest("input, textarea, select")) return true
+    return target.closest("[contenteditable=''], [contenteditable='true']") !== null
   }
 
   async #prefetchNextRound() {

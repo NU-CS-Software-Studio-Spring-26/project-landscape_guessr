@@ -53,7 +53,7 @@
                     class: "btn-secondary text-sm py-1.5 px-3" %>
             <% else %>
               <%= link_to "Sign in",  new_session_path,      class: "btn-secondary text-sm py-1.5 px-3" %>
-              <%= link_to "Sign up",  new_registration_path, class: "btn-primary  text-sm py-1.5 px-3" %>
+              <%= link_to "Sign up",  new_registration_path, class: "btn-primary text-sm py-1.5 px-3" %>
             <% end %>
           </div>
 
@@ -85,11 +85,11 @@
            hidden>
         <div class="px-4 py-3 space-y-1">
           <% if authenticated? %>
-            <%= link_to "How scoring works", scoring_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <%= link_to "Games",      games_path,      data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <%= link_to "Image Sets", image_sets_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <%= link_to "Challenges", challenges_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <%= link_to "Practice",   practice_path,   data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
+            <%= link_to "How scoring works", scoring_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <div class="pt-3 border-t border-forest-100 flex items-center justify-between">
               <%= link_to Current.user.username, profile_path,
                     data: { action: "mobile-menu#close" },
@@ -98,12 +98,12 @@
                     class: "btn-secondary text-sm py-1.5 px-3" %>
             </div>
           <% else %>
-            <%= link_to "Sign in",  new_session_path,      data: { action: "mobile-menu#close" }, class: "btn-primary w-full text-center block" %>
+            <%= link_to "Sign in",  new_session_path,      data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-600 hover:text-forest-800 underline underline-offset-2 transition-colors" %>
             <%= link_to "Practice", practice_path,         data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
-            <%= link_to "How scoring works", scoring_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <%= link_to "About",    about_path,            data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
+            <%= link_to "How scoring works", scoring_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <div class="pt-3">
-              <%= link_to "Sign up free", new_registration_path, class: "btn-primary w-full text-center block" %>
+              <%= link_to "Sign up", new_registration_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-600 hover:text-forest-800 underline underline-offset-2 transition-colors" %>
             </div>
           <% end %>
         </div>

@@ -1,10 +1,45 @@
 import { Controller } from "@hotwired/stimulus"
 import { MAPTILER_KEY } from "lib/maptiler"
 
-const HINT_RADIUS_OPTIONS_KM = [0, 500, 750, 1000, 1500, 2000, 3000, 4000]
+const HINT_RADIUS_MIN_KM = 0
+const HINT_RADIUS_MAX_KM = 5000
+const HINT_RADIUS_STEP_KM = 50
+const HINT_RADIUS_DEFAULT_ENABLED_KM = 5000
+const CONTINENT_BY_COUNTRY_CODE = Object.freeze({
+  AF: "Asia", AX: "Europe", AL: "Europe", DZ: "Africa", AS: "Oceania", AD: "Europe", AO: "Africa", AI: "North America", AQ: "Antarctica",
+  AG: "North America", AR: "South America", AM: "Asia", AW: "North America", AU: "Oceania", AT: "Europe", AZ: "Asia", BS: "North America",
+  BH: "Asia", BD: "Asia", BB: "North America", BY: "Europe", BE: "Europe", BZ: "North America", BJ: "Africa", BM: "North America",
+  BT: "Asia", BO: "South America", BA: "Europe", BW: "Africa", BV: "Antarctica", BR: "South America", IO: "Asia", BN: "Asia",
+  BG: "Europe", BF: "Africa", BI: "Africa", CV: "Africa", KH: "Asia", CM: "Africa", CA: "North America", KY: "North America",
+  CF: "Africa", TD: "Africa", CL: "South America", CN: "Asia", CX: "Asia", CC: "Asia", CO: "South America", KM: "Africa", CG: "Africa",
+  CD: "Africa", CK: "Oceania", CR: "North America", CI: "Africa", HR: "Europe", CU: "North America", CW: "North America", CY: "Asia",
+  CZ: "Europe", DK: "Europe", DJ: "Africa", DM: "North America", DO: "North America", EC: "South America", EG: "Africa", SV: "North America",
+  GQ: "Africa", ER: "Africa", EE: "Europe", SZ: "Africa", ET: "Africa", FK: "South America", FO: "Europe", FJ: "Oceania",
+  FI: "Europe", FR: "Europe", GF: "South America", PF: "Oceania", TF: "Antarctica", GA: "Africa", GM: "Africa", GE: "Asia",
+  DE: "Europe", GH: "Africa", GI: "Europe", GR: "Europe", GL: "North America", GD: "North America", GP: "North America", GU: "Oceania",
+  GT: "North America", GG: "Europe", GN: "Africa", GW: "Africa", GY: "South America", HT: "North America", HM: "Antarctica",
+  VA: "Europe", HN: "North America", HK: "Asia", HU: "Europe", IS: "Europe", IN: "Asia", ID: "Asia", IR: "Asia", IQ: "Asia",
+  IE: "Europe", IM: "Europe", IL: "Asia", IT: "Europe", JM: "North America", JP: "Asia", JE: "Europe", JO: "Asia", KZ: "Asia",
+  KE: "Africa", KI: "Oceania", KP: "Asia", KR: "Asia", KW: "Asia", KG: "Asia", LA: "Asia", LV: "Europe", LB: "Asia",
+  LS: "Africa", LR: "Africa", LY: "Africa", LI: "Europe", LT: "Europe", LU: "Europe", MO: "Asia", MG: "Africa", MW: "Africa",
+  MY: "Asia", MV: "Asia", ML: "Africa", MT: "Europe", MH: "Oceania", MQ: "North America", MR: "Africa", MU: "Africa", YT: "Africa",
+  MX: "North America", FM: "Oceania", MD: "Europe", MC: "Europe", MN: "Asia", ME: "Europe", MS: "North America", MA: "Africa",
+  MZ: "Africa", MM: "Asia", NA: "Africa", NR: "Oceania", NP: "Asia", NL: "Europe", NC: "Oceania", NZ: "Oceania", NI: "North America",
+  NE: "Africa", NG: "Africa", NU: "Oceania", NF: "Oceania", MK: "Europe", MP: "Oceania", NO: "Europe", OM: "Asia", PK: "Asia",
+  PW: "Oceania", PS: "Asia", PA: "North America", PG: "Oceania", PY: "South America", PE: "South America", PH: "Asia", PN: "Oceania",
+  PL: "Europe", PT: "Europe", PR: "North America", QA: "Asia", RE: "Africa", RO: "Europe", RU: "Europe", RW: "Africa", BL: "North America",
+  SH: "Africa", KN: "North America", LC: "North America", MF: "North America", PM: "North America", VC: "North America", WS: "Oceania",
+  SM: "Europe", ST: "Africa", SA: "Asia", SN: "Africa", RS: "Europe", SC: "Africa", SL: "Africa", SG: "Asia", SX: "North America",
+  SK: "Europe", SI: "Europe", SB: "Oceania", SO: "Africa", ZA: "Africa", GS: "Antarctica", SS: "Africa", ES: "Europe", LK: "Asia",
+  SD: "Africa", SR: "South America", SJ: "Europe", SE: "Europe", CH: "Europe", SY: "Asia", TW: "Asia", TJ: "Asia", TZ: "Africa",
+  TH: "Asia", TL: "Asia", TG: "Africa", TK: "Oceania", TO: "Oceania", TT: "North America", TN: "Africa", TR: "Asia", TM: "Asia",
+  TC: "North America", TV: "Oceania", UG: "Africa", UA: "Europe", AE: "Asia", GB: "Europe", UM: "Oceania", US: "North America",
+  UY: "South America", UZ: "Asia", VU: "Oceania", VE: "South America", VN: "Asia", VG: "North America", VI: "North America", WF: "Oceania",
+  EH: "Africa", YE: "Asia", ZM: "Africa", ZW: "Africa"
+})
 
 export default class extends Controller {
-  static targets = ["guessBtn", "nextBtn", "result", "imageLink", "timer", "timerBar", "timerPanel", "timerOption", "attemptsOption", "hintTypeOption", "hintRadiusPanel", "hintRadiusOption", "hintLocationPanel", "hintLocationOption", "hintReadout", "saveForm", "removeForm", "saveStatus"]
+  static targets = ["guessBtn", "nextBtn", "result", "imageLink", "timer", "timerBar", "timerPanel", "timerOption", "attemptsOption", "hintTypeOption", "hintRadiusPanel", "hintRadiusNoHintButton", "hintRadiusSlider", "hintRadiusValue", "hintLocationPanel", "hintLocationOption", "hintReadout", "saveForm", "removeForm", "saveStatus"]
   static values = {
     imageId: Number,
     checkUrl: String,
@@ -98,10 +133,17 @@ export default class extends Controller {
   }
 
   setHintRadius(event) {
-    const radius = parseInt(event.params.radius, 10)
-    if (!HINT_RADIUS_OPTIONS_KM.includes(radius)) return
+    const radius = parseInt(event.target?.value || "0", 10)
+    if (!Number.isFinite(radius)) return
     this.hintType = "radius"
-    this.hintRadiusKm = radius
+    this.hintRadiusKm = this.#normalizeHintRadiusKm(radius)
+    this.#applyHintSelection()
+  }
+
+  toggleHintRadiusNoHint() {
+    this.hintType = "radius"
+    if (this.hintRadiusKm <= 0) this.hintRadiusKm = HINT_RADIUS_DEFAULT_ENABLED_KM
+    else this.hintRadiusKm = 0
     this.#applyHintSelection()
   }
 
@@ -449,13 +491,20 @@ export default class extends Controller {
     if (this.hasHintRadiusPanelTarget) {
       this.hintRadiusPanelTarget.classList.toggle("hidden", this.hintType !== "radius")
     }
-    if (this.hasHintRadiusOptionTarget) {
-      this.hintRadiusOptionTargets.forEach((option) => {
-        const radius = parseInt(option.dataset.practiceRadiusParam || "0", 10)
-        const active = this.hintType === "radius" && radius === this.hintRadiusKm
-        option.setAttribute("aria-pressed", active ? "true" : "false")
-        this.#syncOptionButtonStyle(option, active)
-      })
+    const radiusNoHint = this.hintType === "radius" && this.hintRadiusKm <= 0
+    if (this.hasHintRadiusNoHintButtonTarget) {
+      this.hintRadiusNoHintButtonTarget.setAttribute("aria-pressed", radiusNoHint ? "true" : "false")
+      this.#syncOptionButtonStyle(this.hintRadiusNoHintButtonTarget, radiusNoHint)
+    }
+    if (this.hasHintRadiusSliderTarget) {
+      const sliderRadius = radiusNoHint ? HINT_RADIUS_DEFAULT_ENABLED_KM : this.hintRadiusKm
+      this.hintRadiusSliderTarget.value = String(sliderRadius)
+      this.hintRadiusSliderTarget.disabled = radiusNoHint
+      this.hintRadiusSliderTarget.classList.toggle("opacity-50", radiusNoHint)
+      this.hintRadiusSliderTarget.classList.toggle("cursor-not-allowed", radiusNoHint)
+    }
+    if (this.hasHintRadiusValueTarget) {
+      this.hintRadiusValueTarget.textContent = this.#hintRadiusLabel(this.hintRadiusKm)
     }
 
     if (this.hasHintLocationPanelTarget) {
@@ -514,8 +563,19 @@ export default class extends Controller {
     else if (type === "location") this.hintType = "location"
     else this.hintType = this.hintCircleValue ? "radius" : "off"
 
-    this.hintRadiusKm = HINT_RADIUS_OPTIONS_KM.includes(radius) ? radius : 0
+    this.hintRadiusKm = this.#normalizeHintRadiusKm(Number.isFinite(radius) ? radius : HINT_RADIUS_MIN_KM)
     this.hintLocationLevel = ["none", "continent", "country"].includes(level) ? level : "none"
+  }
+
+  #normalizeHintRadiusKm(radius) {
+    if (radius <= 0) return 0
+    const clamped = Math.max(HINT_RADIUS_MIN_KM, Math.min(HINT_RADIUS_MAX_KM, radius))
+    const stepped = Math.round(clamped / HINT_RADIUS_STEP_KM) * HINT_RADIUS_STEP_KM
+    return Math.max(HINT_RADIUS_MIN_KM, Math.min(HINT_RADIUS_MAX_KM, stepped))
+  }
+
+  #hintRadiusLabel(radiusKm) {
+    return radiusKm <= 0 ? "No hint" : `${radiusKm} km`
   }
 
   async #showLocationHint() {
@@ -525,7 +585,7 @@ export default class extends Controller {
       return
     }
 
-    this.hintLocationMessage = "Loading location hint…"
+    this.hintLocationMessage = ""
     this.#syncHintUi()
 
     const requestId = this.#hintLocationRequestId + 1
@@ -543,29 +603,44 @@ export default class extends Controller {
       return
     }
 
-    if (currentLevel === "country") {
-      this.hintLocationMessage = `Hint: Country — ${details.country || "Unknown"}`
-    } else {
-      this.hintLocationMessage = `Hint: Continent — ${details.continent || "Unknown"}`
-    }
+    this.hintLocationMessage = currentLevel === "country" ? (details.country || "Unknown") : (details.continent || "Unknown")
     this.#syncHintUi()
   }
 
   async #loadLocationHintDetails(lat, lng) {
     if (this.hintLocationDetails) return this.hintLocationDetails
 
+    let details = await this.#loadLocationHintDetailsFromMaptiler(lat, lng)
+    if (!details) {
+      // Fallback when MapTiler geocoding is unavailable/rate-limited.
+      details = await this.#loadLocationHintDetailsFromNominatim(lat, lng)
+    }
+    if (!details) return null
+
+    // Prefer deterministic continent resolution from country code.
+    if (details.countryCode) {
+      const mappedContinent = CONTINENT_BY_COUNTRY_CODE[details.countryCode]
+      if (mappedContinent) details.continent = mappedContinent
+    }
+
+    this.hintLocationDetails = details
+    return details
+  }
+
+  async #loadLocationHintDetailsFromMaptiler(lat, lng) {
     const endpoint = `https://api.maptiler.com/geocoding/${lng},${lat}.json?key=${encodeURIComponent(MAPTILER_KEY)}&language=en&limit=8`
     const res = await fetch(endpoint, { headers: { "Accept": "application/json" } })
     if (!res.ok) return null
 
     const payload = await res.json()
-    const details = { continent: "", country: "" }
+    const details = { continent: "", country: "", countryCode: "" }
     const features = Array.isArray(payload?.features) ? payload.features : []
 
     features.forEach((feature) => {
       const placeTypes = Array.isArray(feature?.place_type) ? feature.place_type : []
       if (!details.country && placeTypes.includes("country")) {
         details.country = feature?.text || feature?.place_name || ""
+        details.countryCode = this.#extractCountryCode(feature)
       }
       if (!details.continent && placeTypes.includes("continent")) {
         details.continent = feature?.text || feature?.place_name || ""
@@ -574,13 +649,45 @@ export default class extends Controller {
       const context = Array.isArray(feature?.context) ? feature.context : []
       context.forEach((entry) => {
         const id = String(entry?.id || "")
-        if (!details.country && id.startsWith("country")) details.country = entry?.text || ""
+        if (!details.country && id.startsWith("country")) {
+          details.country = entry?.text || ""
+          details.countryCode = this.#extractCountryCode(entry)
+        }
         if (!details.continent && id.startsWith("continent")) details.continent = entry?.text || ""
       })
     })
 
-    this.hintLocationDetails = details
     return details
+  }
+
+  async #loadLocationHintDetailsFromNominatim(lat, lng) {
+    const endpoint = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&accept-language=en`
+    const res = await fetch(endpoint, { headers: { "Accept": "application/json" } })
+    if (!res.ok) return null
+
+    const payload = await res.json()
+    const address = payload?.address || {}
+    const country = String(address.country || "").trim()
+    const countryCode = String(address.country_code || "").trim().toUpperCase()
+
+    return {
+      continent: countryCode ? (CONTINENT_BY_COUNTRY_CODE[countryCode] || "") : "",
+      country,
+      countryCode
+    }
+  }
+
+  #extractCountryCode(entry) {
+    const fromShortCode = String(entry?.short_code || entry?.properties?.short_code || "")
+      .trim()
+      .toUpperCase()
+    if (/^[A-Z]{2}$/.test(fromShortCode)) return fromShortCode
+
+    const id = String(entry?.id || "")
+    const match = id.match(/^country\.([a-z]{2})\b/i)
+    if (match) return match[1].toUpperCase()
+
+    return ""
   }
 
   #resetHintForNextAttempt() {

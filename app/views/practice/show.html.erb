@@ -59,14 +59,14 @@
     </div>
   </div>
 
-  <div class="flex flex-wrap items-center gap-2 text-xs text-gray-500">
-    <span>Hint type:</span>
+  <div class="flex items-center gap-2 text-xs text-gray-500 min-h-14 overflow-x-auto whitespace-nowrap">
+    <span class="shrink-0">Hint type:</span>
     <button type="button"
             data-practice-target="hintTypeOption"
             data-action="practice#setHintType"
             data-practice-type-param="off"
             aria-pressed="true"
-            class="btn-primary text-sm py-1.5 px-3">
+            class="btn-primary text-sm py-1.5 px-3 shrink-0">
       Off
     </button>
     <button type="button"
@@ -74,7 +74,7 @@
             data-action="practice#setHintType"
             data-practice-type-param="radius"
             aria-pressed="false"
-            class="btn-secondary text-sm py-1.5 px-3">
+            class="btn-secondary text-sm py-1.5 px-3 shrink-0">
       Circle radius
     </button>
     <button type="button"
@@ -82,32 +82,40 @@
             data-action="practice#setHintType"
             data-practice-type-param="location"
             aria-pressed="false"
-            class="btn-secondary text-sm py-1.5 px-3">
+            class="btn-secondary text-sm py-1.5 px-3 shrink-0">
       Location
     </button>
 
-    <div data-practice-target="hintRadiusPanel" class="hidden ml-2 flex flex-wrap items-center gap-2">
-      <span>Radius:</span>
-      <% [0, 500, 750, 1000, 1500, 2000, 3000, 4000].each do |radius| %>
-        <button type="button"
-                data-practice-target="hintRadiusOption"
-                data-action="practice#setHintRadius"
-                data-practice-radius-param="<%= radius %>"
-                aria-pressed="<%= radius == 0 %>"
-                class="<%= radius == 0 ? 'btn-primary' : 'btn-secondary' %> text-sm py-1.5 px-3">
-          <%= radius.zero? ? "No hint" : "#{radius} km" %>
-        </button>
-      <% end %>
+    <div data-practice-target="hintRadiusPanel" class="hidden ml-2 flex items-center gap-2 shrink-0">
+      <span class="shrink-0">Radius:</span>
+      <button type="button"
+              data-practice-target="hintRadiusNoHintButton"
+              data-action="practice#toggleHintRadiusNoHint"
+              aria-pressed="true"
+              class="btn-primary text-sm py-1.5 px-3 shrink-0">
+        No hint
+      </button>
+      <div class="inline-flex items-center rounded-lg border border-forest-200 bg-white shadow-sm px-3 py-2">
+        <input type="range"
+               min="500"
+               max="5000"
+               step="50"
+               value="5000"
+               data-practice-target="hintRadiusSlider"
+               data-action="input->practice#setHintRadius"
+               class="w-96 sm:w-[28rem] cursor-pointer accent-forest-600" />
+      </div>
+      <span data-practice-target="hintRadiusValue" class="min-w-20 text-right font-medium text-forest-800">No hint</span>
     </div>
 
-    <div data-practice-target="hintLocationPanel" class="hidden ml-2 flex flex-wrap items-center gap-2">
-      <span>Location hint:</span>
+    <div data-practice-target="hintLocationPanel" class="hidden ml-2 flex items-center gap-2 shrink-0">
+      <span class="shrink-0">Location hint:</span>
       <button type="button"
               data-practice-target="hintLocationOption"
               data-action="practice#setHintLocationLevel"
               data-practice-level-param="none"
               aria-pressed="true"
-              class="btn-primary text-sm py-1.5 px-3">
+              class="btn-primary text-sm py-1.5 px-3 shrink-0">
         No hint
       </button>
       <button type="button"
@@ -115,7 +123,7 @@
               data-action="practice#setHintLocationLevel"
               data-practice-level-param="continent"
               aria-pressed="false"
-              class="btn-secondary text-sm py-1.5 px-3">
+              class="btn-secondary text-sm py-1.5 px-3 shrink-0">
         Continent
       </button>
       <button type="button"
@@ -123,13 +131,12 @@
               data-action="practice#setHintLocationLevel"
               data-practice-level-param="country"
               aria-pressed="false"
-              class="btn-secondary text-sm py-1.5 px-3">
+              class="btn-secondary text-sm py-1.5 px-3 shrink-0">
         Country
       </button>
+      <span data-practice-target="hintReadout" class="hidden ml-2 text-sm font-medium text-forest-800 shrink-0"></span>
     </div>
   </div>
-
-  <p data-practice-target="hintReadout" class="hidden text-sm text-forest-700"></p>
 
   <div data-practice-target="timerPanel"
        class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 <%= @time_limit_seconds.present? ? '' : 'hidden' %>">
