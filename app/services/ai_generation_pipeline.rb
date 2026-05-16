@@ -213,7 +213,19 @@ class AiGenerationPipeline
 
   def safe_count(pattern, region_filter: nil)
     t0 = Time.now
-    n = WikidataImporter.count(pattern: pattern, region_filter: region_filter)
+    n = WikidataImporter.count(
+      pattern: pattern, region_filter: region_filter,
+      on_progress: lambda do |done, total, sum|
+        # Live running total in the polling UI: "Counted 5 of 14
+        # categories — 1,234 matching items so far". Gives the user
+        # a visible sign of progress even when individual per-type
+        # queries take 20-40s for big classes.
+        @generation.update_columns(
+          progress_message: "Counted #{done} of #{total} #{'category'.pluralize(total)} — " \
+                            "#{ActiveSupport::NumberHelper.number_to_delimited(sum)} matching items so far"
+        )
+      end
+    )
     Rails.logger.info "[ai_count] #{(Time.now - t0).round(2)}s -> #{n.inspect}"
     n
   rescue WikidataImporter::Error => e
@@ -223,7 +235,18 @@ class AiGenerationPipeline
 
   def safe_sample(pattern, region_filter: nil)
     t0 = Time.now
-    rows = WikidataImporter.sample(pattern: pattern, limit: 30, region_filter: region_filter)
+    rows = WikidataImporter.sample(
+      pattern: pattern, limit: 30, region_filter: region_filter,
+      on_progress: lambda do |done, total, _qid|
+        # No running thumb count here — sample's block returns rows
+        # (not a number), and the per-type oversample target isn't
+        # what the user actually cares about. Per-category progress
+        # is enough.
+        @generation.update_columns(
+          progress_message: "Loading preview images: #{done} of #{total} #{'category'.pluralize(total)}…"
+        )
+      end
+    )
     Rails.logger.info "[ai_sample] #{(Time.now - t0).round(2)}s -> #{rows.size} rows"
     rows
   rescue WikidataImporter::Error => e

@@ -93,6 +93,11 @@ class WikidataImporter
   # counts and can over-count items that match multiple P31 classes;
   # callers display this as "up to N matching items" for that reason.
   #
+  # `on_progress`, if given, is called with `(done, total, sum_so_far)`
+  # each time a per-type count returns — used by the pipeline to surface
+  # a live running total ("Counted 5 of 14 — 1,234 items so far") on
+  # the polling UI. Single-query path fires it once at the end.
+  #
   # Returns nil if EVERY per-type query errored — distinct from 0 (all
   # queries ran successfully, no matches). Callers (pipeline) use the
   # distinction to skip wasteful Pro retry / sample fan-out when WDQS
@@ -103,16 +108,28 @@ class WikidataImporter
 
     if types.empty?
       rows = run_query(build_count_sparql(pattern))
-      return rows.first&.dig("c", "value").to_i
+      n = rows.first&.dig("c", "value").to_i
+      on_progress&.call(1, 1, n)
+      return n
     end
 
-    results = parallel_per_type(types, on_progress: on_progress) do |qid|
+    sums = Concurrent::Hash.new
+    results = parallel_per_type(types) do |qid|
       sparql = build_per_type_sparql(
         pattern: pattern, qid: qid,
         limit: HARD_CAP, count_only: true, with_label: false
       )
       rows = run_query(sparql)
-      rows.first&.dig("c", "value").to_i
+      n = rows.first&.dig("c", "value").to_i
+      sums[qid] = n
+      if on_progress
+        # Worker thread: wrap the callback in with_connection so a
+        # DB-writing handler doesn't leak the AR connection pool.
+        ActiveRecord::Base.connection_pool.with_connection do
+          on_progress.call(sums.size, types.size, sums.values.sum)
+        end
+      end
+      n
     end
     return nil if results.all?(&:nil?)
     results.compact.sum
