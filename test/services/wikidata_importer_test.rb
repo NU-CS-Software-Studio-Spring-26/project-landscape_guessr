@@ -303,7 +303,7 @@ class WikidataImporterTest < ActiveSupport::TestCase
     assert_equal via_symbols.id, via_strings.id
   end
 
-  test "with_region_bbox appends SERVICE wikibase:box block when region resolves" do
+  test "with_region_bbox prepends SERVICE wikibase:box (with decoupled coord var) before AI pattern" do
     pattern = "?item wdt:P31 wd:Q23397 ; wdt:P625 ?coord ."
     wrapped = WikidataImporter.with_region_bbox(pattern,
       name: "Massachusetts", parent_name: "United States", admin_level: "admin1")
@@ -311,8 +311,16 @@ class WikidataImporterTest < ActiveSupport::TestCase
     assert_includes wrapped, "cornerSouthWest"
     assert_includes wrapped, "cornerNorthEast"
     assert_match(/Point\(-?\d+\.\d+ -?\d+\.\d+\)/, wrapped)
-    # Original pattern preserved at the start
-    assert wrapped.start_with?(pattern)
+    # SERVICE must come BEFORE the AI's class triple (or WDQS returns 0
+    # matches — empirically verified). And SERVICE binds ?_box_coord, NOT
+    # ?coord — if both bind ?coord, WDQS does an exact-WKT match between
+    # the two and basically never finds anything.
+    service_pos = wrapped.index("SERVICE wikibase:box")
+    pattern_pos = wrapped.index(pattern.strip)
+    assert service_pos < pattern_pos, "SERVICE wikibase:box must come before the AI's pattern"
+    assert_includes wrapped, "?_box_coord"
+    refute_match(/SERVICE wikibase:box[^}]+\?item wdt:P625 \?coord/m, wrapped,
+                 "SERVICE block must bind a decoupled coord var, not ?coord")
   end
 
   test "with_region_bbox returns pattern unchanged when region_filter is blank or unresolvable" do

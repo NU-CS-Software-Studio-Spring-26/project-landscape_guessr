@@ -343,16 +343,29 @@ class WikidataImporter
     region = resolve_region_filter(region_filter)
     return pattern unless region&.min_lat && region.min_lng && region.max_lat && region.max_lng
     # SERVICE wikibase:box uses Blazegraph's native geo-spatial index —
-    # constrains ?item (whose ?coord we've already bound) to points
-    # inside the corner rectangle. Append AFTER the AI's pattern so the
-    # outer wrap (image_or_article_block / COUNT / LIMIT) still applies
-    # uniformly. ~10× faster than BIND+FILTER on coords (measured: 1.5s
-    # vs 15s for mountains-in-MA).
-    "#{pattern.strip}\n      SERVICE wikibase:box {\n" \
-      "        ?item wdt:P625 ?coord .\n" \
-      "        bd:serviceParam wikibase:cornerSouthWest \"Point(#{region.min_lng} #{region.min_lat})\"^^geo:wktLiteral .\n" \
-      "        bd:serviceParam wikibase:cornerNorthEast \"Point(#{region.max_lng} #{region.max_lat})\"^^geo:wktLiteral .\n" \
-      "      }"
+    # constrains ?item to coords inside the rectangle. Two non-obvious
+    # gotchas that BOTH have to be right or the query returns 0:
+    #
+    #   1. SERVICE MUST come BEFORE the AI's class triple. With class
+    #      first, WDQS materializes the full subclass set before joining
+    #      against the spatial index — fast but returns zero matches
+    #      (seems to be a Blazegraph optimizer quirk, verified empirically).
+    #
+    #   2. SERVICE binds its OWN ?coord variable, NOT the AI's ?coord.
+    #      The AI's pattern always includes `wdt:P625 ?coord` (we tell it
+    #      to, for output binding). If we use the same variable name, the
+    #      two bindings collide — WDQS does an exact-WKT-literal match
+    #      between the spatial-index ?coord and the property ?coord, which
+    #      basically never succeeds (returns 0). Using ?_box_coord
+    #      decouples them.
+    #
+    # ~10× faster than BIND+FILTER on coords once both are right
+    # (measured: 1.8s for lakes-in-MA = 1299 results).
+    "SERVICE wikibase:box {\n" \
+      "  ?item wdt:P625 ?_box_coord .\n" \
+      "  bd:serviceParam wikibase:cornerSouthWest \"Point(#{region.min_lng} #{region.min_lat})\"^^geo:wktLiteral .\n" \
+      "  bd:serviceParam wikibase:cornerNorthEast \"Point(#{region.max_lng} #{region.max_lat})\"^^geo:wktLiteral .\n" \
+      "}\n#{pattern.strip}"
   end
 
   # Drops rows whose coordinates fall outside the region's actual
