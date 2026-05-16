@@ -111,7 +111,6 @@ class AiImageSetGenerator
             sparql_pattern:     { type: "STRING" },
             set_name:           { type: "STRING" },
             explanation:        { type: "STRING" },
-            fetch_strategy:     { type: "STRING" },
             cannot_answer:      { type: "BOOLEAN" },
             # Sub-national region filter. Flat fields (not a nested OBJECT)
             # — nested schemas trigger MALFORMED on Flash. Backend looks up
@@ -123,7 +122,7 @@ class AiImageSetGenerator
             region_parent_name: { type: "STRING" },
             region_admin_level: { type: "STRING" }
           },
-          required: %w[sparql_pattern set_name explanation fetch_strategy cannot_answer]
+          required: %w[sparql_pattern set_name explanation cannot_answer]
         }
       }
     ]
@@ -147,7 +146,7 @@ class AiImageSetGenerator
   # element with role: "user".
   #
   # Returns a parsed hash with keys :sparql_pattern, :set_name,
-  # :explanation, :fetch_strategy, :cannot_answer. Function-call loop is
+  # :explanation, :cannot_answer. Function-call loop is
   # internal; the returned hash is what submit_answer received.
   #
   # Logs per-round elapsed time + tool name on every round, plus a
@@ -393,17 +392,9 @@ class AiImageSetGenerator
       sparql_pattern: args["sparql_pattern"].to_s,
       set_name:       args["set_name"].to_s.strip.presence || "Untitled AI Set",
       explanation:    args["explanation"].to_s.strip,
-      fetch_strategy: args["fetch_strategy"].to_s,
       cannot_answer:  args["cannot_answer"] == true,
       region_filter:  build_region_filter(args)
     }
-
-    # Default to exhaustive if unrecognized — safe (matches pre-strategy
-    # behavior). The WikidataImporter ALSO validates and may override
-    # back to exhaustive at execution time (e.g. random_sample + FILTER).
-    unless %w[exhaustive random_sample].include?(payload[:fetch_strategy])
-      payload[:fetch_strategy] = "exhaustive"
-    end
 
     return payload if payload[:cannot_answer]
 
@@ -522,8 +513,6 @@ class AiImageSetGenerator
         a recorded length > 500 km. Want a different cutoff?"
       - set_name: 4-6 words, Title Case ("Volcanoes of Japan").
       - explanation: 1-2 plain-English sentences, no jargon.
-      - fetch_strategy: MUST be exactly "exhaustive" or "random_sample".
-        See the FETCH STRATEGY section below for which to pick.
       - cannot_answer: boolean. true to refuse, false to provide a pattern.
       - region_name, region_parent_name, region_admin_level: optional
         sub-national region filter. See REGION FILTERS below. When set,
@@ -618,52 +607,25 @@ class AiImageSetGenerator
         CATEGORY (i.e. the kind of thing you'd P31-match) after 2-3
         rephrasings. Don't guess.
 
-      FETCH STRATEGY (required field):
+      WHAT THE BACKEND DOES FOR YOU:
 
-      Wikidata has a 60-second query timeout. The backend fans out
-      VALUES-based umbrella queries PER TYPE — each Q-ID in your
-      `VALUES ?type { ... }` block runs as a separate query in parallel.
-      That means a 12-type umbrella isn't one giant query; it's 12
-      narrow queries that each get the full 60-second budget. Pick
-      strategy based on the size of a SINGLE type, not the umbrella.
-
-      Decision table:
-
-        | Query has...                          | Strategy       |
-        | ------------------------------------- | -------------- |
-        | Country (wdt:P17 wd:Q##)              | exhaustive     |
-        | Region/admin (wdt:P131 ...)           | exhaustive     |
-        | FILTER (numeric/date)                 | exhaustive     |
-        | Single narrow class (<20k globally)   | exhaustive     |
-        | VALUES ?type with narrow types        | exhaustive     |
-        | Single very-broad class (>50k global) | random_sample  |
-
-      When in doubt → "exhaustive". It matches typical user expectation
-      ("give me ALL of X") and avoids the trap of returning a small
-      random slice that under-represents specific regions.
-
-      What each does:
-      - "exhaustive" fetches every matching item via subclass walk.
-        Fast when each type is narrow OR has at least one selective
-        constraint (country, FILTER, etc).
-      - "random_sample" fetches up to ~10,000 random items per type
-        via bd:sample. Reserved for truly-unbounded single classes
-        ("all buildings", "all roads", "all artworks worldwide" with
-        no narrowing). The cost: results are a random global slice,
-        so any specific region/country may be sparsely represented.
-
-      Examples to calibrate scale:
-      - "national parks worldwide": Q46169 has ~5k items globally —
-        narrow enough for exhaustive even with no country anchor.
-      - "rivers worldwide": >300k items globally — needs random_sample.
-      - "Romanesque churches worldwide" via VALUES { Q160517 Q1370598 ... }:
-        each style-of-church is narrow — exhaustive per-type works.
-      - "buildings worldwide" with no further narrowing: >5M items —
-        random_sample.
-
-      Backend safety: if you pick random_sample but include FILTER,
-      the backend auto-overrides to exhaustive (bd:sample cannot
-      filter inside its block).
+      - Per-type fan-out: each Q-ID in `VALUES ?type { ... }` runs as
+        its OWN parallel query against WDQS. A 14-type umbrella isn't
+        one giant query — it's 14 narrow queries that each get the full
+        WDQS 60-second budget.
+      - Random sampling: every fetch is randomized via ORDER BY a
+        hashed RAND() inside a subquery. If a type has more than
+        10,000 matching items, the backend returns a true random
+        sample of 10,000 (not the alphabetical-first-10,000 that a
+        plain LIMIT would give). You don't choose a "strategy" — the
+        backend always samples randomly.
+      - Region bbox: when region_name is set, the backend looks up the
+        region's bounding box from our Region table and prepends
+        SERVICE wikibase:box to your pattern. You MUST NOT compose
+        wdt:P131* or any other geo constraint when region_name is set.
+      - Cap warning: if a type exceeds the 10k cap, the show page
+        shows the user a "this category had more than 10,000 items —
+        sample shown" hint. You don't need to engineer around the cap.
 
       PERFORMANCE — Selective numeric filters without geography:
 
@@ -752,7 +714,6 @@ class AiImageSetGenerator
           sparql_pattern: "?item wdt:P31/wdt:P279* wd:Q8072 ; wdt:P17 wd:Q17 ; wdt:P625 ?coord .",
           set_name: "Volcanoes of Japan",
           explanation: "I'll find volcanoes located in Japan that have photos.",
-          fetch_strategy: "exhaustive",
           cannot_answer: false
         )
 
@@ -765,7 +726,6 @@ class AiImageSetGenerator
           sparql_pattern: "?item wdt:P31/wdt:P279* wd:Q23397 ; wdt:P625 ?coord .",
           set_name: "Lakes in Massachusetts",
           explanation: "I'll find lakes located in Massachusetts that have photos.",
-          fetch_strategy: "exhaustive",
           cannot_answer: false,
           region_name: "Massachusetts",
           region_parent_name: "United States",

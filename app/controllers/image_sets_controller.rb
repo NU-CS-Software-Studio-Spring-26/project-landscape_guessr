@@ -429,22 +429,15 @@ class ImageSetsController < ApplicationController
     end
 
     result = gen.result
-    fetch_strategy = if %w[exhaustive random_sample].include?(result[:fetch_strategy])
-      result[:fetch_strategy]
-    else
-      "exhaustive"
-    end
-
     image_set = Current.user.image_sets.new(
-      name:              params[:name].to_s.strip.presence || result[:set_name].presence || "Untitled AI Set",
-      visibility:        %w[public private].include?(params[:visibility]) ? params[:visibility] : "private",
-      ai_prompt:         gen.user_message.to_s,
-      ai_query:          result[:sparql_pattern],
-      ai_explanation:    result[:explanation].to_s,
-      ai_model:          gen.model_used.presence || "flash",
-      ai_fetch_strategy: fetch_strategy,
-      ai_region_filter:  result[:region_filter],
-      import_state:      "pending"
+      name:             params[:name].to_s.strip.presence || result[:set_name].presence || "Untitled AI Set",
+      visibility:       %w[public private].include?(params[:visibility]) ? params[:visibility] : "private",
+      ai_prompt:        gen.user_message.to_s,
+      ai_query:         result[:sparql_pattern],
+      ai_explanation:   result[:explanation].to_s,
+      ai_model:         gen.model_used.presence || "flash",
+      ai_region_filter: result[:region_filter],
+      import_state:     "pending"
     )
 
     if image_set.save

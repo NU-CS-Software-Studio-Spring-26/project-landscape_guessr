@@ -18,10 +18,9 @@ class AiImportImagesJob < ApplicationJob
     image_set.update_columns(import_state: "importing", import_error: nil, import_progress: 0)
 
     WikidataImporter.import!(
-      image_set:      image_set,
-      pattern:        image_set.ai_query,
-      fetch_strategy: image_set.ai_fetch_strategy.presence || "exhaustive",
-      region_filter:  image_set.ai_region_filter
+      image_set:     image_set,
+      pattern:       image_set.ai_query,
+      region_filter: image_set.ai_region_filter
     )
 
     # If the parent had filtered children (uncommon for AI sets, but

@@ -1,28 +1,37 @@
 require "net/http"
 require "uri"
 require "json"
+require "securerandom"
 require "concurrent/atomic/atomic_fixnum"
 
 # Runs SPARQL queries against query.wikidata.org and turns the rows into
 # Image / ImageSetItem records. The AI returns a *pattern* (WHERE-clause
-# body) plus a `fetch_strategy`; this service wraps both ways and runs
-# per-type fan-out for performance.
+# body); this service handles per-type fan-out + random sampling +
+# polygon refinement + Wikipedia image enrichment + bulk insert.
 #
-# == Strategies
+# == Random sampling
 #
-# `exhaustive` — fetch every matching item via a P31/P279* subclass walk.
-# Right for narrow queries (country-bounded, FILTER-narrowed, specific
-# class). Equivalent to the rake's per-type sequential pattern.
+# Every fetched query is randomized via:
 #
-# `random_sample` — wrap each per-type lookup with `SERVICE bd:sample`
-# inside Blazegraph. Capped at HARD_CAP random items per type. Right for
-# broad worldwide queries ("rivers worldwide") where the subclass walk
-# would time out WDQS's 60s limit.
+#   ORDER BY SHA512(CONCAT(STR(RAND()), STR(?item)))
 #
-# Random_sample loses two things vs exhaustive:
-#   - the P279* subclass walk (bd:sample only takes one inner triple)
-#   - the ability to FILTER inside the inner block (so FILTER patterns
-#     auto-override back to exhaustive)
+# inside a subquery, then LIMIT HARD_CAP outside. This works under any
+# filter shape — region bbox, country anchor, FILTER, UNION, subclass
+# walk — and returns true random items when the result set exceeds the
+# cap (vs. WDQS's alphabetical-first-N bias under plain LIMIT).
+#
+# We previously had two strategies (`exhaustive` LIMIT vs `bd:sample`).
+# bd:sample's inner block only accepts a single direct triple, so it
+# silently dropped FILTERs and couldn't combine with SERVICE wikibase:box.
+# For country/region queries it returned 20-50× fewer items than the
+# SHA512 approach. See `build_random_sparql` for the current shape.
+#
+# == Cache busting
+#
+# WDQS caches by query text. A per-call `# nonce: <hex>` comment varies
+# the text so each fetch returns a fresh random sample — without it,
+# RAND() materializes on the first call and gets cached, so retries
+# return identical items. Verified empirically.
 #
 # == Pattern shape detection
 #
@@ -36,19 +45,23 @@ require "concurrent/atomic/atomic_fixnum"
 class WikidataImporter
   ENDPOINT   = URI("https://query.wikidata.org/sparql").freeze
   USER_AGENT = WikimediaUserAgent::STRING
-  # Per-query timeout. WDQS's own hard ceiling is 60s; we set ours below
-  # that so we die first and surface a clean error rather than wedging
-  # behind WDQS's slower failure path. p99 of *healthy* queries is ~34s
-  # in our data, so 45s leaves comfortable headroom — and queries that
-  # actually need >45s are almost always too expensive to ever finish
-  # cleanly under fan-out anyway.
-  READ_TIMEOUT = 45
+  # Preview-phase timeout. WDQS's own hard ceiling is 60s, so 60s here
+  # gives the SPARQL the same budget Blazegraph has — past that and
+  # we'd just be re-sending a query Blazegraph already killed.
+  # SHA512 ORDER BY on big filtered sets (US-buildings, worldwide-rivers)
+  # consistently lands in the 30-55s range; tightening below 60s starts
+  # to fail those legitimately.
+  READ_TIMEOUT = 60
+
+  # Import-phase timeout. Same WDQS 60s server cap applies, but the
+  # client-side budget also covers SSL/HTTP overhead + WDQS queue time
+  # under load. 120s here keeps us from dying on retry-able tail
+  # latency that's not Blazegraph's fault. The user isn't staring at
+  # a spinner during import (it runs as a background job behind the
+  # show-page poll), so the extra headroom has no UX cost.
+  IMPORT_READ_TIMEOUT = 120
 
   HARD_CAP = 10_000
-
-  EXHAUSTIVE    = "exhaustive".freeze
-  RANDOM_SAMPLE = "random_sample".freeze
-  STRATEGIES    = [ EXHAUSTIVE, RANDOM_SAMPLE ].freeze
 
   # Two attempts per query (1 retry). WDQS timeouts are almost never
   # transient — when a pattern is too expensive once, a retry hits the
@@ -75,19 +88,18 @@ class WikidataImporter
   # fan-out (parallel threads) when types are extractable; single
   # query otherwise.
   #
-  # For random_sample, returns the SUM of per-type bd:sample row counts
-  # — a lower bound on the true count, capped at HARD_CAP per type.
-  # When a per-type result hits the cap, callers can read "≥ cap" from
-  # the result_count comparison.
+  # The count is the size of the FILTERED set (pattern + image-or-article
+  # block), pre-cap. For umbrella patterns this is a sum of per-type
+  # counts and can over-count items that match multiple P31 classes;
+  # callers display this as "up to N matching items" for that reason.
   #
   # Returns nil if EVERY per-type query errored — distinct from 0 (all
   # queries ran successfully, no matches). Callers (pipeline) use the
   # distinction to skip wasteful Pro retry / sample fan-out when WDQS
   # is unable to execute the query shape at all.
-  def self.count(pattern:, fetch_strategy: EXHAUSTIVE, on_progress: nil, region_filter: nil)
-    pattern  = with_region_bbox(pattern, region_filter)
-    strategy = effective_strategy(pattern, fetch_strategy)
-    types    = extract_types(pattern)
+  def self.count(pattern:, on_progress: nil, region_filter: nil)
+    pattern = with_region_bbox(pattern, region_filter)
+    types   = extract_types(pattern)
 
     if types.empty?
       rows = run_query(build_count_sparql(pattern))
@@ -96,7 +108,7 @@ class WikidataImporter
 
     results = parallel_per_type(types, on_progress: on_progress) do |qid|
       sparql = build_per_type_sparql(
-        pattern: pattern, qid: qid, strategy: strategy,
+        pattern: pattern, qid: qid,
         limit: HARD_CAP, count_only: true, with_label: false
       )
       rows = run_query(sparql)
@@ -106,37 +118,30 @@ class WikidataImporter
     results.compact.sum
   end
 
-  # Returns up to `limit` rows for the preview thumbnails. NOT a guaranteed
-  # random sample for exhaustive strategy (LIMIT gives alphabetical order
-  # since WDQS doesn't push LIMIT into the walk). For random_sample,
-  # bd:sample really does return random rows.
-  def self.sample(pattern:, limit: 30, fetch_strategy: EXHAUSTIVE, on_progress: nil, region_filter: nil)
+  # Returns up to `limit` rows for the preview thumbnails. Truly random
+  # within the filtered set thanks to the SHA512+RAND ORDER BY inside
+  # build_per_type_sparql.
+  #
+  # We oversample at WDQS because the post-WDQS pipeline drops rows:
+  # ~30-50% to polygon refine (region queries only) and ~50% to
+  # pageimages enrichment (items with only ?article and no ?image
+  # whose pageimages lookup returns nothing). Without oversampling the
+  # 30-row preview ends up with ~10-15 visible thumbs.
+  PREVIEW_OVERSAMPLE = 3
+
+  def self.sample(pattern:, limit: 30, on_progress: nil, region_filter: nil)
     pattern  = with_region_bbox(pattern, region_filter)
-    strategy = effective_strategy(pattern, fetch_strategy)
     types    = extract_types(pattern)
-    # With region_filter, polygon refinement after the bbox query drops
-    # ~30-50% of rows (border + ocean overshoot). Oversample at WDQS so
-    # the user still sees `limit` polygon-accurate thumbnails. Without
-    # this the 30-row preview ends up with ~10-15 visible after refine.
-    region_oversample = region_filter ? 3 : 1
+    target   = limit * PREVIEW_OVERSAMPLE
 
     rows = if types.empty?
-      run_query(wrap_with_limit(pattern, limit: limit * region_oversample, with_label: true))
+      sparql = build_random_sparql(pattern: pattern, limit: target, with_label: true)
+      run_query(sparql)
     else
-      # For random_sample, oversample inside bd:sample to compensate for
-      # outer-filter losses (only ~15-20% of random items have
-      # coord+image+article — empirically: bd:sample 5000 → ~840
-      # surviving). Without this multiplier, a 30-row preview from 14
-      # types ends up with 5 visible rows after filtering.
-      base_per_type = (limit.to_f / types.size).ceil + 2
-      per_type_limit = if strategy == RANDOM_SAMPLE
-        base_per_type * 20
-      else
-        base_per_type * region_oversample
-      end
+      per_type_limit = (target.to_f / types.size).ceil + 2
       results = parallel_per_type(types, on_progress: on_progress) do |qid|
         sparql = build_per_type_sparql(
-          pattern: pattern, qid: qid, strategy: strategy,
+          pattern: pattern, qid: qid,
           limit: per_type_limit, with_label: true
         )
         run_query(sparql)
@@ -170,32 +175,53 @@ class WikidataImporter
   #   "fetching"           — per-type SPARQL queries (progress = types done / total)
   #   "looking_up_images"  — Wikipedia pageimages batch
   #   "inserting"          — INSERT phase (progress = rows inserted / total)
-  def self.import!(image_set:, pattern:, fetch_strategy: EXHAUSTIVE, region_filter: nil)
-    pattern  = with_region_bbox(pattern, region_filter)
-    strategy = effective_strategy(pattern, fetch_strategy)
-    types    = extract_types(pattern)
+  def self.import!(image_set:, pattern:, region_filter: nil)
+    pattern = with_region_bbox(pattern, region_filter)
+    types   = extract_types(pattern)
 
     image_set.update_columns(
       import_state:    "fetching",
       import_progress: 0,
-      import_total:    types.size
+      import_total:    types.size,
+      import_warnings: nil
     )
 
     rows = if types.empty?
       # AI dropped P31 entirely (e.g. V5-style "height > 200" pattern).
       # Single query path; no per-type fan-out possible.
-      run_query(wrap_with_limit(pattern, limit: HARD_CAP, with_label: true))
+      sparql = build_random_sparql(pattern: pattern, limit: HARD_CAP, with_label: true)
+      run_query(sparql, read_timeout: IMPORT_READ_TIMEOUT)
     else
       progress_cb = lambda do |done, total, _qid|
         image_set.update_columns(import_progress: done, import_total: total)
       end
-      results = parallel_per_type(types, on_progress: progress_cb) do |qid|
+      # Per-type failures (timeout, 5xx past retries) and cap-hits (the
+      # type had >HARD_CAP matching items, so our 10k sample is a strict
+      # subset) get surfaced on the show page. Concurrent::Hash because
+      # parallel_per_type writes from multiple threads.
+      type_failures = Concurrent::Hash.new
+      type_caps     = Concurrent::Hash.new
+      error_cb = lambda do |qid, exc|
+        type_failures[qid] = "#{exc.class.name.split("::").last}: #{exc.message.slice(0, 120)}"
+      end
+      results = parallel_per_type(types, on_progress: progress_cb, on_error: error_cb) do |qid|
         sparql = build_per_type_sparql(
-          pattern: pattern, qid: qid, strategy: strategy,
+          pattern: pattern, qid: qid,
           limit: HARD_CAP, with_label: true
         )
-        run_query(sparql)
+        rows = run_query(sparql, read_timeout: IMPORT_READ_TIMEOUT)
+        # Returning exactly HARD_CAP rows means ORDER BY ?rand truncated
+        # — there were more items than our cap. Note for the user; the
+        # set still gets the random 10k subset.
+        type_caps[qid] = rows.size if rows.size >= HARD_CAP
+        rows
       end
+      warnings = {}
+      warnings[:failed_types] = type_failures.to_h if type_failures.any?
+      warnings[:capped_types] = type_caps.to_h     if type_caps.any?
+      # jsonb column: AR auto-serializes the Hash, so no .to_json. Stored
+      # as JSON object so callers can read warnings["failed_types"] etc.
+      image_set.update_columns(import_warnings: warnings) if warnings.any?
       results.compact.flatten
     end
 
@@ -237,38 +263,7 @@ class WikidataImporter
     insert_rows!(image_set: image_set, rows: keepable)
   end
 
-  # === Strategy + pattern-shape helpers ===
-
-  # bd:sample's inner block only accepts a single direct triple — no
-  # FILTER, no VALUES, no multi-triple. If the AI requested random_sample
-  # but the pattern has FILTER, the bd:sample wrapping would silently
-  # drop the filter and import the wrong items. Override to exhaustive.
-  #
-  # Also override if we can't extract any type Q-ID (nothing to sample).
-  def self.effective_strategy(pattern, requested)
-    return EXHAUSTIVE unless STRATEGIES.include?(requested)
-    return EXHAUSTIVE unless requested == RANDOM_SAMPLE
-    if pattern_has_filter?(pattern)
-      Rails.logger.warn "[wdqs] random_sample requested but pattern has FILTER; overriding to exhaustive" if defined?(Rails)
-      return EXHAUSTIVE
-    end
-    if extract_types(pattern).empty?
-      Rails.logger.warn "[wdqs] random_sample requested but no extractable type Q-ID; overriding to exhaustive" if defined?(Rails)
-      return EXHAUSTIVE
-    end
-    # Multi-P31 outside a VALUES block: extract_single_type only sees the
-    # first match and strip_type_triple only strips the first. The second
-    # un-stripped triple would silently filter our random_sample results.
-    if extract_union_types(pattern).nil? && multiple_p31_triples?(pattern)
-      Rails.logger.warn "[wdqs] random_sample requested but multiple P31 triples present (not in VALUES); overriding to exhaustive" if defined?(Rails)
-      return EXHAUSTIVE
-    end
-    RANDOM_SAMPLE
-  end
-
-  def self.pattern_has_filter?(pattern)
-    pattern.match?(/\bFILTER\s*\(/i)
-  end
+  # === Pattern-shape helpers ===
 
   # Returns the Q-IDs from `VALUES ?type { wd:Q... wd:Q... }`, or nil.
   def self.extract_union_types(pattern)
@@ -289,30 +284,6 @@ class WikidataImporter
   # matches (e.g. AI dropped P31 entirely for a selective FILTER query).
   def self.extract_types(pattern)
     extract_union_types(pattern) || [ extract_single_type(pattern) ].compact
-  end
-
-  # Defense against a multi-P31 pattern slipping past `extract_single_type`
-  # (which only catches the first match). For random_sample, we strip ONLY
-  # the matched P31 and wrap with bd:sample — if a SECOND P31 triple
-  # constrains the outer query, the sample silently returns items that
-  # don't match the user's full intent. Cheaper to refuse and fall back
-  # to exhaustive than to ship wrong results.
-  def self.multiple_p31_triples?(pattern)
-    pattern.scan(/wdt:P31(?:\/wdt:P279\*)?\s+wd:Q\d+/).size > 1
-  end
-
-  # Removes the AI's `?item wdt:P31[/wdt:P279*] wd:Qxxx` triple from a
-  # pattern, leaving the rest. Handles both `;` (continues subject) and
-  # `.` (ends statement) delimiters. When `;`, replace with `?item` so
-  # subsequent predicates re-bind correctly.
-  def self.strip_type_triple(pattern, qid)
-    # (?<![A-Za-z0-9_]) makes ?item a real variable boundary — without
-    # it, `?subitem wdt:P31 ...` would partial-match because plain
-    # `\?item` matches anywhere `?item` appears as a substring.
-    re = /(?<![A-Za-z0-9_])\?item\s+wdt:P31(?:\/wdt:P279\*)?\s+wd:#{qid}\s*([.;])/
-    pattern.sub(re) do
-      Regexp.last_match(1) == ";" ? "?item" : ""
-    end
   end
 
   # === Region BBOX injection ===
@@ -418,28 +389,22 @@ class WikidataImporter
 
   # === SPARQL builders ===
 
-  # Strategy-aware per-type SPARQL builder. Used by count/sample/import
-  # for both exhaustive (subclass walk) and random_sample (bd:sample)
-  # paths. Centralizing here means changes to the query shape (e.g. label
-  # service, image/article trailer) flow through both strategies.
-  def self.build_per_type_sparql(pattern:, qid:, strategy:, limit:, count_only: false, with_label: true)
-    stripped     = pattern.sub(/VALUES\s+\?type\s*\{[^}]+\}\s*\.?\s*/m, "")
+  # Per-type SPARQL: substitutes the type QID into the AI pattern, then
+  # wraps with the SHA512 random-sample shape (or COUNT(*) for the count
+  # phase). The pattern may be a single-type or VALUES-style umbrella;
+  # we strip the VALUES clause and rewrite ?type to wd:Qxxx so per-type
+  # fan-out gives us isolated queries.
+  def self.build_per_type_sparql(pattern:, qid:, limit:, count_only: false, with_label: true)
+    stripped    = pattern.sub(/VALUES\s+\?type\s*\{[^}]+\}\s*\.?\s*/m, "")
     # Word-boundary regex: plain `gsub("?type", ...)` would also replace
     # the prefix of `?typeOfThing` or similar, silently corrupting the
     # triple. The (?!\w) lookahead bounds after-the-name.
-    with_qid_in  = stripped.gsub(/\?type(?!\w)/, "wd:#{qid}")
+    with_qid_in = stripped.gsub(/\?type(?!\w)/, "wd:#{qid}")
 
-    case strategy
-    when RANDOM_SAMPLE
-      extras = strip_type_triple(with_qid_in, qid)
-      build_random_sample_sparql(qid: qid, extras: extras, limit: limit,
-                                  count_only: count_only, with_label: with_label)
-    else # EXHAUSTIVE
-      if count_only
-        build_count_sparql(with_qid_in)
-      else
-        wrap_with_limit(with_qid_in, limit: limit, with_label: with_label)
-      end
+    if count_only
+      build_count_sparql(with_qid_in)
+    else
+      build_random_sparql(pattern: with_qid_in, limit: limit, with_label: with_label)
     end
   end
 
@@ -452,55 +417,38 @@ class WikidataImporter
     SPARQL
   end
 
-  def self.build_random_sample_sparql(qid:, extras:, limit:, count_only:, with_label:)
-    if count_only
-      return <<~SPARQL
-        SELECT (COUNT(*) AS ?c) WHERE {
-          SERVICE bd:sample {
-            ?item wdt:P31 wd:#{qid} .
-            bd:serviceParam bd:sample.limit #{limit.to_i} .
-            bd:serviceParam bd:sample.sampleType "RANDOM" .
-          }
-          #{extras}
+  # Universal random-sample shape. Returns up to `limit` items drawn
+  # uniformly at random from the filtered set — works under any pattern
+  # shape (region bbox, country anchor, FILTER, UNION, P279* subclass
+  # walk). See header docstring for why we use SHA512 over RAND() and
+  # why we add a nonce.
+  #
+  # Layered so labels resolve AFTER the LIMIT subquery — per the WDQS
+  # optimization docs, putting wikibase:label inside the expensive
+  # block makes it materialize labels for every intermediate join
+  # (rivers LIMIT 100 with label inside = 504 timeout; outside = 22s).
+  def self.build_random_sparql(pattern:, limit:, with_label: true)
+    inner = <<~INNER
+      SELECT DISTINCT ?item ?image ?coord ?article WHERE {
+        SELECT DISTINCT ?item ?image ?coord ?article (SHA512(CONCAT(STR(RAND()), STR(?item))) AS ?rand) WHERE {
+          #{pattern}
           #{image_or_article_block}
         }
-      SPARQL
-    end
-
-    inner = <<~INNER
-      SELECT DISTINCT ?item ?image ?coord ?article WHERE {
-        SERVICE bd:sample {
-          ?item wdt:P31 wd:#{qid} .
-          bd:serviceParam bd:sample.limit #{limit.to_i} .
-          bd:serviceParam bd:sample.sampleType "RANDOM" .
-        }
-        #{extras}
-        #{image_or_article_block}
+        ORDER BY ?rand
+        LIMIT #{limit.to_i}
       }
     INNER
-    wrap_with_label(inner, with_label: with_label)
-  end
-
-  # Standard exhaustive wrapper. Per the WDQS optimization docs, we
-  # apply the label service AFTER an inner subquery with LIMIT — this
-  # way labels are only fetched for the N surviving rows, not for every
-  # intermediate join. Empirically: rivers LIMIT 100 with label INSIDE
-  # = 504 timeout; same query with label OUTSIDE in subquery = 22s, 100
-  # rows. Universal win, no downside.
-  def self.wrap_with_limit(pattern, limit:, with_label: true)
-    inner = <<~INNER
-      SELECT DISTINCT ?item ?image ?coord ?article WHERE {
-        #{pattern}
-        #{image_or_article_block}
-      } LIMIT #{limit.to_i}
-    INNER
-    wrap_with_label(inner, with_label: with_label)
+    # Per-call nonce in a leading comment — WDQS caches by query text,
+    # so without this the FIRST call materializes RAND() and every
+    # subsequent identical call returns the same "random" sample from
+    # cache. Verified empirically: no nonce → 947/1000 overlap between
+    # two runs of the same query; with nonce → 180/1000 (uniform).
+    "# nonce: #{SecureRandom.hex(8)}\n" + wrap_with_label(inner, with_label: with_label)
   end
 
   # Optionally wraps an inner SPARQL block in an outer query that adds
   # SERVICE wikibase:label. Caller decides whether to opt in (count
-  # queries don't need labels). Centralized so both wrap_with_limit and
-  # build_random_sample_sparql use the identical outer shape.
+  # queries don't need labels).
   def self.wrap_with_label(inner, with_label:)
     return inner unless with_label
     <<~SPARQL
@@ -529,8 +477,10 @@ class WikidataImporter
   # Runs the block per type in parallel threads, with progress reporting.
   # Returns an array of results (nil for errored types — partial success
   # beats total failure). on_progress is called after EACH type completes
-  # (succeeded OR failed) with (done, total, qid).
-  def self.parallel_per_type(types, on_progress: nil)
+  # (succeeded OR failed) with (done, total, qid). on_error, if given,
+  # is called with (qid, exception) for each failure — used by import!
+  # to surface per-type warnings to the user.
+  def self.parallel_per_type(types, on_progress: nil, on_error: nil)
     done = Concurrent::AtomicFixnum.new(0)
     threads = types.map do |qid|
       Thread.new do
@@ -539,6 +489,7 @@ class WikidataImporter
             yield(qid)
           rescue Error => e
             Rails.logger.warn "[wdqs per-type] qid=#{qid} #{e.class}: #{e.message.slice(0, 200)}" if defined?(Rails)
+            on_error&.call(qid, e)
             nil
           end
         n = done.increment
@@ -671,7 +622,11 @@ class WikidataImporter
   # Retries on transient WDQS failures (5xx, connection-level errors).
   # WDQS is fronted by a load balancer that returns 502/503 under load
   # spikes; a single retry-after-backoff typically clears those.
-  def self.run_query(sparql)
+  #
+  # read_timeout: defaults to READ_TIMEOUT (45s — tight for preview UX).
+  # Callers running off the request thread (import!) can pass a longer
+  # value to ride out WDQS tail-latency variance.
+  def self.run_query(sparql, read_timeout: READ_TIMEOUT)
     attempts = 0
     summary  = WikidataQueryLog.summarize_sparql(sparql)
 
@@ -686,7 +641,7 @@ class WikidataImporter
           req["Content-Type"] = "application/x-www-form-urlencoded"
           req["User-Agent"]   = USER_AGENT
           req.body = URI.encode_www_form(query: sparql)
-          Net::HTTP.start(ENDPOINT.hostname, ENDPOINT.port, use_ssl: true, read_timeout: READ_TIMEOUT) do |h|
+          Net::HTTP.start(ENDPOINT.hostname, ENDPOINT.port, use_ssl: true, read_timeout: read_timeout) do |h|
             h.request(req)
           end
         rescue Net::ReadTimeout, Net::OpenTimeout, EOFError, Errno::ECONNRESET => e

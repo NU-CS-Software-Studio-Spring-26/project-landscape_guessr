@@ -72,8 +72,7 @@ class AiGenerationPipeline
     @generation.update!(phase: "counting", progress_message: nil)
     count = safe_count(
       ai_result[:sparql_pattern],
-      fetch_strategy: ai_result[:fetch_strategy],
-      region_filter:  ai_result[:region_filter]
+      region_filter: ai_result[:region_filter]
     )
     bail_if_canceled!
     @generation.update!(result_count: count)
@@ -109,8 +108,7 @@ class AiGenerationPipeline
         @generation.update!(phase: "counting", progress_message: nil)
         count = safe_count(
           ai_result[:sparql_pattern],
-          fetch_strategy: ai_result[:fetch_strategy],
-          region_filter:  ai_result[:region_filter]
+          region_filter: ai_result[:region_filter]
         )
         bail_if_canceled!
         @generation.update!(
@@ -139,8 +137,7 @@ class AiGenerationPipeline
     @generation.update!(phase: "sampling", progress_message: nil)
     preview = safe_sample(
       ai_result[:sparql_pattern],
-      fetch_strategy: ai_result[:fetch_strategy],
-      region_filter:  ai_result[:region_filter]
+      region_filter: ai_result[:region_filter]
     )
     bail_if_canceled!
 
@@ -214,11 +211,9 @@ class AiGenerationPipeline
     end
   end
 
-  def safe_count(pattern, fetch_strategy:, region_filter: nil)
+  def safe_count(pattern, region_filter: nil)
     t0 = Time.now
-    n = WikidataImporter.count(
-      pattern: pattern, fetch_strategy: fetch_strategy, region_filter: region_filter
-    )
+    n = WikidataImporter.count(pattern: pattern, region_filter: region_filter)
     Rails.logger.info "[ai_count] #{(Time.now - t0).round(2)}s -> #{n.inspect}"
     n
   rescue WikidataImporter::Error => e
@@ -226,12 +221,9 @@ class AiGenerationPipeline
     nil
   end
 
-  def safe_sample(pattern, fetch_strategy:, region_filter: nil)
+  def safe_sample(pattern, region_filter: nil)
     t0 = Time.now
-    rows = WikidataImporter.sample(
-      pattern: pattern, limit: 30,
-      fetch_strategy: fetch_strategy, region_filter: region_filter
-    )
+    rows = WikidataImporter.sample(pattern: pattern, limit: 30, region_filter: region_filter)
     Rails.logger.info "[ai_sample] #{(Time.now - t0).round(2)}s -> #{rows.size} rows"
     rows
   rescue WikidataImporter::Error => e
