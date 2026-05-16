@@ -195,12 +195,13 @@ class WikidataImporter
       progress_cb = lambda do |done, total, _qid|
         image_set.update_columns(import_progress: done, import_total: total)
       end
-      # Per-type failures (timeout, 5xx past retries) and cap-hits (the
-      # type had >HARD_CAP matching items, so our 10k sample is a strict
-      # subset) get surfaced on the show page. Concurrent::Hash because
-      # parallel_per_type writes from multiple threads.
+      # Per-type failures (timeout, 5xx past retries) get surfaced on
+      # the show page so the user knows WHICH categories didn't make
+      # it in and can retry. We do NOT track cap-hits — the proposal
+      # page already says "imports up to 10,000 per category" upfront,
+      # so re-telling the user after the fact is just noise.
+      # Concurrent::Hash because parallel_per_type writes from many threads.
       type_failures = Concurrent::Hash.new
-      type_caps     = Concurrent::Hash.new
       error_cb = lambda do |qid, exc|
         type_failures[qid] = "#{exc.class.name.split("::").last}: #{exc.message.slice(0, 120)}"
       end
@@ -209,19 +210,14 @@ class WikidataImporter
           pattern: pattern, qid: qid,
           limit: HARD_CAP, with_label: true
         )
-        rows = run_query(sparql, read_timeout: IMPORT_READ_TIMEOUT)
-        # Returning exactly HARD_CAP rows means ORDER BY ?rand truncated
-        # — there were more items than our cap. Note for the user; the
-        # set still gets the random 10k subset.
-        type_caps[qid] = rows.size if rows.size >= HARD_CAP
-        rows
+        run_query(sparql, read_timeout: IMPORT_READ_TIMEOUT)
       end
-      warnings = {}
-      warnings[:failed_types] = type_failures.to_h if type_failures.any?
-      warnings[:capped_types] = type_caps.to_h     if type_caps.any?
-      # jsonb column: AR auto-serializes the Hash, so no .to_json. Stored
-      # as JSON object so callers can read warnings["failed_types"] etc.
-      image_set.update_columns(import_warnings: warnings) if warnings.any?
+      # jsonb column: AR auto-serializes the Hash on assignment, so no
+      # .to_json. Stored as a JSON object so the show page can read
+      # warnings["failed_types"] directly.
+      if type_failures.any?
+        image_set.update_columns(import_warnings: { failed_types: type_failures.to_h })
+      end
       results.compact.flatten
     end
 

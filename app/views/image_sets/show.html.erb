@@ -103,36 +103,20 @@
               method: :post, class: "btn-secondary text-sm" %>
       <% end %>
     </div>
-  <% elsif @image_set.import_warnings.present? && @image_set.owned_by?(Current.user) %>
-    <%# Per-type partial-success warnings from the import. Only shown to
-        the owner — non-owners don't need diagnostic noise about WDQS
-        flakiness or cap-hits, since the set itself is fine to play. %>
-    <% warnings = @image_set.import_warnings %>
-    <% failed = warnings["failed_types"] || warnings[:failed_types] %>
-    <% capped = warnings["capped_types"] || warnings[:capped_types] %>
+  <% elsif (failed = @image_set.import_warnings&.dig("failed_types")).present? && @image_set.owned_by?(Current.user) %>
+    <%# Partial-success: most categories imported but some failed at
+        WDQS (timeout, 5xx past retries). Owner-only — non-owners
+        don't need diagnostic noise, the set itself is fine to play. %>
     <div class="rounded-xl border border-amber-300 bg-amber-50 px-6 py-4 space-y-3 text-sm">
       <p class="font-medium text-amber-900">Import notes</p>
-      <% if failed.present? %>
-        <div class="text-amber-800 space-y-2">
-          <p>
-            <strong><%= failed.size %></strong>
-            <%= "category".pluralize(failed.size) %> failed at Wikidata (timeout or 5xx):
-            <span class="font-mono text-xs"><%= failed.keys.join(", ") %></span>.
-            Retries often clear it on the second try.
-          </p>
-          <%= button_to "Retry import", retry_import_image_set_path(@image_set),
-                method: :post, class: "btn-secondary text-xs" %>
-        </div>
-      <% end %>
-      <% if capped.present? %>
-        <p class="text-amber-800">
-          <strong><%= capped.size %></strong>
-          <%= "category".pluralize(capped.size) %> had more than 10,000 matching items:
-          <span class="font-mono text-xs"><%= capped.keys.join(", ") %></span>.
-          You got a true random sample of 10,000 per category. To capture
-          more, refine your prompt (narrower region, more specific category).
-        </p>
-      <% end %>
+      <p class="text-amber-800">
+        <strong><%= failed.size %></strong>
+        <%= "category".pluralize(failed.size) %> failed at Wikidata (timeout or 5xx):
+        <span class="font-mono text-xs"><%= failed.keys.join(", ") %></span>.
+        Retries often clear it on the second try.
+      </p>
+      <%= button_to "Retry import", retry_import_image_set_path(@image_set),
+            method: :post, class: "btn-secondary text-xs" %>
     </div>
   <% end %>
 
