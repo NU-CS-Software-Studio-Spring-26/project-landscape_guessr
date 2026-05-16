@@ -9,6 +9,7 @@ class PracticeController < ApplicationController
     resume_session
     @time_limit_seconds = practice_seconds_param
     @attempts = practice_attempts_param
+    @hint_circle_enabled = practice_hint_circle_param
     load_random_located_image
     return if performed?
 
@@ -125,6 +126,10 @@ class PracticeController < ApplicationController
   def practice_attempts_param
     attempts = params[:attempts].to_i
     PRACTICE_ATTEMPTS.include?(attempts) ? attempts : 1
+  end
+
+  def practice_hint_circle_param
+    params[:hint_circle].to_s == "1"
   end
 
   def current_image_from_params

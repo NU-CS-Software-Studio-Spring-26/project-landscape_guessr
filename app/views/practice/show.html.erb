@@ -14,6 +14,7 @@
      data-practice-check-url-value="<%= practice_check_path %>"
      data-practice-time-limit-value="<%= @time_limit_seconds.to_i %>"
      data-practice-attempts-value="<%= @attempts.to_i %>"
+     data-practice-hint-circle-value="<%= @hint_circle_enabled ? true : false %>"
      data-practice-signed-in-value="<%= authenticated? %>"
      data-practice-initially-saved-value="<%= @saved_for_practice ? true : false %>"
      class="w-full space-y-6">
@@ -61,6 +62,26 @@
         <%= attempts %>
       </button>
     <% end %>
+  </div>
+
+  <div class="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+    <span>Hint:</span>
+    <button type="button"
+            data-practice-target="hintOption"
+            data-action="practice#setHintCircle"
+            data-practice-enabled-param="0"
+            aria-pressed="<%= !@hint_circle_enabled %>"
+            class="rounded-full border px-2.5 py-1 font-medium transition-colors cursor-pointer <%= !@hint_circle_enabled ? 'bg-blue-100 text-blue-800 border-blue-300 shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' %>">
+      Off
+    </button>
+    <button type="button"
+            data-practice-target="hintOption"
+            data-action="practice#setHintCircle"
+            data-practice-enabled-param="1"
+            aria-pressed="<%= @hint_circle_enabled %>"
+            class="rounded-full border px-2.5 py-1 font-medium transition-colors cursor-pointer <%= @hint_circle_enabled ? 'bg-blue-100 text-blue-800 border-blue-300 shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' %>">
+      4000 km circle
+    </button>
   </div>
 
   <div data-practice-target="timerPanel"
@@ -120,47 +141,49 @@
 
   <%# Controls %>
   <div class="flex items-center gap-4">
-    <button data-practice-target="guessBtn"
-            data-action="practice#submitGuess"
-            disabled
-            class="btn-primary disabled:opacity-40 disabled:cursor-not-allowed">
-      <%= @attempts == 2 ? "Submit first attempt" : "Submit guess" %>
-    </button>
-
-    <button data-practice-target="nextBtn"
-            data-action="practice#next"
-            class="btn-secondary hidden">
-      Next image
-    </button>
-
     <p data-practice-target="result" class="text-lg font-medium"></p>
 
-    <%= link_to "View image details", @image,
-          target: "_blank",
-          aria: { label: "View image details (opens in a new tab)" },
-          data: { practice_target: "imageLink" },
-          class: "btn-secondary hidden" %>
+    <div class="ml-auto flex items-center gap-4">
+      <button data-practice-target="guessBtn"
+              data-action="practice#submitGuess"
+              disabled
+              class="btn-primary disabled:opacity-40 disabled:cursor-not-allowed">
+        <%= @attempts == 2 ? "Submit first attempt" : "Submit guess" %>
+      </button>
 
-    <% if authenticated? %>
-      <%= form_with url: practice_save_path, method: :post,
-            data: { practice_target: "saveForm", action: "submit->practice#saveForPractice" },
-            class: "hidden" do |f| %>
-        <%= f.hidden_field :image_id, value: @image.id %>
-        <%= f.hidden_field :seconds, value: @time_limit_seconds %>
-        <%= f.hidden_field :attempts, value: @attempts %>
-        <%= f.submit "Add to practice image set", class: "btn-secondary" %>
+      <%= link_to "View image details", @image,
+            target: "_blank",
+            aria: { label: "View image details (opens in a new tab)" },
+            data: { practice_target: "imageLink" },
+            class: "btn-secondary hidden" %>
+
+      <% if authenticated? %>
+        <%= form_with url: practice_save_path, method: :post,
+              data: { practice_target: "saveForm", action: "submit->practice#saveForPractice" },
+              class: "hidden" do |f| %>
+          <%= f.hidden_field :image_id, value: @image.id %>
+          <%= f.hidden_field :seconds, value: @time_limit_seconds %>
+          <%= f.hidden_field :attempts, value: @attempts %>
+          <%= f.submit "Add to practice image set", class: "btn-secondary" %>
+        <% end %>
+
+        <%= form_with url: practice_unsave_path(@image.id), method: :delete,
+              data: { practice_target: "removeForm", action: "submit->practice#removeFromSaved" },
+              class: "hidden" do |f| %>
+          <%= f.hidden_field :seconds, value: @time_limit_seconds %>
+          <%= f.hidden_field :attempts, value: @attempts %>
+          <%= f.hidden_field :from_saved, value: params[:saved].present? ? 1 : nil %>
+          <%= f.submit "Remove from saved", class: "btn-secondary" %>
+        <% end %>
+
+        <p data-practice-target="saveStatus" class="hidden text-sm font-medium"></p>
       <% end %>
 
-      <%= form_with url: practice_unsave_path(@image.id), method: :delete,
-            data: { practice_target: "removeForm", action: "submit->practice#removeFromSaved" },
-            class: "hidden" do |f| %>
-        <%= f.hidden_field :seconds, value: @time_limit_seconds %>
-        <%= f.hidden_field :attempts, value: @attempts %>
-        <%= f.hidden_field :from_saved, value: params[:saved].present? ? 1 : nil %>
-        <%= f.submit "Remove from saved", class: "btn-secondary" %>
-      <% end %>
-
-      <p data-practice-target="saveStatus" class="hidden text-sm font-medium"></p>
-    <% end %>
+      <button data-practice-target="nextBtn"
+              data-action="practice#next"
+              class="btn-primary hidden">
+        Next image
+      </button>
+    </div>
   </div>
 </div>

@@ -75,6 +75,57 @@ export default class extends Controller {
     this.locked = true
   }
 
+  showAnswerHintCircle(lat, lng, radiusKm = 4000) {
+    if (!this.map) return
+    if (!this.map.isStyleLoaded()) {
+      this.map.once("load", () => this.showAnswerHintCircle(lat, lng, radiusKm))
+      return
+    }
+
+    const sourceId = "answer-hint-circle"
+    const fillLayerId = "answer-hint-circle-fill"
+    const outlineLayerId = "answer-hint-circle-outline"
+
+    if (this.map.getLayer(fillLayerId)) this.map.removeLayer(fillLayerId)
+    if (this.map.getLayer(outlineLayerId)) this.map.removeLayer(outlineLayerId)
+    if (this.map.getSource(sourceId)) this.map.removeSource(sourceId)
+
+    this.map.addSource(sourceId, {
+      type: "geojson",
+      data: this.#circleGeoJson(lat, lng, radiusKm)
+    })
+    this.map.addLayer({
+      id: fillLayerId,
+      type: "fill",
+      source: sourceId,
+      paint: {
+        "fill-color": "#16a34a",
+        "fill-opacity": 0.08
+      }
+    })
+    this.map.addLayer({
+      id: outlineLayerId,
+      type: "line",
+      source: sourceId,
+      paint: {
+        "line-color": "#16a34a",
+        "line-width": 2,
+        "line-opacity": 0.8
+      }
+    })
+  }
+
+  hideAnswerHintCircle() {
+    if (!this.map) return
+
+    const sourceId = "answer-hint-circle"
+    const fillLayerId = "answer-hint-circle-fill"
+    const outlineLayerId = "answer-hint-circle-outline"
+    if (this.map.getLayer(fillLayerId)) this.map.removeLayer(fillLayerId)
+    if (this.map.getLayer(outlineLayerId)) this.map.removeLayer(outlineLayerId)
+    if (this.map.getSource(sourceId)) this.map.removeSource(sourceId)
+  }
+
   showAnswer(lat, lng) {
     this.lock()
 
@@ -174,6 +225,7 @@ export default class extends Controller {
       if (this.map.getSource(id)) this.map.removeSource(id)
     })
     this.otherGuessLayers = []
+    this.hideAnswerHintCircle()
     this.map.getCanvasContainer().querySelectorAll(".maplibregl-marker").forEach((el) => {
       if (el !== this.marker?._element) el.remove()
     })
@@ -185,5 +237,54 @@ export default class extends Controller {
 
   #hideLoader() {
     if (this.hasLoaderTarget) this.loaderTarget.classList.add("hidden")
+  }
+
+  #circleGeoJson(centerLat, centerLng, radiusKm) {
+    const earthRadiusKm = 6371
+    const angularDistance = radiusKm / earthRadiusKm
+    const lat1 = this.#degToRad(centerLat)
+    const lng1 = this.#degToRad(centerLng)
+    const steps = 128
+    const coords = []
+
+    for (let i = 0; i <= steps; i += 1) {
+      const bearing = (i / steps) * 2 * Math.PI
+      const lat2 = Math.asin(
+        Math.sin(lat1) * Math.cos(angularDistance) +
+        Math.cos(lat1) * Math.sin(angularDistance) * Math.cos(bearing)
+      )
+      const lng2 = lng1 + Math.atan2(
+        Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(lat1),
+        Math.cos(angularDistance) - Math.sin(lat1) * Math.sin(lat2)
+      )
+
+      coords.push([
+        this.#normalizeLng(this.#radToDeg(lng2)),
+        this.#radToDeg(lat2)
+      ])
+    }
+
+    return {
+      type: "Feature",
+      geometry: {
+        type: "Polygon",
+        coordinates: [coords]
+      }
+    }
+  }
+
+  #degToRad(v) {
+    return (v * Math.PI) / 180
+  }
+
+  #radToDeg(v) {
+    return (v * 180) / Math.PI
+  }
+
+  #normalizeLng(lng) {
+    let normalized = lng
+    while (normalized > 180) normalized -= 360
+    while (normalized < -180) normalized += 360
+    return normalized
   }
 }

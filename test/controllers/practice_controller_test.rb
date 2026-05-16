@@ -43,6 +43,13 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "Submit first attempt"
   end
 
+  test "practice enables 4000km hint circle when requested" do
+    get practice_path(hint_circle: 1)
+    assert_response :success
+    assert_includes response.body, 'data-practice-hint-circle-value="true"'
+    assert_includes response.body, "4000 km circle"
+  end
+
   test "practice falls back to one attempt on unsupported attempts value" do
     get practice_path(attempts: 9)
     assert_response :success

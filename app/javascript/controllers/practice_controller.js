@@ -1,12 +1,13 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
-  static targets = ["guessBtn", "nextBtn", "result", "imageLink", "timer", "timerBar", "timerPanel", "timerOption", "attemptsOption", "saveForm", "removeForm", "saveStatus"]
+  static targets = ["guessBtn", "nextBtn", "result", "imageLink", "timer", "timerBar", "timerPanel", "timerOption", "attemptsOption", "hintOption", "saveForm", "removeForm", "saveStatus"]
   static values = {
     imageId: Number,
     checkUrl: String,
     timeLimit: { type: Number, default: 0 },
     attempts: { type: Number, default: 1 },
+    hintCircle: { type: Boolean, default: false },
     signedIn: { type: Boolean, default: false },
     initiallySaved: { type: Boolean, default: false }
   }
@@ -15,6 +16,9 @@ export default class extends Controller {
   #timerRaf
   #endsAtMs
   #totalSeconds
+  #nextPrefetchController
+  #prefetchedNextUrl
+  #prefetchedImage
 
   connect() {
     this.guessLat = null
@@ -23,18 +27,24 @@ export default class extends Controller {
     this.resolving = false
     this.attemptIndex = 0
     this.savedForPractice = this.initiallySavedValue
+    this.#prefetchedNextUrl = null
+    this.#prefetchedImage = null
+    this.#nextPrefetchController = null
     this.#boundKeydown = this.#handleKeydown.bind(this)
     document.addEventListener("keydown", this.#boundKeydown)
 
     this.#syncTimerUi()
     if (this.timeLimitValue > 0) this.#startTimer()
     this.#syncAttemptsUi()
+    this.#syncHintUi()
+    if (this.hintCircleValue) this.#showHintCircle()
     this.#syncSavedControls()
   }
 
   disconnect() {
     document.removeEventListener("keydown", this.#boundKeydown)
     this.#clearTimer()
+    this.#clearNextPrefetch()
   }
 
   pinChanged(event) {
@@ -57,6 +67,7 @@ export default class extends Controller {
     this.#clearTimer()
     this.#syncTimerUi()
     this.#syncPracticeInUrl()
+    this.#clearNextPrefetch()
     if (!this.completed && this.timeLimitValue > 0) this.#startTimer()
   }
 
@@ -66,6 +77,17 @@ export default class extends Controller {
     this.attemptIndex = 0
     this.#syncAttemptsUi()
     this.#syncPracticeInUrl()
+    this.#clearNextPrefetch()
+  }
+
+  setHintCircle(event) {
+    const enabled = String(event.params.enabled) === "1"
+    this.hintCircleValue = enabled
+    this.#syncHintUi()
+    this.#syncPracticeInUrl()
+    this.#clearNextPrefetch()
+    if (enabled) this.#showHintCircle()
+    else this.#hideHintCircle()
   }
 
   async saveForPractice(event) {
@@ -157,6 +179,7 @@ export default class extends Controller {
       return
     }
     const { answer_lat, answer_lng, distance_km: km } = await res.json()
+    this.#resetHintForNextAttempt()
 
     // In 2-attempt mode, first submit gives distance feedback only.
     if (this.attemptsValue === 2 && this.attemptIndex === 0) {
@@ -208,6 +231,7 @@ export default class extends Controller {
 
     this.resultTarget.textContent = text
     this.resultTarget.className = `text-lg font-medium ${color}`
+    this.#prefetchNextRound()
   }
 
   async #handleTimeout() {
@@ -340,6 +364,8 @@ export default class extends Controller {
     else url.searchParams.delete("seconds")
     if (this.attemptsValue > 1) url.searchParams.set("attempts", String(this.attemptsValue))
     else url.searchParams.delete("attempts")
+    if (this.hintCircleValue) url.searchParams.set("hint_circle", "1")
+    else url.searchParams.delete("hint_circle")
     url.searchParams.set("image_id", String(this.imageIdValue))
     window.history.replaceState({}, "", url.toString())
   }
@@ -391,16 +417,84 @@ export default class extends Controller {
     this.saveStatusTarget.className = `text-sm font-medium ${colorClass}`
   }
 
+  #syncHintUi() {
+    if (!this.hasHintOptionTarget) return
+
+    this.hintOptionTargets.forEach((option) => {
+      const enabled = String(option.dataset.practiceEnabledParam || "0") === "1"
+      const active = enabled === this.hintCircleValue
+      option.setAttribute("aria-pressed", active ? "true" : "false")
+      option.classList.toggle("bg-blue-100", active)
+      option.classList.toggle("text-blue-800", active)
+      option.classList.toggle("border-blue-300", active)
+      option.classList.toggle("shadow-sm", active)
+      option.classList.toggle("bg-white", !active)
+      option.classList.toggle("text-gray-700", !active)
+      option.classList.toggle("border-gray-300", !active)
+      option.classList.toggle("hover:bg-gray-50", !active)
+    })
+  }
+
+  #resetHintForNextAttempt() {
+    if (!this.hintCircleValue) return
+    this.hintCircleValue = false
+    this.#hideHintCircle()
+    this.#syncHintUi()
+    this.#syncPracticeInUrl()
+  }
+
+  async #showHintCircle() {
+    const mapCtrl = this.#guessMapController()
+    if (!mapCtrl) return
+
+    const answer = await this.#loadAnswerForHint()
+    if (!answer) {
+      this.resultTarget.className = "text-lg font-medium text-red-600"
+      this.resultTarget.textContent = "Couldn't load 4000 km hint."
+      this.hintCircleValue = false
+      this.#syncHintUi()
+      this.#syncPracticeInUrl()
+      return
+    }
+
+    mapCtrl.showAnswerHintCircle(answer.lat, answer.lng, 4000)
+  }
+
+  #hideHintCircle() {
+    const mapCtrl = this.#guessMapController()
+    if (!mapCtrl) return
+    mapCtrl.hideAnswerHintCircle()
+  }
+
+  async #loadAnswerForHint() {
+    if (this.hintAnswerLat !== undefined && this.hintAnswerLng !== undefined) {
+      return { lat: this.hintAnswerLat, lng: this.hintAnswerLng }
+    }
+
+    const url = `${this.checkUrlValue}?image_id=${this.imageIdValue}&lat=0&lng=0`
+    const res = await fetch(url, { headers: { "Accept": "application/json" } })
+    if (!res.ok) return null
+    const { answer_lat, answer_lng } = await res.json()
+    this.hintAnswerLat = parseFloat(answer_lat)
+    this.hintAnswerLng = parseFloat(answer_lng)
+    return { lat: this.hintAnswerLat, lng: this.hintAnswerLng }
+  }
+
+  #guessMapController() {
+    return this.application.getControllerForElementAndIdentifier(
+      this.element.querySelector("[data-controller='guess-map']"),
+      "guess-map"
+    )
+  }
+
   next() {
     // Turbo.visit (not window.location.reload) so the JS context survives
     // and the MapTiler session stays the same across practice rounds.
     // `replace` keeps the back button sane — successive random images
     // shouldn't pile into history.
-    const url = new URL(window.location.href)
-    // Keep timer settings but drop image pinning so "Next image" actually
-    // advances to a new random image.
-    url.searchParams.delete("image_id")
-    Turbo.visit(url.toString(), { action: "replace" })
+    const url = this.#prefetchedNextUrl || this.#nextRoundUrl().toString()
+    this.#clearNextPrefetch()
+    Turbo.visit(url, { action: "replace" })
   }
 
   #handleKeydown(event) {
@@ -412,5 +506,71 @@ export default class extends Controller {
     } else if (!this.nextBtnTarget.classList.contains("hidden")) {
       this.next()
     }
+  }
+
+  #nextRoundUrl() {
+    const url = new URL(window.location.href)
+    if (this.timeLimitValue > 0) url.searchParams.set("seconds", String(this.timeLimitValue))
+    else url.searchParams.delete("seconds")
+    if (this.attemptsValue > 1) url.searchParams.set("attempts", String(this.attemptsValue))
+    else url.searchParams.delete("attempts")
+    if (this.hintCircleValue) url.searchParams.set("hint_circle", "1")
+    else url.searchParams.delete("hint_circle")
+    url.searchParams.delete("image_id")
+    return url
+  }
+
+  async #prefetchNextRound() {
+    this.#clearNextPrefetch()
+
+    const prefetchUrl = this.#nextRoundUrl().toString()
+    const controller = new AbortController()
+    this.#nextPrefetchController = controller
+
+    try {
+      const res = await fetch(prefetchUrl, {
+        headers: { "Accept": "text/html" },
+        credentials: "same-origin",
+        signal: controller.signal
+      })
+      if (!res.ok) return
+
+      const html = await res.text()
+      if (controller.signal.aborted) return
+
+      const doc = new DOMParser().parseFromString(html, "text/html")
+      const root = doc.querySelector("[data-controller~='practice']")
+      const nextImageId = parseInt(root?.dataset.practiceImageIdValue || "", 10)
+      if (!Number.isFinite(nextImageId)) return
+
+      const image = doc.querySelector("img[data-zoomable-target='image']")
+      const imageSrc = image?.getAttribute("src")
+      if (!imageSrc) return
+
+      const url = this.#nextRoundUrl()
+      url.searchParams.set("image_id", String(nextImageId))
+      this.#prefetchedNextUrl = url.toString()
+
+      // Warm the browser image cache so the next round appears faster.
+      this.#prefetchedImage = new Image()
+      this.#prefetchedImage.decoding = "async"
+      this.#prefetchedImage.src = imageSrc
+    } catch (error) {
+      if (error?.name !== "AbortError") this.#clearNextPrefetch()
+      return
+    } finally {
+      if (this.#nextPrefetchController === controller) {
+        this.#nextPrefetchController = null
+      }
+    }
+  }
+
+  #clearNextPrefetch() {
+    if (this.#nextPrefetchController) {
+      this.#nextPrefetchController.abort()
+      this.#nextPrefetchController = null
+    }
+    this.#prefetchedNextUrl = null
+    this.#prefetchedImage = null
   }
 }
