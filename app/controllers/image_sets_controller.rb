@@ -443,6 +443,7 @@ class ImageSetsController < ApplicationController
       ai_explanation:    result[:explanation].to_s,
       ai_model:          gen.model_used.presence || "flash",
       ai_fetch_strategy: fetch_strategy,
+      ai_region_filter:  result[:region_filter],
       import_state:      "pending"
     )
 

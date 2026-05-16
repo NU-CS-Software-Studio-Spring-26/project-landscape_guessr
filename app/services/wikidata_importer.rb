@@ -79,7 +79,13 @@ class WikidataImporter
   # — a lower bound on the true count, capped at HARD_CAP per type.
   # When a per-type result hits the cap, callers can read "≥ cap" from
   # the result_count comparison.
-  def self.count(pattern:, fetch_strategy: EXHAUSTIVE, on_progress: nil)
+  #
+  # Returns nil if EVERY per-type query errored — distinct from 0 (all
+  # queries ran successfully, no matches). Callers (pipeline) use the
+  # distinction to skip wasteful Pro retry / sample fan-out when WDQS
+  # is unable to execute the query shape at all.
+  def self.count(pattern:, fetch_strategy: EXHAUSTIVE, on_progress: nil, region_filter: nil)
+    pattern  = with_region_bbox(pattern, region_filter)
     strategy = effective_strategy(pattern, fetch_strategy)
     types    = extract_types(pattern)
 
@@ -96,6 +102,7 @@ class WikidataImporter
       rows = run_query(sparql)
       rows.first&.dig("c", "value").to_i
     end
+    return nil if results.all?(&:nil?)
     results.compact.sum
   end
 
@@ -103,7 +110,8 @@ class WikidataImporter
   # random sample for exhaustive strategy (LIMIT gives alphabetical order
   # since WDQS doesn't push LIMIT into the walk). For random_sample,
   # bd:sample really does return random rows.
-  def self.sample(pattern:, limit: 30, fetch_strategy: EXHAUSTIVE, on_progress: nil)
+  def self.sample(pattern:, limit: 30, fetch_strategy: EXHAUSTIVE, on_progress: nil, region_filter: nil)
+    pattern  = with_region_bbox(pattern, region_filter)
     strategy = effective_strategy(pattern, fetch_strategy)
     types    = extract_types(pattern)
 
@@ -149,7 +157,8 @@ class WikidataImporter
   #   "fetching"           — per-type SPARQL queries (progress = types done / total)
   #   "looking_up_images"  — Wikipedia pageimages batch
   #   "inserting"          — INSERT phase (progress = rows inserted / total)
-  def self.import!(image_set:, pattern:, fetch_strategy: EXHAUSTIVE)
+  def self.import!(image_set:, pattern:, fetch_strategy: EXHAUSTIVE, region_filter: nil)
+    pattern  = with_region_bbox(pattern, region_filter)
     strategy = effective_strategy(pattern, fetch_strategy)
     types    = extract_types(pattern)
 
@@ -178,6 +187,18 @@ class WikidataImporter
     end
 
     rows = normalize_rows(rows)
+
+    # Polygon refinement (import-only — count/sample stay bbox for speed):
+    # WDQS's bbox is a rectangle; the true region polygon is tighter, so
+    # bbox-matched items can fall outside the actual region (NH lakes
+    # leaking into a "lakes in MA" set, etc). After the bbox query
+    # returns, fetch the polygon via Nominatim (rate-limited, cached on
+    # the Region row forever after first fetch) and drop coords outside
+    # it. Mirrors what ImageSet#materialize_filtered_items! does for the
+    # manual map-filter feature.
+    if region_filter
+      rows = refine_rows_to_region_polygon(rows, region_filter, image_set: image_set)
+    end
 
     # Always enrich via Wikipedia pageimages — preserves any P18 URL we
     # already have when MediaWiki returns no pageimage (see sample/
@@ -284,6 +305,92 @@ class WikidataImporter
     pattern.sub(re) do
       Regexp.last_match(1) == ";" ? "?item" : ""
     end
+  end
+
+  # === Region BBOX injection ===
+  #
+  # When the AI emits region_name/region_parent_name/region_admin_level,
+  # the pipeline forwards them as a region_filter hash. We resolve to a
+  # Region row (exact match — Region.search ranks high-pop countries
+  # first, so it can't disambiguate "Massachusetts, United States"), then
+  # wrap the AI's pattern with SERVICE wikibase:box using the bbox
+  # already seeded from GeoNames. WDQS's native spatial index makes this
+  # ~10× faster than BIND+FILTER on coords (1.5s vs 15s in our tests for
+  # mountains-in-MA).
+  #
+  # The AI is told NEVER to compose wdt:P131* itself — that pattern
+  # reliably times out WDQS for sub-national regions. The backend takes
+  # over geo filtering whenever region_filter is set.
+
+  # Exact AR lookup. Region.search's relevance ranking favours high-
+  # population countries (tested: "Massachusetts United States" returns
+  # United States first). For our disambiguation use case we need the
+  # AI's structured fields → exact match. parent_name is optional; for
+  # countries it's typically nil.
+  def self.resolve_region_filter(region_filter)
+    return nil if region_filter.blank?
+    rf = region_filter.transform_keys(&:to_sym) rescue region_filter
+    name  = rf[:name].to_s.strip.presence
+    level = rf[:admin_level].to_s.strip.presence
+    parent_name = rf[:parent_name].to_s.strip.presence
+    return nil unless name && level
+    scope = Region.where(name: name, admin_level: level)
+    scope = scope.where(parent_id: Region.where(name: parent_name).select(:id)) if parent_name
+    scope.first
+  end
+
+  def self.with_region_bbox(pattern, region_filter)
+    region = resolve_region_filter(region_filter)
+    return pattern unless region&.min_lat && region.min_lng && region.max_lat && region.max_lng
+    # SERVICE wikibase:box uses Blazegraph's native geo-spatial index —
+    # constrains ?item (whose ?coord we've already bound) to points
+    # inside the corner rectangle. Append AFTER the AI's pattern so the
+    # outer wrap (image_or_article_block / COUNT / LIMIT) still applies
+    # uniformly. ~10× faster than BIND+FILTER on coords (measured: 1.5s
+    # vs 15s for mountains-in-MA).
+    "#{pattern.strip}\n      SERVICE wikibase:box {\n" \
+      "        ?item wdt:P625 ?coord .\n" \
+      "        bd:serviceParam wikibase:cornerSouthWest \"Point(#{region.min_lng} #{region.min_lat})\"^^geo:wktLiteral .\n" \
+      "        bd:serviceParam wikibase:cornerNorthEast \"Point(#{region.max_lng} #{region.max_lat})\"^^geo:wktLiteral .\n" \
+      "      }"
+  end
+
+  # Drops rows whose coordinates fall outside the region's actual
+  # polygon (vs. the bbox we used at WDQS). Fetches the polygon from
+  # Nominatim if not already cached on the Region row — same lazy-fetch
+  # pattern that ImageSet#materialize_filtered_items! uses for the
+  # manual map-filter feature. Rate-limited (~1 req/s in Region's
+  # nominatim_wait_for_slot!) but cached on the Region row forever
+  # after first fetch, so amortized cost is one Nominatim call per
+  # region per project lifetime.
+  #
+  # Falls back to the bbox-filtered rows if Nominatim is unreachable —
+  # degraded accuracy is better than failing the whole import.
+  def self.refine_rows_to_region_polygon(rows, region_filter, image_set:)
+    region = resolve_region_filter(region_filter)
+    return rows unless region
+
+    unless region.boundary.present?
+      image_set.update_columns(import_state: "resolving_region")
+      begin
+        region.fetch_real_boundary!
+      rescue StandardError => e
+        Rails.logger.warn "[poly_refine] Nominatim fetch failed for #{region.name}: #{e.class}: #{e.message.slice(0, 200)}"
+        return rows
+      end
+    end
+
+    polygon = region.rgeo_boundary
+    return rows unless polygon
+
+    factory = RGeo::Geographic.spherical_factory(srid: 4326)
+    kept = rows.select do |r|
+      next false unless r[:lat] && r[:lng]
+      point = factory.point(r[:lng], r[:lat])
+      polygon.contains?(point) rescue false
+    end
+    Rails.logger.info "[poly_refine] region=#{region.name} bbox_in=#{rows.size} polygon_kept=#{kept.size}"
+    kept
   end
 
   # === SPARQL builders ===

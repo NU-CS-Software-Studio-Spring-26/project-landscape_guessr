@@ -108,11 +108,20 @@ class AiImageSetGenerator
         parameters: {
           type: "OBJECT",
           properties: {
-            sparql_pattern: { type: "STRING" },
-            set_name:       { type: "STRING" },
-            explanation:    { type: "STRING" },
-            fetch_strategy: { type: "STRING" },
-            cannot_answer:  { type: "BOOLEAN" }
+            sparql_pattern:     { type: "STRING" },
+            set_name:           { type: "STRING" },
+            explanation:        { type: "STRING" },
+            fetch_strategy:     { type: "STRING" },
+            cannot_answer:      { type: "BOOLEAN" },
+            # Sub-national region filter. Flat fields (not a nested OBJECT)
+            # — nested schemas trigger MALFORMED on Flash. Backend looks up
+            # the region in our pre-indexed Region table and injects a BBOX
+            # FILTER into the SPARQL; the AI MUST NOT include wdt:P131* or
+            # any geo constraint of its own when these are set. Country-
+            # level filters stay on wdt:P17 (direct property, cheap).
+            region_name:        { type: "STRING" },
+            region_parent_name: { type: "STRING" },
+            region_admin_level: { type: "STRING" }
           },
           required: %w[sparql_pattern set_name explanation fetch_strategy cannot_answer]
         }
@@ -385,7 +394,8 @@ class AiImageSetGenerator
       set_name:       args["set_name"].to_s.strip.presence || "Untitled AI Set",
       explanation:    args["explanation"].to_s.strip,
       fetch_strategy: args["fetch_strategy"].to_s,
-      cannot_answer:  args["cannot_answer"] == true
+      cannot_answer:  args["cannot_answer"] == true,
+      region_filter:  build_region_filter(args)
     }
 
     # Default to exhaustive if unrecognized — safe (matches pre-strategy
@@ -418,6 +428,20 @@ class AiImageSetGenerator
     end
 
     payload
+  end
+
+  # Assemble the region_filter hash from the three flat AI fields. Returns
+  # nil unless we have BOTH a name and a recognized admin_level; missing
+  # parent_name is OK for countries (no parent) but lookup may be ambiguous
+  # without it for "Georgia" the state vs "Georgia" the country.
+  ALLOWED_ADMIN_LEVELS = %w[continent country admin1 admin2 city].freeze
+
+  def build_region_filter(args)
+    name        = args["region_name"].to_s.strip.presence
+    level       = args["region_admin_level"].to_s.strip.presence
+    parent_name = args["region_parent_name"].to_s.strip.presence
+    return nil unless name && ALLOWED_ADMIN_LEVELS.include?(level)
+    { name: name, parent_name: parent_name, admin_level: level }
   end
 
   def system_prompt
@@ -501,6 +525,10 @@ class AiImageSetGenerator
       - fetch_strategy: MUST be exactly "exhaustive" or "random_sample".
         See the FETCH STRATEGY section below for which to pick.
       - cannot_answer: boolean. true to refuse, false to provide a pattern.
+      - region_name, region_parent_name, region_admin_level: optional
+        sub-national region filter. See REGION FILTERS below. When set,
+        sparql_pattern MUST omit geo constraints (no wdt:P131*, no
+        wdt:P17 for the same region).
 
       MODELING PRINCIPLES (apply these before composing the pattern):
 
@@ -666,43 +694,42 @@ class AiImageSetGenerator
       50m, population > 100k), the property alone matches too many
       items — keep P31.
 
-      PERFORMANCE — Sub-national region filters with broad classes:
+      REGION FILTERS:
 
-      Country-level filters (`wdt:P17 wd:Q##`) are direct and cheap —
-      use them freely.
+      For COUNTRY-level filtering, use `wdt:P17 wd:Q##` in your
+      SPARQL — direct property, cheap, works in WDQS.
 
-      But for region filters SMALLER than a country (US states,
-      French départements, counties, cities), the standard
-      `wdt:P131* wd:Q##` containment pattern combined with broad or
-      umbrella class lists consistently times out WDQS. WDQS has to
-      walk the recursive P131 chain for every candidate item, which
-      explodes when the candidate set is large.
+      For SUB-NATIONAL regions (US states, provinces, counties,
+      cities), DO NOT use `wdt:P131*` in your SPARQL — it reliably
+      times out WDQS. Instead set the region_name / region_parent_name
+      / region_admin_level fields. The backend looks the region up in
+      our pre-indexed region table and injects a BBOX filter for you.
 
-      For sub-national region filters, do ONE of these:
+      When you set the region fields, your sparql_pattern must NOT
+      include any geo constraint — just class + coord:
 
-      1. **Narrow the classes.** Pick 1-3 specific classes rather
-         than a broad umbrella. For "nature in Massachusetts": just
-         lakes + state parks, not 15 nature sub-types. Acknowledge
-         the trade-off in your explanation ("I focused on lakes and
-         state parks — let me know if you want other features").
+        sparql_pattern:        "?item wdt:P31/wdt:P279* wd:Q23397 ; wdt:P625 ?coord ."
+        region_name:           "Massachusetts"
+        region_parent_name:    "United States"
+        region_admin_level:    "admin1"
 
-      2. **Coordinate bounding box** (for famously-bounded regions
-         where you can recall an approximate BBOX from common
-         knowledge — US states, large countries, well-known cities).
-         Drop the P131 triple entirely and FILTER on coordinates:
-
-           ?item wdt:P31/wdt:P279* wd:Q##### ; wdt:P625 ?coord .
-           BIND(geof:latitude(?coord) AS ?lat)
-           BIND(geof:longitude(?coord) AS ?lng)
-           FILTER(?lat >= 41.0 && ?lat <= 43.0 &&
-                  ?lng >= -73.5 && ?lng <= -69.9)
-
-         Don't fabricate BBOX numbers for regions you don't know.
-         When in doubt, prefer option 1.
-
-      NEVER combine `wdt:P131*` with 5+ classes in a UNION for a
-      sub-national region — that pattern is the catastrophic failure
-      case we've measured.
+      REGION FIELD RULES:
+      - region_name: Canonical English name. "United States" not
+        "USA"; "Germany" not "Deutschland"; "Bavaria" not "Bayern".
+        Lookup uses GeoNames data which only has English forms.
+      - region_parent_name: Parent administrative region's English
+        name. For admin1, the country ("United States"). For city,
+        the admin1 or admin2 ("Massachusetts" for Cambridge MA,
+        "Cambridgeshire" for Cambridge UK).
+      - region_admin_level: exactly one of "country", "admin1"
+        (states/provinces), "admin2" (counties), "city".
+      - Omit ALL three fields when the user's "region" isn't a formal
+        admin unit ("the South", "Northern California", "the Mediterranean
+        coast"). Either reinterpret as a country/state, or refuse.
+      - For country-level filtering, leave region fields empty and
+        use `wdt:P17 wd:Q##` in the pattern as before — countries
+        have weirdly-shaped bboxes (Russia, USA) so direct P17 is
+        more accurate.
 
       EXPLANATION STYLE:
       - Plain English, friendly, no jargon.
@@ -714,7 +741,10 @@ class AiImageSetGenerator
       - When cannot_answer=true, suggest the nearest workable
         alternative if one exists. Avoid bare "I can't" dead-ends.
 
-      ONE EXAMPLE FLOW — user: "volcanoes in Japan"
+      EXAMPLE FLOWS
+
+      Country-level (use wdt:P17 in SPARQL, no region_* fields) —
+      user: "volcanoes in Japan"
 
         search_wikidata("volcano") → Q8072 "type of mountain" ✓
         search_wikidata("Japan")   → Q17  "country in East Asia" ✓
@@ -724,6 +754,22 @@ class AiImageSetGenerator
           explanation: "I'll find volcanoes located in Japan that have photos.",
           fetch_strategy: "exhaustive",
           cannot_answer: false
+        )
+
+      Sub-national (use region_* fields, NO geo in SPARQL) —
+      user: "lakes in Massachusetts"
+
+        search_wikidata("lake") → Q23397 "body of water" ✓
+        (no need to search "Massachusetts" — the backend resolves it)
+        submit_answer(
+          sparql_pattern: "?item wdt:P31/wdt:P279* wd:Q23397 ; wdt:P625 ?coord .",
+          set_name: "Lakes in Massachusetts",
+          explanation: "I'll find lakes located in Massachusetts that have photos.",
+          fetch_strategy: "exhaustive",
+          cannot_answer: false,
+          region_name: "Massachusetts",
+          region_parent_name: "United States",
+          region_admin_level: "admin1"
         )
     PROMPT
   end

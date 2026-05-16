@@ -20,7 +20,8 @@ class AiImportImagesJob < ApplicationJob
     WikidataImporter.import!(
       image_set:      image_set,
       pattern:        image_set.ai_query,
-      fetch_strategy: image_set.ai_fetch_strategy.presence || "exhaustive"
+      fetch_strategy: image_set.ai_fetch_strategy.presence || "exhaustive",
+      region_filter:  image_set.ai_region_filter
     )
 
     # If the parent had filtered children (uncommon for AI sets, but

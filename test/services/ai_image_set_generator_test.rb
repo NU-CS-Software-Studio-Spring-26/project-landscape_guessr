@@ -111,6 +111,36 @@ class AiImageSetGeneratorTest < ActiveSupport::TestCase
     end
   end
 
+  test "region_filter is assembled from flat fields when all valid" do
+    gen = AiImageSetGenerator.new(api_key: "stub")
+    args = {
+      sparql_pattern: "?item wdt:P31 wd:Q23397 ; wdt:P625 ?coord .",
+      set_name: "Lakes in Massachusetts", explanation: "Lakes in Mass.",
+      cannot_answer: false,
+      region_name: "Massachusetts",
+      region_parent_name: "United States",
+      region_admin_level: "admin1"
+    }
+    queue_gemini_responses([ submit_answer_envelope(args) ]) do
+      r = gen.generate(conversation: [ { role: "user", text: "lakes in mass" } ])
+      assert_equal({ name: "Massachusetts", parent_name: "United States", admin_level: "admin1" },
+                   r[:region_filter])
+    end
+  end
+
+  test "region_filter is nil when admin_level is missing or invalid" do
+    gen = AiImageSetGenerator.new(api_key: "stub")
+    args = {
+      sparql_pattern: "?item wdt:P31 wd:Q23397 ; wdt:P625 ?coord .",
+      set_name: "X", explanation: "x", cannot_answer: false,
+      region_name: "Wherever", region_admin_level: "galactic_sector"
+    }
+    queue_gemini_responses([ submit_answer_envelope(args) ]) do
+      r = gen.generate(conversation: [ { role: "user", text: "x" } ])
+      assert_nil r[:region_filter]
+    end
+  end
+
   test "rate-limit error bubbles up after retries" do
     gen = AiImageSetGenerator.new(api_key: "stub")
     # Burn both attempts on HTTP 429 — the retry inside post_with_retry

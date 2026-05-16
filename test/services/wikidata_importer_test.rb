@@ -261,6 +261,66 @@ class WikidataImporterTest < ActiveSupport::TestCase
   rescue StandardError => e
     flunk "Expected no raise, got #{e.class}: #{e.message}"
   end
+
+  # === Region BBOX injection ===
+
+  test "resolve_region_filter exact-matches by name+admin_level+parent" do
+    mass = WikidataImporter.resolve_region_filter(
+      name: "Massachusetts", parent_name: "United States", admin_level: "admin1"
+    )
+    assert_equal "Massachusetts", mass&.name
+    assert_equal "admin1", mass&.admin_level
+    refute_nil mass.min_lat
+  end
+
+  test "resolve_region_filter disambiguates Georgia state vs country" do
+    state   = WikidataImporter.resolve_region_filter(
+      name: "Georgia", parent_name: "United States", admin_level: "admin1"
+    )
+    country = WikidataImporter.resolve_region_filter(name: "Georgia", admin_level: "country")
+    assert_equal "admin1",  state&.admin_level
+    assert_equal "country", country&.admin_level
+    refute_equal state.id, country.id
+  end
+
+  test "resolve_region_filter returns nil for non-canonical names" do
+    assert_nil WikidataImporter.resolve_region_filter(
+      name: "Bayern", parent_name: "Germany", admin_level: "admin1"
+    )
+    assert_nil WikidataImporter.resolve_region_filter(
+      name: "Massachusetts", parent_name: "USA", admin_level: "admin1"
+    )
+    assert_nil WikidataImporter.resolve_region_filter(name: nil, admin_level: "admin1")
+  end
+
+  test "resolve_region_filter accepts both symbol and string keys" do
+    via_symbols = WikidataImporter.resolve_region_filter(
+      name: "Massachusetts", parent_name: "United States", admin_level: "admin1"
+    )
+    via_strings = WikidataImporter.resolve_region_filter(
+      "name" => "Massachusetts", "parent_name" => "United States", "admin_level" => "admin1"
+    )
+    assert_equal via_symbols.id, via_strings.id
+  end
+
+  test "with_region_bbox appends SERVICE wikibase:box block when region resolves" do
+    pattern = "?item wdt:P31 wd:Q23397 ; wdt:P625 ?coord ."
+    wrapped = WikidataImporter.with_region_bbox(pattern,
+      name: "Massachusetts", parent_name: "United States", admin_level: "admin1")
+    assert_includes wrapped, "SERVICE wikibase:box"
+    assert_includes wrapped, "cornerSouthWest"
+    assert_includes wrapped, "cornerNorthEast"
+    assert_match(/Point\(-?\d+\.\d+ -?\d+\.\d+\)/, wrapped)
+    # Original pattern preserved at the start
+    assert wrapped.start_with?(pattern)
+  end
+
+  test "with_region_bbox returns pattern unchanged when region_filter is blank or unresolvable" do
+    pattern = "?item wdt:P31 wd:Q23397 ; wdt:P625 ?coord ."
+    assert_equal pattern, WikidataImporter.with_region_bbox(pattern, nil)
+    assert_equal pattern, WikidataImporter.with_region_bbox(pattern,
+      name: "Bayern", parent_name: "Germany", admin_level: "admin1")
+  end
 end
 
 # Mirror of the helper used in ai_image_set_generator_test.rb. Lets a

@@ -96,6 +96,26 @@ class AiGenerationPipelineTest < ActiveSupport::TestCase
     assert_equal "Volcanoes (better)", gen.result[:set_name]
   end
 
+  test "unresolvable region_filter fails fast with a helpful message; no Wikidata call" do
+    gen = AiGeneration.create!(
+      user: @user, status: "pending", user_message: "lakes in bayern",
+      conversation_json: [ { role: "user", text: "lakes in bayern" } ].to_json
+    )
+    ai_with_bad_region = AI_RESULT.merge(
+      region_filter: { name: "Bayern", parent_name: "Germany", admin_level: "admin1" }
+    )
+    count_called = false
+    with_stubbed_generator(returns: ai_with_bad_region) do
+      stub_class_method(WikidataImporter, :count, ->(*_a, **_k) { count_called = true; 0 }) do
+        AiGenerationPipeline.new(generation: gen).run
+      end
+    end
+    refute count_called, "count should not run when region is unresolvable"
+    gen.reload
+    assert_equal "failed", gen.status
+    assert_match(/canonical English name|couldn't find/i, gen.error.to_s)
+  end
+
   test "Wikidata count failure marks generation failed with actionable message; skips sample" do
     gen = AiGeneration.create!(
       user: @user, status: "pending", user_message: "volcanoes",

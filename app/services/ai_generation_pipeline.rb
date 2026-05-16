@@ -52,9 +52,29 @@ class AiGenerationPipeline
       return
     end
 
+    # Validate region_filter UPFRONT — if AI emitted a region we can't
+    # resolve (typo, native-language name, region not in our Region
+    # table), fail with a specific message instead of silently running
+    # the query without region constraint and returning global results.
+    if ai_result[:region_filter] && WikidataImporter.resolve_region_filter(ai_result[:region_filter]).nil?
+      rf = ai_result[:region_filter]
+      label = "#{rf[:name]}#{rf[:parent_name] ? ", #{rf[:parent_name]}" : ""}"
+      @generation.update!(
+        status:           "failed",
+        phase:            nil,
+        progress_message: nil,
+        error:            "I couldn't find region '#{label}' in our database. Try a canonical English name (e.g. 'Bavaria' not 'Bayern', 'United States' not 'USA')."
+      )
+      return
+    end
+
     check_deadline!
     @generation.update!(phase: "counting", progress_message: nil)
-    count = safe_count(ai_result[:sparql_pattern], fetch_strategy: ai_result[:fetch_strategy])
+    count = safe_count(
+      ai_result[:sparql_pattern],
+      fetch_strategy: ai_result[:fetch_strategy],
+      region_filter:  ai_result[:region_filter]
+    )
     bail_if_canceled!
     @generation.update!(result_count: count)
 
@@ -83,8 +103,15 @@ class AiGenerationPipeline
         conversation[-1] = { role: "model", text: ai_result.to_json }
         check_deadline!
         # Re-enter the counting phase for the Pro answer's recount.
+        # CRITICAL: pass region_filter through here too — without it, the
+        # Pro-retry count is unfiltered (fan-out across every type, no
+        # SERVICE wikibase:box) and takes ~90s for a broad umbrella.
         @generation.update!(phase: "counting", progress_message: nil)
-        count = safe_count(ai_result[:sparql_pattern], fetch_strategy: ai_result[:fetch_strategy])
+        count = safe_count(
+          ai_result[:sparql_pattern],
+          fetch_strategy: ai_result[:fetch_strategy],
+          region_filter:  ai_result[:region_filter]
+        )
         bail_if_canceled!
         @generation.update!(
           model_used:        "pro",
@@ -112,7 +139,8 @@ class AiGenerationPipeline
     @generation.update!(phase: "sampling", progress_message: nil)
     preview = safe_sample(
       ai_result[:sparql_pattern],
-      fetch_strategy: ai_result[:fetch_strategy]
+      fetch_strategy: ai_result[:fetch_strategy],
+      region_filter:  ai_result[:region_filter]
     )
     bail_if_canceled!
 
@@ -186,20 +214,23 @@ class AiGenerationPipeline
     end
   end
 
-  def safe_count(pattern, fetch_strategy:)
+  def safe_count(pattern, fetch_strategy:, region_filter: nil)
     t0 = Time.now
-    n = WikidataImporter.count(pattern: pattern, fetch_strategy: fetch_strategy)
-    Rails.logger.info "[ai_count] #{(Time.now - t0).round(2)}s -> #{n}"
+    n = WikidataImporter.count(
+      pattern: pattern, fetch_strategy: fetch_strategy, region_filter: region_filter
+    )
+    Rails.logger.info "[ai_count] #{(Time.now - t0).round(2)}s -> #{n.inspect}"
     n
   rescue WikidataImporter::Error => e
     Rails.logger.warn "[ai_count] err #{e.class}: #{e.message.slice(0, 200)}"
     nil
   end
 
-  def safe_sample(pattern, fetch_strategy:)
+  def safe_sample(pattern, fetch_strategy:, region_filter: nil)
     t0 = Time.now
     rows = WikidataImporter.sample(
-      pattern: pattern, limit: 30, fetch_strategy: fetch_strategy
+      pattern: pattern, limit: 30,
+      fetch_strategy: fetch_strategy, region_filter: region_filter
     )
     Rails.logger.info "[ai_sample] #{(Time.now - t0).round(2)}s -> #{rows.size} rows"
     rows

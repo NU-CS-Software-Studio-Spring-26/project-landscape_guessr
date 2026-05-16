@@ -1,0 +1,46 @@
+# Minimal Region fixtures for tests that exercise the AI region_filter
+# disambiguation path. The full GeoNames seed (~200k rows) is dev-only
+# (bin/rails regions:seed_all takes ~10 min); these fixtures cover the
+# disambiguation cases we test in WikidataImporterTest.
+
+united_states:
+  name: United States
+  normalized_name: united states
+  admin_level: country
+  iso_code: USA
+  min_lat: 24.3
+  max_lat: 49.4
+  min_lng: -124.8
+  max_lng: -66.9
+
+georgia_country:
+  name: Georgia
+  normalized_name: georgia
+  admin_level: country
+  iso_code: GEO
+  min_lat: 41.24
+  max_lat: 43.39
+  min_lng: 40.0
+  max_lng: 46.7
+
+massachusetts:
+  name: Massachusetts
+  normalized_name: massachusetts
+  admin_level: admin1
+  iso_code: US.MA
+  parent: united_states
+  min_lat: 41.1888853
+  max_lat: 42.8867783
+  min_lng: -73.5082102
+  max_lng: -69.8601402
+
+georgia_state:
+  name: Georgia
+  normalized_name: georgia
+  admin_level: admin1
+  iso_code: US.GA
+  parent: united_states
+  min_lat: 30.7
+  max_lat: 34.99
+  min_lng: -85.6
+  max_lng: -80.8
