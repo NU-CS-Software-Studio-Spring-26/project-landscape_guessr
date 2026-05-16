@@ -114,9 +114,14 @@ class WikidataImporter
     pattern  = with_region_bbox(pattern, region_filter)
     strategy = effective_strategy(pattern, fetch_strategy)
     types    = extract_types(pattern)
+    # With region_filter, polygon refinement after the bbox query drops
+    # ~30-50% of rows (border + ocean overshoot). Oversample at WDQS so
+    # the user still sees `limit` polygon-accurate thumbnails. Without
+    # this the 30-row preview ends up with ~10-15 visible after refine.
+    region_oversample = region_filter ? 3 : 1
 
     rows = if types.empty?
-      run_query(wrap_with_limit(pattern, limit: limit, with_label: true))
+      run_query(wrap_with_limit(pattern, limit: limit * region_oversample, with_label: true))
     else
       # For random_sample, oversample inside bd:sample to compensate for
       # outer-filter losses (only ~15-20% of random items have
@@ -124,7 +129,11 @@ class WikidataImporter
       # surviving). Without this multiplier, a 30-row preview from 14
       # types ends up with 5 visible rows after filtering.
       base_per_type = (limit.to_f / types.size).ceil + 2
-      per_type_limit = strategy == RANDOM_SAMPLE ? base_per_type * 20 : base_per_type
+      per_type_limit = if strategy == RANDOM_SAMPLE
+        base_per_type * 20
+      else
+        base_per_type * region_oversample
+      end
       results = parallel_per_type(types, on_progress: on_progress) do |qid|
         sparql = build_per_type_sparql(
           pattern: pattern, qid: qid, strategy: strategy,
@@ -136,6 +145,10 @@ class WikidataImporter
     end
 
     rows = normalize_rows(rows)
+    # Polygon refinement (BEFORE pageimages so we don't waste API calls
+    # on items the polygon will drop) — same helper used by import! so
+    # the preview matches what would actually get imported.
+    rows = refine_rows_to_region_polygon(rows, region_filter) if region_filter
     # Always enrich via Wikipedia pageimages. WikipediaImageFetcher's
     # `next if filename.blank?` preserves any P18 URL we already have
     # when MediaWiki returns no pageimage — so pageimages mode is a
@@ -188,17 +201,12 @@ class WikidataImporter
 
     rows = normalize_rows(rows)
 
-    # Polygon refinement (import-only — count/sample stay bbox for speed):
-    # WDQS's bbox is a rectangle; the true region polygon is tighter, so
-    # bbox-matched items can fall outside the actual region (NH lakes
-    # leaking into a "lakes in MA" set, etc). After the bbox query
-    # returns, fetch the polygon via Nominatim (rate-limited, cached on
-    # the Region row forever after first fetch) and drop coords outside
-    # it. Mirrors what ImageSet#materialize_filtered_items! does for the
-    # manual map-filter feature.
-    if region_filter
-      rows = refine_rows_to_region_polygon(rows, region_filter, image_set: image_set)
-    end
+    # Polygon refinement: WDQS's bbox is a rectangle; the true region
+    # polygon is tighter, so bbox-matched items can fall outside the
+    # actual region (NH lakes leaking into a "lakes in MA" set, etc).
+    # Drop them BEFORE pageimages enrichment so we don't waste API
+    # calls on items the polygon will remove.
+    rows = refine_rows_to_region_polygon(rows, region_filter) if region_filter
 
     # Always enrich via Wikipedia pageimages — preserves any P18 URL we
     # already have when MediaWiki returns no pageimage (see sample/
@@ -377,14 +385,16 @@ class WikidataImporter
   # after first fetch, so amortized cost is one Nominatim call per
   # region per project lifetime.
   #
-  # Falls back to the bbox-filtered rows if Nominatim is unreachable —
-  # degraded accuracy is better than failing the whole import.
-  def self.refine_rows_to_region_polygon(rows, region_filter, image_set:)
+  # Used by BOTH sample (so the preview thumbnails match what the
+  # import will land) and import! (so the persisted set is polygon-
+  # accurate, not bbox-overshooting). Falls back to the bbox-filtered
+  # rows if Nominatim is unreachable — degraded accuracy is better
+  # than failing the whole flow.
+  def self.refine_rows_to_region_polygon(rows, region_filter)
     region = resolve_region_filter(region_filter)
     return rows unless region
 
     unless region.boundary.present?
-      image_set.update_columns(import_state: "resolving_region")
       begin
         region.fetch_real_boundary!
       rescue StandardError => e
