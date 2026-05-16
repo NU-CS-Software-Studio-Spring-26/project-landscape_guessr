@@ -83,19 +83,6 @@
           <%= hidden_field_tag "guess[image_id]", @image.id %>
           <%= hidden_field_tag "guess[latitude]", "", data: { game_target: "latitude" } %>
           <%= hidden_field_tag "guess[longitude]", "", data: { game_target: "longitude" } %>
-          <div class="flex flex-wrap items-center gap-3">
-            <label class="text-sm text-gray-600">
-              Round timer
-              <select data-game-target="timerSelect"
-                      data-action="change->game#timerChanged"
-                      class="ml-2 rounded-md border border-gray-300 px-2 py-1 text-sm">
-                <option value="0">Off</option>
-                <option value="30">30s</option>
-                <option value="60">60s</option>
-              </select>
-            </label>
-            <span data-game-target="timer" class="text-sm text-gray-500">Timer off</span>
-          </div>
           <div class="flex items-center gap-2">
             <span data-game-target="readout" class="text-sm text-gray-600">Click the map to drop a pin.</span>
             <p data-game-target="result" class="text-lg font-medium"></p>

@@ -1,7 +1,10 @@
 import { Controller } from "@hotwired/stimulus"
+import { MAPTILER_KEY } from "lib/maptiler"
+
+const HINT_RADIUS_OPTIONS_KM = [0, 500, 750, 1000, 1500, 2000, 3000, 4000]
 
 export default class extends Controller {
-  static targets = ["guessBtn", "nextBtn", "result", "imageLink", "timer", "timerBar", "timerPanel", "timerOption", "attemptsOption", "hintOption", "saveForm", "removeForm", "saveStatus"]
+  static targets = ["guessBtn", "nextBtn", "result", "imageLink", "timer", "timerBar", "timerPanel", "timerOption", "attemptsOption", "hintTypeOption", "hintRadiusPanel", "hintRadiusOption", "hintLocationPanel", "hintLocationOption", "hintReadout", "saveForm", "removeForm", "saveStatus"]
   static values = {
     imageId: Number,
     checkUrl: String,
@@ -19,6 +22,7 @@ export default class extends Controller {
   #nextPrefetchController
   #prefetchedNextUrl
   #prefetchedImage
+  #hintLocationRequestId
 
   connect() {
     this.guessLat = null
@@ -30,6 +34,10 @@ export default class extends Controller {
     this.#prefetchedNextUrl = null
     this.#prefetchedImage = null
     this.#nextPrefetchController = null
+    this.#hintLocationRequestId = 0
+    this.hintLocationMessage = ""
+    this.hintLocationDetails = null
+    this.#initializeHintStateFromUrl()
     this.#boundKeydown = this.#handleKeydown.bind(this)
     document.addEventListener("keydown", this.#boundKeydown)
 
@@ -37,7 +45,7 @@ export default class extends Controller {
     if (this.timeLimitValue > 0) this.#startTimer()
     this.#syncAttemptsUi()
     this.#syncHintUi()
-    if (this.hintCircleValue) this.#showHintCircle()
+    this.#applyHintSelection()
     this.#syncSavedControls()
   }
 
@@ -80,14 +88,29 @@ export default class extends Controller {
     this.#clearNextPrefetch()
   }
 
-  setHintCircle(event) {
-    const enabled = String(event.params.enabled) === "1"
-    this.hintCircleValue = enabled
-    this.#syncHintUi()
-    this.#syncPracticeInUrl()
-    this.#clearNextPrefetch()
-    if (enabled) this.#showHintCircle()
-    else this.#hideHintCircle()
+  setHintType(event) {
+    const type = String(event.params.type || "off")
+    if (!["off", "radius", "location"].includes(type)) return
+    this.hintType = type
+    if (type === "radius") this.hintRadiusKm = 0
+    if (type === "location") this.hintLocationLevel = "none"
+    this.#applyHintSelection()
+  }
+
+  setHintRadius(event) {
+    const radius = parseInt(event.params.radius, 10)
+    if (!HINT_RADIUS_OPTIONS_KM.includes(radius)) return
+    this.hintType = "radius"
+    this.hintRadiusKm = radius
+    this.#applyHintSelection()
+  }
+
+  setHintLocationLevel(event) {
+    const level = String(event.params.level || "none")
+    if (!["none", "continent", "country"].includes(level)) return
+    this.hintType = "location"
+    this.hintLocationLevel = level
+    this.#applyHintSelection()
   }
 
   async saveForPractice(event) {
@@ -324,14 +347,7 @@ export default class extends Controller {
         const optionSeconds = parseInt(option.dataset.practiceSecondsParam || "0", 10)
         const active = optionSeconds === this.timeLimitValue
         option.setAttribute("aria-pressed", active ? "true" : "false")
-        option.classList.toggle("bg-blue-100", active)
-        option.classList.toggle("text-blue-800", active)
-        option.classList.toggle("border-blue-300", active)
-        option.classList.toggle("shadow-sm", active)
-        option.classList.toggle("bg-white", !active)
-        option.classList.toggle("text-gray-700", !active)
-        option.classList.toggle("border-gray-300", !active)
-        option.classList.toggle("hover:bg-gray-50", !active)
+        this.#syncOptionButtonStyle(option, active)
       })
     }
   }
@@ -342,14 +358,7 @@ export default class extends Controller {
         const optionAttempts = parseInt(option.dataset.practiceAttemptsParam || "1", 10)
         const active = optionAttempts === this.attemptsValue
         option.setAttribute("aria-pressed", active ? "true" : "false")
-        option.classList.toggle("bg-blue-100", active)
-        option.classList.toggle("text-blue-800", active)
-        option.classList.toggle("border-blue-300", active)
-        option.classList.toggle("shadow-sm", active)
-        option.classList.toggle("bg-white", !active)
-        option.classList.toggle("text-gray-700", !active)
-        option.classList.toggle("border-gray-300", !active)
-        option.classList.toggle("hover:bg-gray-50", !active)
+        this.#syncOptionButtonStyle(option, active)
       })
     }
 
@@ -364,8 +373,18 @@ export default class extends Controller {
     else url.searchParams.delete("seconds")
     if (this.attemptsValue > 1) url.searchParams.set("attempts", String(this.attemptsValue))
     else url.searchParams.delete("attempts")
-    if (this.hintCircleValue) url.searchParams.set("hint_circle", "1")
-    else url.searchParams.delete("hint_circle")
+    if (this.hintType === "radius") {
+      url.searchParams.set("hint_type", "radius")
+      url.searchParams.set("hint_radius", String(this.hintRadiusKm))
+    } else if (this.hintType === "location") {
+      url.searchParams.set("hint_type", "location")
+      url.searchParams.set("hint_location", this.hintLocationLevel)
+    } else {
+      url.searchParams.delete("hint_type")
+      url.searchParams.delete("hint_radius")
+      url.searchParams.delete("hint_location")
+    }
+    url.searchParams.delete("hint_circle")
     url.searchParams.set("image_id", String(this.imageIdValue))
     window.history.replaceState({}, "", url.toString())
   }
@@ -418,46 +437,182 @@ export default class extends Controller {
   }
 
   #syncHintUi() {
-    if (!this.hasHintOptionTarget) return
+    if (this.hasHintTypeOptionTarget) {
+      this.hintTypeOptionTargets.forEach((option) => {
+        const type = String(option.dataset.practiceTypeParam || "off")
+        const active = type === this.hintType
+        option.setAttribute("aria-pressed", active ? "true" : "false")
+        this.#syncOptionButtonStyle(option, active)
+      })
+    }
 
-    this.hintOptionTargets.forEach((option) => {
-      const enabled = String(option.dataset.practiceEnabledParam || "0") === "1"
-      const active = enabled === this.hintCircleValue
-      option.setAttribute("aria-pressed", active ? "true" : "false")
-      option.classList.toggle("bg-blue-100", active)
-      option.classList.toggle("text-blue-800", active)
-      option.classList.toggle("border-blue-300", active)
-      option.classList.toggle("shadow-sm", active)
-      option.classList.toggle("bg-white", !active)
-      option.classList.toggle("text-gray-700", !active)
-      option.classList.toggle("border-gray-300", !active)
-      option.classList.toggle("hover:bg-gray-50", !active)
+    if (this.hasHintRadiusPanelTarget) {
+      this.hintRadiusPanelTarget.classList.toggle("hidden", this.hintType !== "radius")
+    }
+    if (this.hasHintRadiusOptionTarget) {
+      this.hintRadiusOptionTargets.forEach((option) => {
+        const radius = parseInt(option.dataset.practiceRadiusParam || "0", 10)
+        const active = this.hintType === "radius" && radius === this.hintRadiusKm
+        option.setAttribute("aria-pressed", active ? "true" : "false")
+        this.#syncOptionButtonStyle(option, active)
+      })
+    }
+
+    if (this.hasHintLocationPanelTarget) {
+      this.hintLocationPanelTarget.classList.toggle("hidden", this.hintType !== "location")
+    }
+    if (this.hasHintLocationOptionTarget) {
+      this.hintLocationOptionTargets.forEach((option) => {
+        const level = String(option.dataset.practiceLevelParam || "continent")
+        const active = this.hintType === "location" && level === this.hintLocationLevel
+        option.setAttribute("aria-pressed", active ? "true" : "false")
+        this.#syncOptionButtonStyle(option, active)
+      })
+    }
+
+    if (this.hasHintReadoutTarget) {
+      const showReadout = this.hintType === "location" && this.hintLocationMessage.length > 0
+      this.hintReadoutTarget.textContent = this.hintLocationMessage
+      this.hintReadoutTarget.classList.toggle("hidden", !showReadout)
+    }
+  }
+
+  #syncOptionButtonStyle(option, active) {
+    option.classList.toggle("btn-primary", active)
+    option.classList.toggle("btn-secondary", !active)
+  }
+
+  async #applyHintSelection() {
+    this.#syncHintUi()
+    this.#syncPracticeInUrl()
+    this.#clearNextPrefetch()
+
+    if (this.hintType === "radius") {
+      this.hintLocationMessage = ""
+      this.#syncHintUi()
+      await this.#showHintCircle()
+      return
+    }
+
+    this.#hideHintCircle()
+    if (this.hintType === "location") {
+      await this.#showLocationHint()
+      return
+    }
+
+    this.hintLocationMessage = ""
+    this.#syncHintUi()
+  }
+
+  #initializeHintStateFromUrl() {
+    const params = new URLSearchParams(window.location.search)
+    const type = params.get("hint_type")
+    const radius = parseInt(params.get("hint_radius") || "", 10)
+    const level = params.get("hint_location")
+
+    if (type === "radius") this.hintType = "radius"
+    else if (type === "location") this.hintType = "location"
+    else this.hintType = this.hintCircleValue ? "radius" : "off"
+
+    this.hintRadiusKm = HINT_RADIUS_OPTIONS_KM.includes(radius) ? radius : 0
+    this.hintLocationLevel = ["none", "continent", "country"].includes(level) ? level : "none"
+  }
+
+  async #showLocationHint() {
+    if (this.hintLocationLevel === "none") {
+      this.hintLocationMessage = ""
+      this.#syncHintUi()
+      return
+    }
+
+    this.hintLocationMessage = "Loading location hint…"
+    this.#syncHintUi()
+
+    const requestId = this.#hintLocationRequestId + 1
+    this.#hintLocationRequestId = requestId
+    const currentLevel = this.hintLocationLevel
+    const answer = await this.#loadAnswerForHint()
+    if (!answer || requestId !== this.#hintLocationRequestId) return
+
+    const details = await this.#loadLocationHintDetails(answer.lat, answer.lng)
+    if (requestId !== this.#hintLocationRequestId || this.hintType !== "location") return
+
+    if (!details) {
+      this.hintLocationMessage = "Couldn't load location hint."
+      this.#syncHintUi()
+      return
+    }
+
+    if (currentLevel === "country") {
+      this.hintLocationMessage = `Hint: Country — ${details.country || "Unknown"}`
+    } else {
+      this.hintLocationMessage = `Hint: Continent — ${details.continent || "Unknown"}`
+    }
+    this.#syncHintUi()
+  }
+
+  async #loadLocationHintDetails(lat, lng) {
+    if (this.hintLocationDetails) return this.hintLocationDetails
+
+    const endpoint = `https://api.maptiler.com/geocoding/${lng},${lat}.json?key=${encodeURIComponent(MAPTILER_KEY)}&language=en&limit=8`
+    const res = await fetch(endpoint, { headers: { "Accept": "application/json" } })
+    if (!res.ok) return null
+
+    const payload = await res.json()
+    const details = { continent: "", country: "" }
+    const features = Array.isArray(payload?.features) ? payload.features : []
+
+    features.forEach((feature) => {
+      const placeTypes = Array.isArray(feature?.place_type) ? feature.place_type : []
+      if (!details.country && placeTypes.includes("country")) {
+        details.country = feature?.text || feature?.place_name || ""
+      }
+      if (!details.continent && placeTypes.includes("continent")) {
+        details.continent = feature?.text || feature?.place_name || ""
+      }
+
+      const context = Array.isArray(feature?.context) ? feature.context : []
+      context.forEach((entry) => {
+        const id = String(entry?.id || "")
+        if (!details.country && id.startsWith("country")) details.country = entry?.text || ""
+        if (!details.continent && id.startsWith("continent")) details.continent = entry?.text || ""
+      })
     })
+
+    this.hintLocationDetails = details
+    return details
   }
 
   #resetHintForNextAttempt() {
-    if (!this.hintCircleValue) return
-    this.hintCircleValue = false
+    if (this.hintType === "off") return
+    this.hintType = "off"
+    this.hintLocationMessage = ""
     this.#hideHintCircle()
     this.#syncHintUi()
     this.#syncPracticeInUrl()
   }
 
   async #showHintCircle() {
+    if (this.hintRadiusKm <= 0) {
+      this.#hideHintCircle()
+      return
+    }
+
     const mapCtrl = this.#guessMapController()
     if (!mapCtrl) return
 
     const answer = await this.#loadAnswerForHint()
     if (!answer) {
       this.resultTarget.className = "text-lg font-medium text-red-600"
-      this.resultTarget.textContent = "Couldn't load 4000 km hint."
-      this.hintCircleValue = false
+      this.resultTarget.textContent = `Couldn't load ${this.hintRadiusKm} km hint.`
+      this.hintType = "off"
+      this.hintLocationMessage = ""
       this.#syncHintUi()
       this.#syncPracticeInUrl()
       return
     }
 
-    mapCtrl.showAnswerHintCircle(answer.lat, answer.lng, 4000)
+    mapCtrl.showAnswerHintCircle(answer.lat, answer.lng, this.hintRadiusKm)
   }
 
   #hideHintCircle() {
@@ -498,14 +653,33 @@ export default class extends Controller {
   }
 
   #handleKeydown(event) {
-    if (event.code !== "Space") return
-    event.preventDefault()
+    if (event.defaultPrevented) return
+    if (event.altKey || event.ctrlKey || event.metaKey) return
+    if (this.#isEditableTarget(event.target)) return
 
-    if (!this.guessBtnTarget.classList.contains("hidden") && !this.guessBtnTarget.disabled) {
-      this.submitGuess()
-    } else if (!this.nextBtnTarget.classList.contains("hidden")) {
-      this.next()
+    const key = String(event.key || "").toLowerCase()
+    const canSubmit = !this.guessBtnTarget.classList.contains("hidden") && !this.guessBtnTarget.disabled
+    const canNext = !this.nextBtnTarget.classList.contains("hidden")
+
+    if (event.code === "Space" || event.key === "Enter") {
+      event.preventDefault()
+      if (canSubmit) this.submitGuess()
+      else if (canNext) this.next()
+      return
     }
+
+    if (key === "n" && canNext) {
+      event.preventDefault()
+      this.next()
+      return
+    }
+
+  }
+
+  #isEditableTarget(target) {
+    if (!(target instanceof Element)) return false
+    if (target.closest("input, textarea, select")) return true
+    return target.closest("[contenteditable=''], [contenteditable='true']") !== null
   }
 
   #nextRoundUrl() {
@@ -514,8 +688,18 @@ export default class extends Controller {
     else url.searchParams.delete("seconds")
     if (this.attemptsValue > 1) url.searchParams.set("attempts", String(this.attemptsValue))
     else url.searchParams.delete("attempts")
-    if (this.hintCircleValue) url.searchParams.set("hint_circle", "1")
-    else url.searchParams.delete("hint_circle")
+    if (this.hintType === "radius") {
+      url.searchParams.set("hint_type", "radius")
+      url.searchParams.set("hint_radius", String(this.hintRadiusKm))
+    } else if (this.hintType === "location") {
+      url.searchParams.set("hint_type", "location")
+      url.searchParams.set("hint_location", this.hintLocationLevel)
+    } else {
+      url.searchParams.delete("hint_type")
+      url.searchParams.delete("hint_radius")
+      url.searchParams.delete("hint_location")
+    }
+    url.searchParams.delete("hint_circle")
     url.searchParams.delete("image_id")
     return url
   }

@@ -1,7 +1,7 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
-  static targets = ["latitude", "longitude", "readout", "submit", "next", "result", "otherGuesses", "timerSelect", "timer", "leaveModal"]
+  static targets = ["latitude", "longitude", "readout", "submit", "next", "result", "otherGuesses", "leaveModal"]
   static values = { gamePath: String }
 
   connect() {
@@ -12,8 +12,6 @@ export default class extends Controller {
     this.#prefetchedNextUrl = null
     this.#prefetchedImage = null
     this.#nextPrefetchController = null
-    this.timerHandle = null
-    this.secondsRemaining = 0
     this.#boundKeydown = this.#handleKeydown.bind(this)
     this.#boundClick = this.#handleClick.bind(this)
     this.#boundSubmit = this.#handleSubmit.bind(this)
@@ -24,8 +22,6 @@ export default class extends Controller {
     document.addEventListener("submit", this.#boundSubmit, true)
     document.addEventListener("turbo:before-visit", this.#boundBeforeVisit)
     window.addEventListener("beforeunload", this.#boundBeforeUnload)
-    this.#restoreTimerPreference()
-    this.#startTimerFromSelection()
   }
 
   disconnect() {
@@ -35,7 +31,6 @@ export default class extends Controller {
     document.removeEventListener("turbo:before-visit", this.#boundBeforeVisit)
     window.removeEventListener("beforeunload", this.#boundBeforeUnload)
     document.body.classList.remove("overflow-hidden")
-    this.#stopTimer()
     this.#clearNextPrefetch()
   }
 
@@ -47,11 +42,6 @@ export default class extends Controller {
     this.longitudeTarget.value = lng
     this.readoutTarget.textContent = `Pin: ${lat.toFixed(3)}, ${lng.toFixed(3)}`
     this.submitTarget.disabled = false
-  }
-
-  timerChanged() {
-    this.#storeTimerPreference()
-    this.#startTimerFromSelection()
   }
 
   async submitGuess(event) {
@@ -95,8 +85,6 @@ export default class extends Controller {
       "guess-map"
     )
     mapCtrl.showAnswer(answerLat, answerLng)
-    this.#stopTimer()
-    this.#renderTimerLabel("Round complete")
 
     this.submitTarget.classList.add("hidden")
     this.nextTarget.classList.remove("hidden")
@@ -130,7 +118,6 @@ export default class extends Controller {
   }
 
   nextRound() {
-    this.#stopTimer()
     // Turbo.visit (not window.location.href) so the JS context survives
     // and the MapTiler session stays the same across rounds — a hard nav
     // would mint a new mtsid per round and burn 5× the session quota.
@@ -167,85 +154,6 @@ export default class extends Controller {
     } else if (!this.nextTarget.classList.contains("hidden")) {
       this.nextRound()
     }
-  }
-
-  #startTimerFromSelection() {
-    const seconds = parseInt(this.timerSelectTarget.value, 10)
-    this.#stopTimer()
-
-    if (!seconds || seconds <= 0) {
-      this.#renderTimerLabel("Timer off")
-      return
-    }
-
-    this.secondsRemaining = seconds
-    this.#renderTimerLabel(`Time left: ${this.secondsRemaining}s`)
-    this.timerHandle = window.setInterval(() => {
-      this.secondsRemaining -= 1
-      if (this.secondsRemaining <= 0) {
-        this.#stopTimer()
-        this.#renderTimerLabel("Time's up — auto-submitting")
-        this.#autoSubmitAtTimeout()
-        return
-      }
-      this.#renderTimerLabel(`Time left: ${this.secondsRemaining}s`)
-    }, 1000)
-  }
-
-  #stopTimer() {
-    if (this.timerHandle) {
-      window.clearInterval(this.timerHandle)
-      this.timerHandle = null
-    }
-  }
-
-  #autoSubmitAtTimeout() {
-    if (this.submitTarget.classList.contains("hidden") || this.submitTarget.disabled) return
-    if (this.guessLat === null || this.guessLng === null) {
-      const fallback = this.#fallbackGuess()
-      this.#setGuess(fallback.lat, fallback.lng)
-      this.readoutTarget.textContent = `No pin placed. Auto-pin at ${fallback.lat.toFixed(3)}, ${fallback.lng.toFixed(3)}.`
-    }
-    this.submitGuess()
-  }
-
-  #fallbackGuess() {
-    const mapCtrl = this.#guessMapController()
-    const center = mapCtrl?.map?.getCenter?.()
-    if (center) return { lat: center.lat, lng: center.lng }
-    return { lat: 20, lng: 0 }
-  }
-
-  #setGuess(lat, lng) {
-    this.guessLat = lat
-    this.guessLng = lng
-    this.latitudeTarget.value = lat
-    this.longitudeTarget.value = lng
-    this.submitTarget.disabled = false
-
-    const mapCtrl = this.#guessMapController()
-    mapCtrl?.placePin?.(lat, lng)
-  }
-
-  #guessMapController() {
-    return this.application.getControllerForElementAndIdentifier(
-      this.element.querySelector("[data-controller='guess-map']"),
-      "guess-map"
-    )
-  }
-
-  #renderTimerLabel(text) {
-    if (this.hasTimerTarget) this.timerTarget.textContent = text
-  }
-
-  #restoreTimerPreference() {
-    const saved = window.localStorage.getItem("landscape-guessr:round-timer")
-    if (!saved) return
-    if (["0", "30", "60"].includes(saved)) this.timerSelectTarget.value = saved
-  }
-
-  #storeTimerPreference() {
-    window.localStorage.setItem("landscape-guessr:round-timer", this.timerSelectTarget.value)
   }
 
   async #prefetchNextRound() {
