@@ -47,36 +47,52 @@ export default class extends Controller {
     this.#schedule(this.intervalValue)
   }
 
-  // Friendly labels for each sub-state of the import pipeline. The
-  // importer sets these in WikidataImporter#import!; see comment there
-  // for what each phase actually does. Until we have a numeric total
-  // (i.e. until we hit the "inserting" phase), we hide the X/Y counter
-  // since it'd just sit on "0 / ?" and look stuck.
+  // Friendly labels per sub-state. The fetching phase now uses
+  // per-type fan-out (categories done / total) so we customize the
+  // label when those numbers are present. Inserting phase still uses
+  // (rows done / total).
   static stageLabels = {
     pending:           "Starting…",
     importing:         "Starting import…",
-    fetching:          "Fetching matching items from Wikidata (this can take 30-60 seconds for broad sets)…",
     looking_up_images: "Fetching photos from Wikipedia articles…",
     inserting:         "Importing images…",
   }
 
   #render(data) {
     const labels = this.constructor.stageLabels
-    const hasNumbers = data.total > 0 || data.state === "inserting"
+    // fetching, looking_up_images, and inserting all advance per batch.
+    const hasNumbers = (data.state === "fetching" && data.total > 0) ||
+                       data.state === "looking_up_images" ||
+                       data.state === "inserting"
 
     if (this.hasProgressTarget) this.progressTarget.textContent = data.progress
     if (this.hasTotalTarget)    this.totalTarget.textContent    = data.total || "?"
-    if (this.hasBarTarget && data.total > 0) {
+    // Drive the bar from whichever phase has real numerator/denominator
+    // data: fetching (categories done), looking_up_images (titles done),
+    // inserting (rows done).
+    if (this.hasBarTarget && data.total > 0 &&
+        ["fetching", "looking_up_images", "inserting"].includes(data.state)) {
       this.barTarget.value = data.progress
       this.barTarget.max   = data.total
     }
-    // Toggle the "(0 / ?)" counter visibility — hide it during the
-    // pre-insert phases when we don't have meaningful numbers yet.
     const counter = this.element.querySelector("[data-counter]")
     if (counter) counter.classList.toggle("hidden", !hasNumbers)
 
     if (this.hasStatusTarget) {
-      this.statusTarget.textContent = labels[data.state] || data.state || ""
+      this.statusTarget.textContent = this.#labelFor(data, labels)
     }
+  }
+
+  // fetching gets a special label because the X/Y meaning is "8 of 14
+  // categories done", not "8 of 14 images". Wording matters: "categories"
+  // makes clear that we're fanning out across the AI's per-type queries.
+  #labelFor(data, labels) {
+    if (data.state === "fetching") {
+      if (data.total > 0) {
+        return `Fetching matching items from Wikidata (${data.progress} of ${data.total} categories done)…`
+      }
+      return "Fetching matching items from Wikidata…"
+    }
+    return labels[data.state] || data.state || ""
   }
 }

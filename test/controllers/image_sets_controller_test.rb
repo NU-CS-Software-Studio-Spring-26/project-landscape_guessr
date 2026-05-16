@@ -304,7 +304,7 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
     assert_redirected_to set
   end
 
-  test "retry_import refuses non-failed sets" do
+  test "retry_import refuses completed sets" do
     set = ImageSet.create!(user: @alice, name: "Done AI Set", visibility: "private",
                             ai_query: "?item wdt:P31 wd:Q8072 .",
                             import_state: "completed")
@@ -312,7 +312,22 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
       post retry_import_image_set_path(set)
     end
     assert_redirected_to set
-    assert_match(/isn't in a failed state/i, flash[:alert])
+    assert_match(/already completed/i, flash[:alert])
+  end
+
+  test "retry_import allows stuck non-failed sub-states (worker crash recovery)" do
+    %w[pending fetching looking_up_images inserting].each do |stuck_state|
+      set = ImageSet.create!(user: @alice, name: "Stuck #{stuck_state}", visibility: "private",
+                              ai_query: "?item wdt:P31 wd:Q8072 .",
+                              import_state: stuck_state, import_progress: 42, import_total: 100)
+      assert_enqueued_with(job: AiImportImagesJob) do
+        post retry_import_image_set_path(set)
+      end
+      set.reload
+      assert_equal "pending", set.import_state, "expected #{stuck_state} → pending"
+      assert_equal 0, set.import_progress
+      assert_redirected_to set
+    end
   end
 
   test "retry_import refuses non-AI sets" do
@@ -346,5 +361,29 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
     assert_equal "importing", body["state"]
     assert_equal 10, body["progress"]
     assert_equal 50, body["total"]
+  end
+
+  test "import_status is owner-only (no info leak to other users)" do
+    sign_in_as @bob
+    set = ImageSet.create!(user: @alice, name: "Alice's failing set",
+                            visibility: "public", import_state: "failed",
+                            import_error: "Net::ReadTimeout: query.wikidata.org timed out at /app/lib/foo.rb")
+    get import_status_image_set_path(set)
+    # @bob shouldn't see Alice's import_error message — require_owner
+    # redirects with an alert.
+    assert_redirected_to set
+    assert_match(/permission/i, flash[:alert])
+  end
+
+  test "import_status returns JSON 403 (not HTML redirect) for non-owner JSON request" do
+    # The poll banner fetches with Accept: application/json. Without the
+    # respond_to in require_owner, the auth failure returned a 302→200 HTML
+    # body and the client's res.json() threw.
+    sign_in_as @bob
+    set = ImageSet.create!(user: @alice, name: "Alice's set",
+                            visibility: "public", import_state: "importing")
+    get import_status_image_set_path(set), headers: { "Accept" => "application/json" }
+    assert_response :forbidden
+    assert_equal "application/json", response.media_type
   end
 end

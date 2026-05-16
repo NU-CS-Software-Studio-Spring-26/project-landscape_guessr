@@ -16,7 +16,7 @@ class WikipediaImageFetcher
   API = URI("https://en.wikipedia.org/w/api.php").freeze
   # MediaWiki cap per request — verified at https://www.mediawiki.org/wiki/API:Query.
   BATCH_SIZE = 50
-  USER_AGENT = "landscape-guessr/ai-image-sets (https://github.com/NU-CS-Software-Studio-Spring-26/project-landscape_guessr) Ruby/#{RUBY_VERSION}".freeze
+  USER_AGENT = WikimediaUserAgent::STRING
   FILEPATH = "https://commons.wikimedia.org/wiki/Special:FilePath/".freeze
   READ_TIMEOUT = 60
 
@@ -28,32 +28,47 @@ class WikipediaImageFetcher
   # image (and are dropped at the URL-blank filter). That tradeoff is
   # the right default — if you need redirect-following, add it as an
   # opt-in flag, but do not make it default.
-  def self.refresh_images!(rows:)
+  # on_progress: optional callback called after each batch with
+  # (done, total) — both are TITLE counts (50/batch). Used by the
+  # importer to advance the "Fetching photos from Wikipedia articles"
+  # banner so the user sees the long phase actually making progress
+  # instead of sitting on "0 / ?".
+  def self.refresh_images!(rows:, on_progress: nil)
     needs_wp = rows.select { |r| r[:article].present? }
     return if needs_wp.empty?
 
     title_to_row = {}
     needs_wp.each { |r| title_to_row[decode_wp_title(r[:article])] = r }
     titles = title_to_row.keys
+    total  = titles.size
+    last_batch_idx = ((total - 1) / BATCH_SIZE)
 
     titles.each_slice(BATCH_SIZE).with_index do |batch, idx|
       pages = fetch_pageimages(batch)
-      normalized = pages[:normalized] || {}
+      # Build an api_title → original_title reverse map ONCE per batch.
+      # Prior code did `title_to_row.keys.find { ... }` inside the per-
+      # page loop — O(batch × titles_total) per import. For a 10k-row
+      # import that's ~2.5M comparisons; the reverse map collapses to O(N).
+      api_to_original = {}
+      batch.each { |t| api_to_original[t] = t }
+      (pages[:normalized] || {}).each { |from, to| api_to_original[to] = from if batch.include?(from) }
+
       pages[:pages].each do |p|
         filename = p["pageimage"]
         next if filename.blank?
-
-        api_title = p["title"]
-        original = title_to_row.keys.find { |t| t == api_title || normalized[t] == api_title }
+        original = api_to_original[p["title"]]
         next unless original
-
         row = title_to_row[original]
+        next unless row
         row[:url] = FILEPATH + URI.encode_www_form_component(filename).gsub("+", "%20")
       end
 
+      done = [ (idx + 1) * BATCH_SIZE, total ].min
+      on_progress&.call(done, total)
+
       # Courtesy delay between batches — Wikipedia's API has soft per-IP
       # limits and we want to stay polite at the 10k-row scale.
-      sleep 0.2 unless idx == (titles.size / BATCH_SIZE.to_f).ceil - 1
+      sleep 0.2 unless idx == last_batch_idx
     end
     rows
   end

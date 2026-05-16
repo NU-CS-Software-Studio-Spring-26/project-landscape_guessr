@@ -18,15 +18,16 @@ class AiImportImagesJob < ApplicationJob
     image_set.update_columns(import_state: "importing", import_error: nil, import_progress: 0)
 
     WikidataImporter.import!(
-      image_set: image_set,
-      pattern: image_set.ai_query,
-      image_source: image_set.ai_image_source.presence || "wikidata_p18"
+      image_set:      image_set,
+      pattern:        image_set.ai_query,
+      image_source:   image_set.ai_image_source.presence || "wikidata_p18",
+      fetch_strategy: image_set.ai_fetch_strategy.presence || "exhaustive"
     )
 
     # If the parent had filtered children (uncommon for AI sets, but
     # possible if a user filters one), refresh them so they reflect the
     # new images.
-    RematerializeFilteredSetsJob.perform_later(image_set.id) if image_set.filtered_sets.any?
+    RematerializeFilteredSetsJob.perform_later(image_set.id) if image_set.filtered_sets.exists?
 
     image_set.update_columns(import_state: "completed")
   rescue StandardError => e
@@ -41,6 +42,12 @@ class AiImportImagesJob < ApplicationJob
         import_error: "#{e.class}: #{e.message.to_s.slice(0, 500)}"
       )
     end
-    raise
+    # Don't re-raise. The user-visible signal is import_state="failed"
+    # plus the retry button on the show page. Re-raising tells ActiveJob
+    # to retry the job, which on a real backend (SolidQueue, Sidekiq)
+    # would re-run the entire 60s+ import with default backoff — a
+    # persistent failure (bad pattern, rate limit) would hammer WDQS
+    # repeatedly with no chance of succeeding. The owner retries
+    # manually when they want.
   end
 end

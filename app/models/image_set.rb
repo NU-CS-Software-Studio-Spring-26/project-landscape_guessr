@@ -64,6 +64,16 @@ class ImageSet < ApplicationRecord
     parent_image_set_id.present?
   end
 
+  # AI-import states that mean a background job is mid-flight (or just
+  # crashed and left us here). Centralized so the show view, the retry
+  # button gate, and any future caller stay in sync — duplicating the
+  # %w[...] list across views invariably drifts.
+  IMPORT_IN_PROGRESS_STATES = %w[pending importing fetching looking_up_images inserting].freeze
+
+  def import_in_progress?
+    IMPORT_IN_PROGRESS_STATES.include?(import_state)
+  end
+
   def effective_items
     image_set_items
   end

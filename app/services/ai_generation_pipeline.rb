@@ -40,17 +40,22 @@ class AiGenerationPipeline
     end
 
     @generation.update!(phase: "counting", progress_message: nil)
-    count = safe_count(ai_result[:sparql_pattern])
+    count = safe_count(ai_result[:sparql_pattern], fetch_strategy: ai_result[:fetch_strategy])
     @generation.update!(result_count: count)
 
-    # Flash 0-results → silently retry on Pro. The user's prompt is
-    # unchanged; the prior conversation already shows Flash's attempt.
-    # We REPLACE the conversation's last model turn with Pro's answer
-    # so the refinement form posts the upgraded conversation forward.
-    # Only retry on a genuine 0-result Flash answer. `count.to_i.zero?`
-    # also matches a nil count (WDQS timeout / 5xx), where retrying on
-    # Pro is futile — the new pattern would face the same WDQS issue.
-    if count == 0 && model == :flash
+    # Flash 0-results OR couldn't-count → silently retry on Pro. The
+    # user's prompt is unchanged; the prior conversation already shows
+    # Flash's attempt. We REPLACE the conversation's last model turn
+    # with Pro's answer so the refinement form posts the upgraded
+    # conversation forward.
+    #
+    # `count.to_i.zero?` matches both `0` (genuine no-match — maybe
+    # Pro can compose a less-restrictive pattern) and `nil` (WDQS
+    # timeout/5xx on Flash's pattern — Pro might compose a simpler
+    # pattern that WDQS can actually execute, e.g. dropping a costly
+    # property path). Either way, paying the Pro cost is the right
+    # call before giving the user an empty/error result.
+    if count.to_i.zero? && model == :flash
       # We're going back to Gemini, so the phase label needs to flip
       # away from "counting" — otherwise the polling UI shows "Counting
       # matches in Wikidata…" for the 30-60s the Pro call takes, which
@@ -66,7 +71,7 @@ class AiGenerationPipeline
         conversation[-1] = { role: "model", text: ai_result.to_json }
         # Re-enter the counting phase for the Pro answer's recount.
         @generation.update!(phase: "counting", progress_message: nil)
-        count = safe_count(ai_result[:sparql_pattern])
+        count = safe_count(ai_result[:sparql_pattern], fetch_strategy: ai_result[:fetch_strategy])
         @generation.update!(
           model_used:        "pro",
           conversation_json: conversation.to_json,
@@ -77,7 +82,11 @@ class AiGenerationPipeline
     end
 
     @generation.update!(phase: "sampling", progress_message: nil)
-    preview = safe_sample(ai_result[:sparql_pattern], image_source: ai_result[:image_source])
+    preview = safe_sample(
+      ai_result[:sparql_pattern],
+      image_source: ai_result[:image_source],
+      fetch_strategy: ai_result[:fetch_strategy]
+    )
 
     @generation.update!(
       status:       "completed",
@@ -122,9 +131,9 @@ class AiGenerationPipeline
     end
   end
 
-  def safe_count(pattern)
+  def safe_count(pattern, fetch_strategy:)
     t0 = Time.now
-    n = WikidataImporter.count(pattern: pattern)
+    n = WikidataImporter.count(pattern: pattern, fetch_strategy: fetch_strategy)
     Rails.logger.info "[ai_count] #{(Time.now - t0).round(2)}s -> #{n}"
     n
   rescue WikidataImporter::Error => e
@@ -132,9 +141,12 @@ class AiGenerationPipeline
     nil
   end
 
-  def safe_sample(pattern, image_source:)
+  def safe_sample(pattern, image_source:, fetch_strategy:)
     t0 = Time.now
-    rows = WikidataImporter.sample(pattern: pattern, image_source: image_source, limit: 30)
+    rows = WikidataImporter.sample(
+      pattern: pattern, image_source: image_source,
+      limit: 30, fetch_strategy: fetch_strategy
+    )
     Rails.logger.info "[ai_sample] #{(Time.now - t0).round(2)}s -> #{rows.size} rows"
     rows
   rescue WikidataImporter::Error => e

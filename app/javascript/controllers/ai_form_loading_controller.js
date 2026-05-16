@@ -7,12 +7,33 @@ import { Controller } from "@hotwired/stimulus"
 // over all in-flight UI — so this controller only has to cover the
 // brief redirect window. No rotating "thinking" stages here; that
 // belongs to ai_generation_poll_controller.
+//
+// Also resets the prompt textarea before Turbo caches the page on
+// navigation. Without this, typed-but-unsubmitted text persists in
+// the snapshot and reappears when the user navigates back to /ai_new.
+// The server always renders value="" so resetting to defaultValue
+// matches the fresh-render state.
 export default class extends Controller {
   static targets = ["submit"]
+
+  connect() {
+    this.boundClearForCache = this.#clearForCache.bind(this)
+    document.addEventListener("turbo:before-cache", this.boundClearForCache)
+  }
+
+  disconnect() {
+    document.removeEventListener("turbo:before-cache", this.boundClearForCache)
+  }
 
   submit(_event) {
     if (!this.hasSubmitTarget) return
     this.submitTarget.disabled = true
     this.submitTarget.setAttribute("aria-busy", "true")
+  }
+
+  #clearForCache() {
+    this.element.querySelectorAll("textarea, input[type='text']").forEach((el) => {
+      el.value = el.defaultValue
+    })
   }
 }

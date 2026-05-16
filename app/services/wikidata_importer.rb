@@ -1,38 +1,55 @@
 require "net/http"
 require "uri"
 require "json"
+require "concurrent/atomic/atomic_fixnum"
 
 # Runs SPARQL queries against query.wikidata.org and turns the rows into
 # Image / ImageSetItem records. The AI returns a *pattern* (WHERE-clause
-# body); this service wraps the pattern three ways:
+# body) plus a `fetch_strategy`; this service wraps both ways and runs
+# per-type fan-out for performance.
 #
-#   count!    — `SELECT (COUNT(*) AS ?c) WHERE { <pattern> }`
-#   sample!   — random 30-row preview (uses bd:sample for large categories)
-#   import!   — full fetch, optionally with bd:sample for large categories,
-#               then insert into an ImageSet (image_set_items)
+# == Strategies
 #
-# All three reuse the wrapper helpers so the AI's pattern is the only
-# AI-controlled string anywhere in the codebase that reaches an external
-# service. The endpoint is hardcoded (read-only); there's no SSRF.
+# `exhaustive` — fetch every matching item via a P31/P279* subclass walk.
+# Right for narrow queries (country-bounded, FILTER-narrowed, specific
+# class). Equivalent to the rake's per-type sequential pattern.
+#
+# `random_sample` — wrap each per-type lookup with `SERVICE bd:sample`
+# inside Blazegraph. Capped at HARD_CAP random items per type. Right for
+# broad worldwide queries ("rivers worldwide") where the subclass walk
+# would time out WDQS's 60s limit.
+#
+# Random_sample loses two things vs exhaustive:
+#   - the P279* subclass walk (bd:sample only takes one inner triple)
+#   - the ability to FILTER inside the inner block (so FILTER patterns
+#     auto-override back to exhaustive)
+#
+# == Pattern shape detection
+#
+# `extract_union_types(pattern)` → array of QIDs from `VALUES ?type {...}`
+# `extract_single_type(pattern)` → single QID from `wdt:P31[/wdt:P279*] wd:Qxxx`
+# `extract_types(pattern)`       → either of the above, or [] if neither
+#
+# When types are extractable, per-type fan-out parallelizes the work.
+# When not extractable (the AI dropped P31 entirely for a selective
+# FILTER query), we fall back to a single-query path.
 class WikidataImporter
-  ENDPOINT = URI("https://query.wikidata.org/sparql").freeze
-  USER_AGENT = "landscape-guessr/ai-image-sets (https://github.com/NU-CS-Software-Studio-Spring-26/project-landscape_guessr) Ruby/#{RUBY_VERSION}".freeze
-
-  # WDQS hard timeout is 60s. Our read_timeout is 90s to swallow a bit of
-  # network jitter without a connection-reset on the application side.
+  ENDPOINT   = URI("https://query.wikidata.org/sparql").freeze
+  USER_AGENT = WikimediaUserAgent::STRING
   READ_TIMEOUT = 90
 
-  # Server-side safety net. If the AI returns a pattern with no sample
-  # and no apparent limit on result size, this caps the import. AI is
-  # instructed to use bd:sample for huge categories; this catches the
-  # case where it forgets.
   HARD_CAP = 10_000
 
-  # Non-photo filename patterns lifted from db/seeds.rb. Wikidata
-  # occasionally records a satellite image or schematic as P18. No \b
-  # word boundaries — Ruby's \b treats `_` as a word char, so \bMODIS\b
-  # fails to match "MODIS_satellite.jpg". The seeder learned this the
-  # hard way; do not re-add \b without testing against real filenames.
+  EXHAUSTIVE    = "exhaustive".freeze
+  RANDOM_SAMPLE = "random_sample".freeze
+  STRATEGIES    = [ EXHAUSTIVE, RANDOM_SAMPLE ].freeze
+
+  MAX_RETRIES = 3
+
+  # Non-photo filename patterns lifted from db/seeds.rb. No \b word
+  # boundaries — Ruby's \b treats `_` as a word char, so \bMODIS\b
+  # fails to match "MODIS_satellite.jpg". Do not re-add \b without
+  # testing against real filenames.
   NON_PHOTO_PATTERNS = [
     /ASTER|MODIS|Landsat|LANDSAT|Sentinel|MISR|Messtischblatt/i,
     /_map[._]|location[_\s-]map|relief[_\s-]map|system[_\s-]map/i,
@@ -42,31 +59,172 @@ class WikidataImporter
   class Error < StandardError; end
   class TimeoutError < Error; end
 
-  # Returns the total number of items the pattern would match. For
-  # patterns built around `VALUES ?type { wd:QA wd:QB ... }` (the
-  # AI's idiom for "broad concept spanning multiple Wikidata classes"
-  # — nature, transportation, sports, etc.), we run a COUNT per type
-  # and sum, because the single-query form hits WDQS's 60s timeout on
-  # broad P31/P279* walks. An items-belonging-to-multiple-types case
-  # gets counted twice; we accept the small inaccuracy for the
-  # ~20-30x speedup. Matches the per-type pattern in db/seeds.rb.
-  def self.count(pattern:)
-    if (types = extract_union_types(pattern))
-      return count_per_type(pattern, types: types)
+  # === Public API ===
+
+  # Returns the total number of items matching the pattern. Per-type
+  # fan-out (parallel threads) when types are extractable; single
+  # query otherwise.
+  #
+  # For random_sample, returns the SUM of per-type bd:sample row counts
+  # — a lower bound on the true count, capped at HARD_CAP per type.
+  # When a per-type result hits the cap, callers can read "≥ cap" from
+  # the result_count comparison.
+  def self.count(pattern:, fetch_strategy: EXHAUSTIVE, on_progress: nil)
+    strategy = effective_strategy(pattern, fetch_strategy)
+    types    = extract_types(pattern)
+
+    if types.empty?
+      rows = run_query(build_count_sparql(pattern))
+      return rows.first&.dig("c", "value").to_i
     end
-    rows = run_query(<<~SPARQL)
-      SELECT (COUNT(*) AS ?c) WHERE {
-        #{pattern}
-        #{image_or_article_block}
-      }
-    SPARQL
-    rows.first&.dig("c", "value").to_i
+
+    results = parallel_per_type(types, on_progress: on_progress) do |qid|
+      sparql = build_per_type_sparql(
+        pattern: pattern, qid: qid, strategy: strategy,
+        limit: HARD_CAP, count_only: true, with_label: false
+      )
+      rows = run_query(sparql)
+      rows.first&.dig("c", "value").to_i
+    end
+    results.compact.sum
   end
 
-  # If the pattern contains `VALUES ?type { wd:Q... wd:Q... }`, return
-  # the QIDs; otherwise nil. The AI is instructed to use this idiom
-  # for broad concepts (see UNIVERSAL_PROPERTIES section of system
-  # prompt); we detect it here for the count-fan-out optimization.
+  # Returns up to `limit` rows for the preview thumbnails. NOT a guaranteed
+  # random sample for exhaustive strategy (LIMIT gives alphabetical order
+  # since WDQS doesn't push LIMIT into the walk). For random_sample,
+  # bd:sample really does return random rows.
+  def self.sample(pattern:, image_source: "wikidata_p18", limit: 30, fetch_strategy: EXHAUSTIVE, on_progress: nil)
+    strategy = effective_strategy(pattern, fetch_strategy)
+    types    = extract_types(pattern)
+
+    rows = if types.empty?
+      run_query(wrap_with_limit(pattern, limit: limit, with_label: true))
+    else
+      # For random_sample, oversample inside bd:sample to compensate for
+      # outer-filter losses (only ~15-20% of random items have
+      # coord+image+article — empirically: bd:sample 5000 → ~840
+      # surviving). Without this multiplier, a 30-row preview from 14
+      # types ends up with 5 visible rows after filtering.
+      base_per_type = (limit.to_f / types.size).ceil + 2
+      per_type_limit = strategy == RANDOM_SAMPLE ? base_per_type * 20 : base_per_type
+      results = parallel_per_type(types, on_progress: on_progress) do |qid|
+        sparql = build_per_type_sparql(
+          pattern: pattern, qid: qid, strategy: strategy,
+          limit: per_type_limit, with_label: true
+        )
+        run_query(sparql)
+      end
+      results.compact.flatten
+    end
+
+    rows = normalize_rows(rows)
+    WikipediaImageFetcher.refresh_images!(rows: rows) if image_source == "wikipedia_pageimages"
+    candidates = dedupe_by_url(rows.select { |r| r[:url].present? && r[:lat] && r[:lng] })
+    # No server-side existence check. Broken thumbnails (deleted/renamed
+    # files on Commons) are handled at render time by hide_broken_image
+    # — the wrapper collapses on img.onerror so the preview shows only
+    # working thumbs. Validating server-side added a 1-batch API call
+    # that's cheap here but for the full import meant 200+ calls per
+    # 10k-row set and routinely tripped Commons 429 rate limits.
+    candidates.first(limit)
+  end
+
+  # Full import. Reports progress through sub-states:
+  #   "fetching"           — per-type SPARQL queries (progress = types done / total)
+  #   "looking_up_images"  — Wikipedia pageimages batch (pageimages mode only)
+  #   "inserting"          — INSERT phase (progress = rows inserted / total)
+  def self.import!(image_set:, pattern:, image_source: "wikidata_p18", fetch_strategy: EXHAUSTIVE)
+    strategy = effective_strategy(pattern, fetch_strategy)
+    types    = extract_types(pattern)
+
+    image_set.update_columns(
+      import_state:    "fetching",
+      import_progress: 0,
+      import_total:    types.size
+    )
+
+    rows = if types.empty?
+      # AI dropped P31 entirely (e.g. V5-style "height > 200" pattern).
+      # Single query path; no per-type fan-out possible.
+      run_query(wrap_with_limit(pattern, limit: HARD_CAP, with_label: true))
+    else
+      progress_cb = lambda do |done, total, _qid|
+        image_set.update_columns(import_progress: done, import_total: total)
+      end
+      results = parallel_per_type(types, on_progress: progress_cb) do |qid|
+        sparql = build_per_type_sparql(
+          pattern: pattern, qid: qid, strategy: strategy,
+          limit: HARD_CAP, with_label: true
+        )
+        run_query(sparql)
+      end
+      results.compact.flatten
+    end
+
+    rows = normalize_rows(rows)
+
+    if image_source == "wikipedia_pageimages"
+      image_set.update_columns(import_state: "looking_up_images", import_progress: 0, import_total: 0)
+      WikipediaImageFetcher.refresh_images!(
+        rows: rows,
+        on_progress: ->(done, total) {
+          # Wikipedia phase can be 30-90s for a 9k-item set (sequential
+          # 50-batch calls + 0.2s courtesy sleep). Without this counter
+          # the banner sits silent and users assume it's hung.
+          image_set.update_columns(import_progress: done, import_total: total)
+        }
+      )
+    end
+
+    keepable = rows.select { |r| r[:url].present? && r[:lat] && r[:lng] && photo_url?(r[:url]) }
+    keepable = dedupe_by_url(keepable)
+
+    # No Commons existence check here. We used to batch-call the
+    # MediaWiki API to confirm every URL existed, but for a 10k import
+    # that's 200+ batches and routinely tripped Commons rate limits
+    # (HTTP 429) — when rate-limited, the checker passed through
+    # everything anyway, giving zero validation. hide_broken_image at
+    # render time catches files that 404 (deleted, renamed) without
+    # the upstream noise.
+    image_set.update_columns(import_state: "inserting", import_total: keepable.size, import_progress: 0)
+
+    insert_rows!(image_set: image_set, rows: keepable)
+  end
+
+  # === Strategy + pattern-shape helpers ===
+
+  # bd:sample's inner block only accepts a single direct triple — no
+  # FILTER, no VALUES, no multi-triple. If the AI requested random_sample
+  # but the pattern has FILTER, the bd:sample wrapping would silently
+  # drop the filter and import the wrong items. Override to exhaustive.
+  #
+  # Also override if we can't extract any type Q-ID (nothing to sample).
+  def self.effective_strategy(pattern, requested)
+    return EXHAUSTIVE unless STRATEGIES.include?(requested)
+    return EXHAUSTIVE unless requested == RANDOM_SAMPLE
+    if pattern_has_filter?(pattern)
+      Rails.logger.warn "[wdqs] random_sample requested but pattern has FILTER; overriding to exhaustive" if defined?(Rails)
+      return EXHAUSTIVE
+    end
+    if extract_types(pattern).empty?
+      Rails.logger.warn "[wdqs] random_sample requested but no extractable type Q-ID; overriding to exhaustive" if defined?(Rails)
+      return EXHAUSTIVE
+    end
+    # Multi-P31 outside a VALUES block: extract_single_type only sees the
+    # first match and strip_type_triple only strips the first. The second
+    # un-stripped triple would silently filter our random_sample results.
+    if extract_union_types(pattern).nil? && multiple_p31_triples?(pattern)
+      Rails.logger.warn "[wdqs] random_sample requested but multiple P31 triples present (not in VALUES); overriding to exhaustive" if defined?(Rails)
+      return EXHAUSTIVE
+    end
+    RANDOM_SAMPLE
+  end
+
+  def self.pattern_has_filter?(pattern)
+    pattern.match?(/\bFILTER\s*\(/i)
+  end
+
+  # Returns the Q-IDs from `VALUES ?type { wd:Q... wd:Q... }`, or nil.
   def self.extract_union_types(pattern)
     m = pattern.match(/VALUES\s+\?type\s*\{([^}]+)\}/m)
     return nil unless m
@@ -74,153 +232,140 @@ class WikidataImporter
     qids.empty? ? nil : qids
   end
 
-  # Run a count per type by substituting the VALUES variable. Each
-  # per-type count is fast (one P31/P279* walk on a single class), and
-  # we sum. Parallelized across threads — Net::HTTP creates a separate
-  # connection per call so concurrent queries are safe, and WDQS easily
-  # handles 5 parallel reads from one client. Wall time drops from
-  # ~N×5s to ~5s for typical broad patterns.
-  #
-  # Errors on individual types are swallowed — better to under-count
-  # than fail the whole preview screen.
-  def self.count_per_type(pattern, types:)
-    stripped = pattern.sub(/VALUES\s+\?type\s*\{[^}]+\}\s*\.?\s*/m, "")
-    threads = types.map do |qid|
-      Thread.new do
-        one = stripped.gsub("?type", "wd:#{qid}")
-        sparql = <<~SPARQL
-          SELECT (COUNT(*) AS ?c) WHERE {
-            #{one}
-            #{image_or_article_block}
-          }
-        SPARQL
-        run_query(sparql).first&.dig("c", "value").to_i
-      rescue Error
-        0  # partial under-count beats blanket failure
+  # Returns the single Q-ID from `wdt:P31[/wdt:P279*] wd:Qxxx`, or nil.
+  def self.extract_single_type(pattern)
+    m = pattern.match(/wdt:P31(?:\/wdt:P279\*)?\s+wd:(Q\d+)/)
+    m ? m[1] : nil
+  end
+
+  # Returns Q-IDs (always an Array). Handles VALUES patterns (multiple)
+  # and single-type patterns (one). Empty when neither pattern shape
+  # matches (e.g. AI dropped P31 entirely for a selective FILTER query).
+  def self.extract_types(pattern)
+    extract_union_types(pattern) || [ extract_single_type(pattern) ].compact
+  end
+
+  # Defense against a multi-P31 pattern slipping past `extract_single_type`
+  # (which only catches the first match). For random_sample, we strip ONLY
+  # the matched P31 and wrap with bd:sample — if a SECOND P31 triple
+  # constrains the outer query, the sample silently returns items that
+  # don't match the user's full intent. Cheaper to refuse and fall back
+  # to exhaustive than to ship wrong results.
+  def self.multiple_p31_triples?(pattern)
+    pattern.scan(/wdt:P31(?:\/wdt:P279\*)?\s+wd:Q\d+/).size > 1
+  end
+
+  # Removes the AI's `?item wdt:P31[/wdt:P279*] wd:Qxxx` triple from a
+  # pattern, leaving the rest. Handles both `;` (continues subject) and
+  # `.` (ends statement) delimiters. When `;`, replace with `?item` so
+  # subsequent predicates re-bind correctly.
+  def self.strip_type_triple(pattern, qid)
+    # (?<![A-Za-z0-9_]) makes ?item a real variable boundary — without
+    # it, `?subitem wdt:P31 ...` would partial-match because plain
+    # `\?item` matches anywhere `?item` appears as a substring.
+    re = /(?<![A-Za-z0-9_])\?item\s+wdt:P31(?:\/wdt:P279\*)?\s+wd:#{qid}\s*([.;])/
+    pattern.sub(re) do
+      Regexp.last_match(1) == ";" ? "?item" : ""
+    end
+  end
+
+  # === SPARQL builders ===
+
+  # Strategy-aware per-type SPARQL builder. Used by count/sample/import
+  # for both exhaustive (subclass walk) and random_sample (bd:sample)
+  # paths. Centralizing here means changes to the query shape (e.g. label
+  # service, image/article trailer) flow through both strategies.
+  def self.build_per_type_sparql(pattern:, qid:, strategy:, limit:, count_only: false, with_label: true)
+    stripped     = pattern.sub(/VALUES\s+\?type\s*\{[^}]+\}\s*\.?\s*/m, "")
+    # Word-boundary regex: plain `gsub("?type", ...)` would also replace
+    # the prefix of `?typeOfThing` or similar, silently corrupting the
+    # triple. The (?!\w) lookahead bounds after-the-name.
+    with_qid_in  = stripped.gsub(/\?type(?!\w)/, "wd:#{qid}")
+
+    case strategy
+    when RANDOM_SAMPLE
+      extras = strip_type_triple(with_qid_in, qid)
+      build_random_sample_sparql(qid: qid, extras: extras, limit: limit,
+                                  count_only: count_only, with_label: with_label)
+    else # EXHAUSTIVE
+      if count_only
+        build_count_sparql(with_qid_in)
+      else
+        wrap_with_limit(with_qid_in, limit: limit, with_label: with_label)
       end
     end
-    threads.map(&:value).sum
   end
 
-  # Returns up to `limit` rows (default 30) for preview thumbnails on
-  # the form. NOT a random sample (WDQS's bd:sample SERVICE only
-  # accepts a single direct triple inside, incompatible with our
-  # multi-constraint patterns). LIMIT 30 gives alphabetical ordering.
-  #
-  # Same per-type fan-out as count(): broad `VALUES ?type { ... }`
-  # patterns combined with P31/P279* walks timeout WDQS even at
-  # LIMIT 30, because the optimizer can't short-circuit the OPTIONAL
-  # + FILTER on image-or-article without evaluating the broad union
-  # first. Per-type queries are each fast; we run them in parallel
-  # and take the first `limit` rows.
-  def self.sample(pattern:, image_source: "wikidata_p18", limit: 30)
-    rows = if (types = extract_union_types(pattern))
-      sample_per_type(pattern, types: types, limit: limit)
-    else
-      run_query(wrap_with_limit(pattern, limit: limit, with_label: true))
-    end
-    rows = normalize_rows(rows)
-    if image_source == "wikipedia_pageimages"
-      WikipediaImageFetcher.refresh_images!(rows: rows)
-    end
-    dedupe_by_url(rows.select { |r| r[:url].present? && r[:lat] && r[:lng] }).first(limit)
-  end
-
-  # Per-type sample matching the per-type count logic. Each per-type
-  # query gets `limit/types.size` rows (rounded up) so the combined
-  # result has roughly `limit` items after dedup. Runs in parallel
-  # threads — same safety story as count_per_type.
-  def self.sample_per_type(pattern, types:, limit:)
-    stripped = pattern.sub(/VALUES\s+\?type\s*\{[^}]+\}\s*\.?\s*/m, "")
-    per_type_limit = (limit.to_f / types.size).ceil + 2 # +2 buffer for dedup losses
-    threads = types.map do |qid|
-      Thread.new do
-        one = stripped.gsub("?type", "wd:#{qid}")
-        run_query(wrap_with_limit(one, limit: per_type_limit, with_label: true))
-      rescue Error
-        []
-      end
-    end
-    threads.flat_map(&:value)
-  end
-
-  # Full import. Wraps the pattern with the OPTIONAL+FILTER trailer and
-  # caps at HARD_CAP (10,000).
-  #
-  # Reports progress through three sub-states so the show-page polling
-  # banner can tell the user what's actually happening, instead of
-  # sitting on "0 / ?" for 30-90 seconds while the SPARQL + Wikipedia
-  # legs finish:
-  #   "fetching"           — running the full SPARQL (slow for broad ones)
-  #   "looking_up_images"  — Wikipedia pageimages batch (pageimages mode only)
-  #   "inserting"          — INSERT phase, where progress/total numbers
-  #                          are populated and meaningful
-  def self.import!(image_set:, pattern:, image_source: "wikidata_p18")
-    image_set.update_columns(import_state: "fetching")
-    sparql = wrap_with_limit(pattern, limit: HARD_CAP, with_label: true)
-    rows = run_query(sparql)
-    rows = normalize_rows(rows)
-
-    if image_source == "wikipedia_pageimages"
-      image_set.update_columns(import_state: "looking_up_images")
-      WikipediaImageFetcher.refresh_images!(rows: rows)
-    end
-
-    # Filter rows the renderer would just drop anyway. Reports an honest
-    # import_total before we start inserting so the progress bar isn't
-    # off-by-skipped-rows. URL-dedup AFTER pageimages rewrite (the
-    # rewrite changes URLs, so dedup must come after).
-    keepable = rows.select { |r| r[:url].present? && r[:lat] && r[:lng] && photo_url?(r[:url]) }
-    keepable = dedupe_by_url(keepable)
-
-    image_set.update_columns(import_state: "inserting", import_total: keepable.size, import_progress: 0)
-
-    new_links = 0
-    inserted = 0
-    keepable.each_slice(100) do |slice|
-      ImageSetItem.transaction do
-        slice.each do |row|
-          image = Image.find_or_create_by!(url: row[:url]) do |img|
-            img.title     = row[:title].presence || "Untitled"
-            img.latitude  = row[:lat]
-            img.longitude = row[:lng]
-          end
-
-          item = image_set.image_set_items.find_or_initialize_by(image: image)
-          if item.new_record?
-            item.latitude  = row[:lat]
-            item.longitude = row[:lng]
-            item.save!
-            new_links += 1
-          end
-        end
-      end
-      inserted += slice.size
-      image_set.update_columns(import_progress: inserted)
-    end
-
-    new_links
-  end
-
-  # === wrappers ===
-
-  # Plain LIMIT-bounded query. Used when AI says the category isn't huge
-  # (uses_random_sample = false). The OPTIONAL+FILTER trailer is added
-  # outside the AI's pattern, then bounded by LIMIT.
-  def self.wrap_with_limit(pattern, limit:, with_label: true)
-    label_service = with_label ? %(SERVICE wikibase:label { bd:serviceParam wikibase:language "en" }) : ""
+  def self.build_count_sparql(pattern)
     <<~SPARQL
-      SELECT DISTINCT ?item ?itemLabel ?image ?coord ?article WHERE {
+      SELECT (COUNT(*) AS ?c) WHERE {
         #{pattern}
         #{image_or_article_block}
-        #{label_service}
-      } LIMIT #{limit.to_i}
+      }
     SPARQL
   end
 
-  # Standard P18-or-Wikipedia-article trailer. Items pass if they have a
-  # Wikidata P18 image OR an English Wikipedia article (so we can fall
-  # back to the article's lead image via WikipediaImageFetcher).
+  def self.build_random_sample_sparql(qid:, extras:, limit:, count_only:, with_label:)
+    if count_only
+      return <<~SPARQL
+        SELECT (COUNT(*) AS ?c) WHERE {
+          SERVICE bd:sample {
+            ?item wdt:P31 wd:#{qid} .
+            bd:serviceParam bd:sample.limit #{limit.to_i} .
+            bd:serviceParam bd:sample.sampleType "RANDOM" .
+          }
+          #{extras}
+          #{image_or_article_block}
+        }
+      SPARQL
+    end
+
+    inner = <<~INNER
+      SELECT DISTINCT ?item ?image ?coord ?article WHERE {
+        SERVICE bd:sample {
+          ?item wdt:P31 wd:#{qid} .
+          bd:serviceParam bd:sample.limit #{limit.to_i} .
+          bd:serviceParam bd:sample.sampleType "RANDOM" .
+        }
+        #{extras}
+        #{image_or_article_block}
+      }
+    INNER
+    wrap_with_label(inner, with_label: with_label)
+  end
+
+  # Standard exhaustive wrapper. Per the WDQS optimization docs, we
+  # apply the label service AFTER an inner subquery with LIMIT — this
+  # way labels are only fetched for the N surviving rows, not for every
+  # intermediate join. Empirically: rivers LIMIT 100 with label INSIDE
+  # = 504 timeout; same query with label OUTSIDE in subquery = 22s, 100
+  # rows. Universal win, no downside.
+  def self.wrap_with_limit(pattern, limit:, with_label: true)
+    inner = <<~INNER
+      SELECT DISTINCT ?item ?image ?coord ?article WHERE {
+        #{pattern}
+        #{image_or_article_block}
+      } LIMIT #{limit.to_i}
+    INNER
+    wrap_with_label(inner, with_label: with_label)
+  end
+
+  # Optionally wraps an inner SPARQL block in an outer query that adds
+  # SERVICE wikibase:label. Caller decides whether to opt in (count
+  # queries don't need labels). Centralized so both wrap_with_limit and
+  # build_random_sample_sparql use the identical outer shape.
+  def self.wrap_with_label(inner, with_label:)
+    return inner unless with_label
+    <<~SPARQL
+      SELECT ?item ?itemLabel ?image ?coord ?article WHERE {
+        { #{inner.strip} }
+        SERVICE wikibase:label { bd:serviceParam wikibase:language "en" }
+      }
+    SPARQL
+  end
+
+  # Items pass if they have a Wikidata P18 image OR an English Wikipedia
+  # article (we fall back to the article's lead image via WikipediaImageFetcher).
   def self.image_or_article_block
     <<~BLOCK
       OPTIONAL { ?item wdt:P18 ?image }
@@ -232,22 +377,156 @@ class WikidataImporter
     BLOCK
   end
 
+  # === Per-type parallelism ===
+
+  # Runs the block per type in parallel threads, with progress reporting.
+  # Returns an array of results (nil for errored types — partial success
+  # beats total failure). on_progress is called after EACH type completes
+  # (succeeded OR failed) with (done, total, qid).
+  def self.parallel_per_type(types, on_progress: nil)
+    done = Concurrent::AtomicFixnum.new(0)
+    threads = types.map do |qid|
+      Thread.new do
+        result =
+          begin
+            yield(qid)
+          rescue Error => e
+            Rails.logger.warn "[wdqs per-type] qid=#{qid} #{e.class}: #{e.message.slice(0, 200)}" if defined?(Rails)
+            nil
+          end
+        n = done.increment
+        begin
+          # The progress callback typically writes back to the database
+          # (e.g., image_set.update_columns(import_progress:)) — and we're
+          # in a worker thread that has no AR connection of its own.
+          # Without with_connection, AR either checks one out and never
+          # returns it (pool leak) or raises ConnectionTimeoutError once
+          # the pool is exhausted. with_connection borrows for the call
+          # and returns the connection deterministically.
+          ActiveRecord::Base.connection_pool.with_connection do
+            on_progress&.call(n, types.size, qid)
+          end
+        rescue StandardError => e
+          Rails.logger.warn "[wdqs per-type progress] #{e.class}: #{e.message}" if defined?(Rails)
+        end
+        result
+      end
+    end
+    threads.map(&:value)
+  end
+
+  # === Row insert (the inserting phase) ===
+
+  # Bulk insert: ~5 queries per batch of 500 instead of 4 queries per row.
+  # For a 7k-image import that's ~70 queries vs 28,000 — meaningfully
+  # less DB load, much less log noise, ~10× faster wall time.
+  #
+  # logger.silence wraps the whole thing so dev mode doesn't spam SQL
+  # logs for every batch. Production already runs at info level so the
+  # silence is mostly a dev quality-of-life win.
+  #
+  # Dedup strategy: we pre-query existing Images by URL and existing
+  # ImageSetItems by image_id, then insert_all only the genuinely new
+  # rows. The race-prone case (two concurrent imports of the same URL,
+  # or a retry_import that overlaps the original job) is closed by the
+  # unique index on images.url (where url IS NOT NULL) + unique_by: :url
+  # below — if the race happens, ON CONFLICT DO NOTHING wins and we
+  # later RELOAD the now-existing id rather than re-inserting.
+  def self.insert_rows!(image_set:, rows:)
+    new_links = 0
+    inserted  = 0
+
+    ActiveRecord::Base.logger.silence do
+      rows.each_slice(500) do |slice|
+        ImageSetItem.transaction do
+          new_links += insert_slice!(image_set: image_set, slice: slice)
+        end
+        inserted += slice.size
+        image_set.update_columns(import_progress: inserted)
+      end
+    end
+
+    new_links
+  end
+
+  def self.insert_slice!(image_set:, slice:)
+    # filter_map: nil URLs make for a useless Image (can't dedupe-by-url,
+    # can't render). Upstream `import!` keepable-filter already drops
+    # them but defensive — a future caller might not.
+    urls = slice.filter_map { |r| r[:url] }
+    url_to_image_id = Image.where(url: urls).pluck(:url, :id).to_h
+
+    # 1. Bulk-insert any Image rows whose URL we don't already have.
+    new_image_rows = slice.reject { |r| url_to_image_id.key?(r[:url]) }
+                          .uniq { |r| r[:url] }
+                          .map do |r|
+      { url: r[:url], title: r[:title].presence || "Untitled",
+        latitude: r[:lat], longitude: r[:lng],
+        created_at: Time.current, updated_at: Time.current }
+    end
+
+    if new_image_rows.any?
+      # unique_by: :url tells Rails to emit ON CONFLICT (url) DO NOTHING
+      # — Rails finds the matching partial unique index (url IS NOT NULL)
+      # by columns, so a stale schema cache doesn't bite us the way an
+      # index-name lookup would (e.g. if a dev server is still up from
+      # before the migration ran). Result: a concurrent importer that
+      # beat us to a URL doesn't fail us. `returning:` won't include
+      # rows skipped by ON CONFLICT, so we re-query missing ids below.
+      result = Image.insert_all(new_image_rows, returning: %i[id url], unique_by: :url)
+      result.rows.each { |id, url| url_to_image_id[url] = id }
+
+      # ON CONFLICT DO NOTHING means rows that lost a race against a
+      # concurrent insert don't appear in `result.rows` — re-fetch their
+      # ids here so the subsequent join-table insert can use them.
+      still_missing = new_image_rows.map { |r| r[:url] } - url_to_image_id.keys
+      unless still_missing.empty?
+        Image.where(url: still_missing).pluck(:url, :id).each do |url, id|
+          url_to_image_id[url] = id
+        end
+      end
+    end
+
+    # 2. Bulk-insert ImageSetItem rows for images not already linked
+    # to this set. Existing index_image_set_items_on_image_set_id_and_image_id
+    # is unique, so duplicates also get caught at the DB level if we miss
+    # one — but pre-filtering keeps the INSERT clean.
+    candidate_image_ids = slice.filter_map { |r| url_to_image_id[r[:url]] }.uniq
+    already_linked = image_set.image_set_items
+                              .where(image_id: candidate_image_ids)
+                              .pluck(:image_id).to_set
+
+    item_rows = slice.filter_map do |r|
+      image_id = url_to_image_id[r[:url]]
+      next nil unless image_id
+      next nil if already_linked.include?(image_id)
+      already_linked << image_id  # guard against intra-slice dupes
+      { image_set_id: image_set.id, image_id: image_id,
+        latitude: r[:lat], longitude: r[:lng],
+        created_at: Time.current, updated_at: Time.current }
+    end
+
+    if item_rows.any?
+      # unique_by on (image_set_id, image_id) means a concurrent
+      # importer that beat us to the same (set, image) pair causes
+      # ON CONFLICT DO NOTHING instead of aborting the entire 500-row
+      # batch with a uniqueness violation. The pre-query above filters
+      # most races but a parallel retry_import can interleave.
+      ImageSetItem.insert_all(item_rows, unique_by: %i[image_set_id image_id])
+      item_rows.size
+    else
+      0
+    end
+  end
+
   # === HTTP ===
 
   # Retries on transient WDQS failures (5xx, connection-level errors).
   # WDQS is fronted by a load balancer that returns 502/503 under load
-  # spikes; a single retry-after-backoff typically clears those. Without
-  # this, ONE flaky moment kills an import that took the user 90s of AI
-  # work to set up.
-  #
-  # Retry budget: 3 attempts with 1s → 2s backoff. WDQS itself has a 60s
-  # internal timeout so the worst-case wall time for the entire retry
-  # loop is ~3×90s + 3s = ~273s — bounded.
-  MAX_RETRIES = 3
-
+  # spikes; a single retry-after-backoff typically clears those.
   def self.run_query(sparql)
     attempts = 0
-    summary = WikidataQueryLog.summarize_sparql(sparql)
+    summary  = WikidataQueryLog.summarize_sparql(sparql)
 
     loop do
       attempts += 1
@@ -267,7 +546,7 @@ class WikidataImporter
           WikidataQueryLog.log(action: :sparql, status: "timeout", duration: Time.now - t0,
                                 attempt: attempts, error: "#{e.class}: #{e.message}", q: summary)
           if attempts < MAX_RETRIES
-            sleep(attempts) # 1s, 2s
+            sleep(attempts)
             next
           end
           raise TimeoutError, "Wikidata query timed out after #{attempts} attempts: #{e.class}: #{e.message}"
@@ -276,11 +555,9 @@ class WikidataImporter
       duration = Time.now - t0
 
       if response.code.start_with?("5") && attempts < MAX_RETRIES
-        # Transient — retry. Don't retry 4xx (our bug, not theirs) or
-        # the final 5xx (caller decides what to do with the failure).
         WikidataQueryLog.log(action: :sparql, status: response.code, duration: duration,
                               attempt: attempts, retrying: true, q: summary)
-        sleep(attempts) # 1s, 2s
+        sleep(attempts)
         next
       end
 
@@ -297,12 +574,28 @@ class WikidataImporter
     end
   end
 
-  # SPARQL binding -> plain hash. Dedupes by ?item: when an item has
-  # multiple P18 values, the query returns one row per (item, image)
-  # pair. Without this dedup, "Mount Fuji" would appear in the set twice
-  # — once for each of its P18 photos — which looks like a bug to users
-  # who asked for "one photo of every X". Keeps the first row per item;
-  # that's effectively the alphabetically-first image URL.
+  # === Result-shape helpers ===
+
+  # Hosts we trust to serve actual image bytes. P18 always resolves through
+  # Commons via Special:FilePath; Wikipedia pageimages return absolute upload
+  # URLs (upload.wikimedia.org). Anything else is either an old/wrong P18
+  # link (e.g. http://example.org from a vandal-tagged entity) or a Wikidata
+  # data error — either way we don't want it in our image set, since the
+  # browser will just show a broken-image icon.
+  IMAGE_URL_HOSTS = %w[
+    commons.wikimedia.org
+    upload.wikimedia.org
+  ].freeze
+
+  # SPARQL bindings → plain hashes, deduped by ?item.
+  #
+  # Rows with NO URL at this stage are kept on purpose: for
+  # image_source=wikipedia_pageimages the ?image slot is usually empty
+  # at SPARQL time and gets populated later by WikipediaImageFetcher.
+  # Filtering on nil here would drop the bulk of pageimages-mode rows
+  # before they ever reach the fetcher. We only drop rows with a
+  # *present-but-untrusted* URL (occasional Wikidata vandal data
+  # pointing P18 at example.com, etc).
   def self.normalize_rows(bindings)
     seen_items = Set.new
     bindings.filter_map do |b|
@@ -314,8 +607,10 @@ class WikidataImporter
       lng, lat = m ? [ m[1].to_f, m[2].to_f ] : [ nil, nil ]
 
       url   = b.dig("image", "value")&.sub(/\Ahttp:/, "https:")
+      next if url.present? && !trusted_image_url?(url)
+
       title = b.dig("itemLabel", "value").presence
-      title = nil if title&.match?(/\AQ\d+\z/) # Wikibase falls back to entity id when no label
+      title = nil if title&.match?(/\AQ\d+\z/)
 
       {
         item:    iri,
@@ -323,17 +618,20 @@ class WikidataImporter
         url:     url,
         lat:     lat,
         lng:     lng,
-        article: b.dig("article", "value") # may be nil; consumed by WikipediaImageFetcher
+        article: b.dig("article", "value")
       }
     end
   end
 
-  # Drops rows with a URL we've already seen. Why URL-dedup *after*
-  # item-dedup (in normalize_rows): two different Wikidata items can
-  # share an image URL (e.g. one photo featuring two adjacent peaks
-  # gets used as P18 for both items). Without this pass, both items
-  # render as separate cards in the preview/set with the same picture.
-  # Keeps the first row per URL.
+  def self.trusted_image_url?(url)
+    uri = URI.parse(url)
+    uri.scheme == "https" && IMAGE_URL_HOSTS.include?(uri.host)
+  rescue URI::InvalidURIError
+    false
+  end
+
+  # Drops rows with a URL we've already seen. Two different items can share
+  # a P18 (e.g. one photo featuring two adjacent peaks).
   def self.dedupe_by_url(rows)
     seen = Set.new
     rows.select { |r| seen.add?(r[:url]) }

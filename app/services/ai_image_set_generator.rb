@@ -112,9 +112,10 @@ class AiImageSetGenerator
             set_name:       { type: "STRING" },
             explanation:    { type: "STRING" },
             image_source:   { type: "STRING" },
+            fetch_strategy: { type: "STRING" },
             cannot_answer:  { type: "BOOLEAN" }
           },
-          required: %w[sparql_pattern set_name explanation image_source cannot_answer]
+          required: %w[sparql_pattern set_name explanation image_source fetch_strategy cannot_answer]
         }
       }
     ]
@@ -385,6 +386,7 @@ class AiImageSetGenerator
       set_name:       args["set_name"].to_s.strip.presence || "Untitled AI Set",
       explanation:    args["explanation"].to_s.strip,
       image_source:   args["image_source"].to_s,
+      fetch_strategy: args["fetch_strategy"].to_s,
       cannot_answer:  args["cannot_answer"] == true
     }
 
@@ -392,19 +394,30 @@ class AiImageSetGenerator
       payload[:image_source] = "wikipedia_pageimages"
     end
 
+    # Default to exhaustive if unrecognized — safe (matches pre-strategy
+    # behavior). The WikidataImporter ALSO validates and may override
+    # back to exhaustive at execution time (e.g. random_sample + FILTER).
+    unless %w[exhaustive random_sample].include?(payload[:fetch_strategy])
+      payload[:fetch_strategy] = "exhaustive"
+    end
+
     return payload if payload[:cannot_answer]
 
     raise InvalidResponseError, "submit_answer with empty sparql_pattern" if payload[:sparql_pattern].strip.empty?
 
-    # Only the three constructs that would actually conflict with our
-    # wrapping or open a security hole:
-    #   SELECT  — we wrap with our own outer SELECT
-    #   LIMIT   — we apply a server-side cap; AI's LIMIT would silently shrink results
-    #   SERVICE — AI-controlled service blocks could hit arbitrary endpoints
+    # Block any keyword that either breaks our outer wrapping or could
+    # let the AI take the query somewhere we don't control. WDQS is
+    # read-only so INSERT/DELETE/etc would 4xx anyway, but defense in
+    # depth is cheap: a future endpoint with write capability would
+    # silently inherit the gap.
+    #   SELECT/LIMIT       — collide with our outer SELECT + cap
+    #   SERVICE            — arbitrary endpoint calls
+    #   DESCRIBE/ASK/CONSTRUCT — alternate query forms; bypass our wrap
+    #   INSERT/DELETE/LOAD/CLEAR/DROP/WITH — SPARQL Update; should never appear
     # OPTIONAL/FILTER/UNION inside the pattern are fine; SPARQL allows
     # them alongside the OPTIONAL+FILTER trailer we add and they're
     # often necessary (numeric thresholds, alternatives, etc).
-    %w[SELECT LIMIT SERVICE].each do |kw|
+    %w[SELECT LIMIT SERVICE DESCRIBE ASK CONSTRUCT INSERT DELETE LOAD CLEAR DROP WITH].each do |kw|
       if payload[:sparql_pattern] =~ /\b#{kw}\b/i
         raise InvalidResponseError, "AI returned #{kw} in sparql_pattern (not allowed)"
       end
@@ -448,10 +461,12 @@ class AiImageSetGenerator
 
       SUBMIT_ANSWER FIELD CONSTRAINTS:
       - sparql_pattern: SPARQL WHERE-clause body. MUST bind ?item and
-        ?coord. MUST NOT contain SELECT, LIMIT, or SERVICE blocks —
-        the server adds those, plus its own OPTIONAL+FILTER trailer
-        for the image/article fallback. Empty string is OK when
-        cannot_answer=true. Basic shape:
+        ?coord. The matched-item variable MUST be exactly ?item (not
+        ?place, ?building, etc.) — the backend rewrites the type triple
+        and assumes that name. MUST NOT contain SELECT, LIMIT, or
+        SERVICE blocks — the server adds those, plus its own
+        OPTIONAL+FILTER trailer for the image/article fallback. Empty
+        string is OK when cannot_answer=true. Basic shape:
         `?item wdt:P31/wdt:P279* wd:Q##### ; wdt:P17 wd:Q## ; wdt:P625 ?coord .`
         Use wdt:P31/wdt:P279* (subclass walk) for broad categories;
         exact wdt:P31 for narrow concepts with deliberate scope.
@@ -477,6 +492,8 @@ class AiImageSetGenerator
       - explanation: 1-2 plain-English sentences, no jargon.
       - image_source: MUST be exactly "wikipedia_pageimages" (default)
         or "wikidata_p18". No other values.
+      - fetch_strategy: MUST be exactly "exhaustive" or "random_sample".
+        See the FETCH STRATEGY section below for which to pick.
       - cannot_answer: boolean. true to refuse, false to provide a pattern.
 
       MODELING PRINCIPLES (apply these before composing the pattern):
@@ -505,18 +522,38 @@ class AiImageSetGenerator
         `VALUES ?country { wd:QA wd:QB ... } . ?item wdt:P17 ?country` —
         search each country Q-ID first.
 
-      - **Broad concepts span multiple classes.** When the user's
-        category is a vibe / domain / feeling rather than one Wikidata
-        class ("nature", "transportation", "sports", "art",
-        "architecture", "wildlife"), do NOT pick a single overly-
-        abstract Q-ID and use it as P31 — most actual items are
-        classified under SPECIFIC subclasses, not the umbrella concept.
-        Wikidata's "natural object" (Q1970309) has ~5 US instances;
-        "mountain" alone has thousands. Enumerate the meaningful
-        specific classes with VALUES + P31/P279*:
-          VALUES ?type { wd:Q8502 wd:Q23397 wd:Q34038 wd:Q4421 wd:Q46169 }
-          ?item wdt:P31/wdt:P279* ?type ; wdt:P17 wd:Q30 ; wdt:P625 ?coord .
-        Search each specific class first to find its Q-ID.
+      - **Umbrella concepts that span multiple classes.** Applies ONLY
+        when the user's request is a vibe / domain / feeling and no
+        single Wikidata class captures it. Examples that ARE umbrellas:
+        "nature", "wildlife", "transportation", "architecture",
+        "sports". Examples that are NOT umbrellas (these are specific
+        classes — use a single type, do not enumerate): "rivers
+        worldwide", "volcanoes worldwide", "skyscrapers in Asia",
+        "birds in Brazil". Broad scope ≠ umbrella; only enumerate when
+        no single class fits.
+
+        For umbrellas: ENUMERATE EXHAUSTIVELY by sub-domain. Think of
+        the umbrella like a Wikipedia category page — what *kinds* of
+        things belong? Group your brainstorm so you don't miss whole
+        branches. For "natural scenery", the sub-domains are landforms
+        (mountain, plateau, valley, cliff...), water (lake, river,
+        waterfall...), shore (beach, coast, fjord, island...), thermal
+        (volcano, geyser...), vegetated (forest, wetland...), arid
+        (desert, dune...). Apply the same sub-domain decomposition to
+        any umbrella the user gives you.
+
+        Target: 15-25 candidate types brainstormed, search them ALL
+        in one turn (emit many search_wikidata calls in parallel),
+        keep those with confident Q-IDs (typically 12-20 final).
+        Each search is ~0.2s; missing a category means missing a
+        whole class of images, so thoroughness is cheap.
+
+        Final shape for umbrellas:
+          VALUES ?type { wd:QA wd:QB ... wd:QT }
+          ?item wdt:P31/wdt:P279* ?type ; wdt:P625 ?coord .
+
+        Final shape for specific classes (even broad-worldwide ones):
+          ?item wdt:P31/wdt:P279* wd:Q##### ; wdt:P625 ?coord .
 
       REFUSAL — call submit_answer with cannot_answer=true if:
       - The category isn't comprehensively indexed in Wikidata — even if
@@ -540,6 +577,82 @@ class AiImageSetGenerator
         where most items won't have English Wikipedia articles, OR if
         the user explicitly asks for "fast".
 
+      FETCH STRATEGY (required field):
+
+      Wikidata has a 60-second query timeout. The backend fans out
+      VALUES-based umbrella queries PER TYPE — each Q-ID in your
+      `VALUES ?type { ... }` block runs as a separate query in parallel.
+      That means a 12-type umbrella isn't one giant query; it's 12
+      narrow queries that each get the full 60-second budget. Pick
+      strategy based on the size of a SINGLE type, not the umbrella.
+
+      Decision table:
+
+        | Query has...                          | Strategy       |
+        | ------------------------------------- | -------------- |
+        | Country (wdt:P17 wd:Q##)              | exhaustive     |
+        | Region/admin (wdt:P131 ...)           | exhaustive     |
+        | FILTER (numeric/date)                 | exhaustive     |
+        | Single narrow class (<20k globally)   | exhaustive     |
+        | VALUES ?type with narrow types        | exhaustive     |
+        | Single very-broad class (>50k global) | random_sample  |
+
+      When in doubt → "exhaustive". It matches typical user expectation
+      ("give me ALL of X") and avoids the trap of returning a small
+      random slice that under-represents specific regions.
+
+      What each does:
+      - "exhaustive" fetches every matching item via subclass walk.
+        Fast when each type is narrow OR has at least one selective
+        constraint (country, FILTER, etc).
+      - "random_sample" fetches up to ~10,000 random items per type
+        via bd:sample. Reserved for truly-unbounded single classes
+        ("all buildings", "all roads", "all artworks worldwide" with
+        no narrowing). The cost: results are a random global slice,
+        so any specific region/country may be sparsely represented.
+
+      Examples to calibrate scale:
+      - "national parks worldwide": Q46169 has ~5k items globally —
+        narrow enough for exhaustive even with no country anchor.
+      - "rivers worldwide": >300k items globally — needs random_sample.
+      - "Romanesque churches worldwide" via VALUES { Q160517 Q1370598 ... }:
+        each style-of-church is narrow — exhaustive per-type works.
+      - "buildings worldwide" with no further narrowing: >5M items —
+        random_sample.
+
+      Backend safety: if you pick random_sample but include FILTER,
+      the backend auto-overrides to exhaustive (bd:sample cannot
+      filter inside its block).
+
+      PERFORMANCE — Selective numeric filters without geography:
+
+      For "X with property > threshold worldwide" (no country anchor),
+      the standard P31/P279* pattern times out because WDQS walks the
+      whole subclass tree before applying the FILTER.
+
+      When the FILTER is SELECTIVE (narrows to <20k items globally —
+      e.g. height > 200m, length > 500km, population > 10M, founded
+      before 1500), drop the P31 constraint entirely:
+
+        ?item wdt:P2048 ?height ; wdt:P625 ?coord . FILTER(?height > 200)
+
+      instead of:
+
+        ?item wdt:P31/wdt:P279* wd:Q41176 ; wdt:P2048 ?height ;
+              wdt:P625 ?coord . FILTER(?height > 200)
+
+      WDQS starts from the (small) set of items with the property,
+      filters, then joins — instead of walking millions of buildings.
+
+      Trade-off: returns ANY item with that property, not just the
+      target class. Acknowledge in your explanation, e.g.:
+        "Note: includes non-target items that share this property
+        (mountains have heights too)."
+
+      Apply ONLY for selective thresholds. For mild ones (height >
+      50m, population > 100k), the property alone matches too many
+      items — keep P31.
+
       EXPLANATION STYLE:
       - Plain English, friendly, no jargon.
       - Bad: "Filters wd:Q8072 via wdt:P31/wdt:P279* with wdt:P17 wd:Q17."
@@ -559,6 +672,7 @@ class AiImageSetGenerator
           set_name: "Volcanoes of Japan",
           explanation: "I'll find volcanoes located in Japan that have photos.",
           image_source: "wikipedia_pageimages",
+          fetch_strategy: "exhaustive",
           cannot_answer: false
         )
     PROMPT

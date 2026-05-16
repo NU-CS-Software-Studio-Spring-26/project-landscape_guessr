@@ -19,7 +19,7 @@ require "json"
 # AI only needs the claim structure.
 class WikidataEntityInspect
   API = URI("https://www.wikidata.org/w/api.php").freeze
-  USER_AGENT = "landscape-guessr/ai-image-sets (https://github.com/NU-CS-Software-Studio-Spring-26/project-landscape_guessr) Ruby/#{RUBY_VERSION}".freeze
+  USER_AGENT = WikimediaUserAgent::STRING
   READ_TIMEOUT = 15
 
   # Cap how many distinct properties we return. ~25 covers the most

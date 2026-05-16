@@ -1,9 +1,14 @@
 require "test_helper"
 
 class WikidataImporterTest < ActiveSupport::TestCase
-  test "wrap_with_limit appends OPTIONAL+FILTER trailer + label service" do
+  test "wrap_with_limit wraps inner subquery + label service outside (per WDQS docs)" do
     sparql = WikidataImporter.wrap_with_limit("?item wdt:P31 wd:Q8072 .", limit: 100)
-    assert_includes sparql, "SELECT DISTINCT ?item ?itemLabel"
+    # Outer SELECT exposes ?itemLabel; inner SELECT DISTINCT does the
+    # actual data query so the label service only runs on the surviving
+    # LIMIT rows. Documented WDQS optimization — keeps label lookups out
+    # of the unbounded join space.
+    assert_includes sparql, "SELECT ?item ?itemLabel ?image ?coord ?article"
+    assert_includes sparql, "SELECT DISTINCT ?item ?image ?coord ?article"
     assert_includes sparql, "OPTIONAL { ?item wdt:P18 ?image }"
     assert_includes sparql, "FILTER (BOUND(?image) || BOUND(?article))"
     assert_includes sparql, "SERVICE wikibase:label"
@@ -21,7 +26,7 @@ class WikidataImporterTest < ActiveSupport::TestCase
       {
         "item"      => { "value" => "http://www.wikidata.org/entity/Q5678" },
         "itemLabel" => { "value" => "Q5678" }, # Wikibase fallback — should drop to "Untitled"
-        "image"     => { "value" => nil },
+        "image"     => { "value" => "https://commons.wikimedia.org/wiki/Special:FilePath/bar.jpg" },
         "coord"     => { "value" => nil },
         "article"   => { "value" => "https://en.wikipedia.org/wiki/Some_Page" }
       }
@@ -38,6 +43,25 @@ class WikidataImporterTest < ActiveSupport::TestCase
     assert_equal "https://en.wikipedia.org/wiki/Some_Page", rows[1][:article]
   end
 
+  test "normalize_rows drops rows whose image URL is present but untrusted, keeps nil URLs for pageimages fetch" do
+    bindings = [
+      { "item"  => { "value" => "http://www.wikidata.org/entity/Q1" },
+        "image" => { "value" => nil },                                              # nil URL — kept (pageimages will fill it)
+        "article" => { "value" => "https://en.wikipedia.org/wiki/Park_A" } },
+      { "item"  => { "value" => "http://www.wikidata.org/entity/Q2" },
+        "image" => { "value" => "http://example.com/photo.jpg" } },                 # http, untrusted host — dropped
+      { "item"  => { "value" => "http://www.wikidata.org/entity/Q3" },
+        "image" => { "value" => "https://malicious.example/payload.jpg" } },        # https but untrusted host — dropped
+      { "item"  => { "value" => "http://www.wikidata.org/entity/Q4" },
+        "image" => { "value" => "https://commons.wikimedia.org/wiki/Special:FilePath/ok.jpg" } }
+    ]
+    rows = WikidataImporter.normalize_rows(bindings)
+    assert_equal 2, rows.size
+    assert_nil rows[0][:url], "nil-URL row should be kept (pageimages mode fills it later)"
+    assert_equal "https://en.wikipedia.org/wiki/Park_A", rows[0][:article]
+    assert_equal "https://commons.wikimedia.org/wiki/Special:FilePath/ok.jpg", rows[1][:url]
+  end
+
   test "photo_url? rejects non-jpg, non-png, schematics, oversized" do
     good = "https://commons.wikimedia.org/wiki/Special:FilePath/Mount%20Fuji.jpg"
     bad_ext = "https://commons.wikimedia.org/wiki/Special:FilePath/diagram.svg"
@@ -51,6 +75,121 @@ class WikidataImporterTest < ActiveSupport::TestCase
     refute WikidataImporter.photo_url?(bad_satellite)
     refute WikidataImporter.photo_url?(long_url)
     refute WikidataImporter.photo_url?(nil)
+  end
+
+  # === Strategy + pattern-shape helpers ===
+
+  test "extract_single_type pulls Q-ID from P31 (with and without P279*)" do
+    assert_equal "Q41176", WikidataImporter.extract_single_type("?item wdt:P31 wd:Q41176 ; wdt:P625 ?coord .")
+    assert_equal "Q41176", WikidataImporter.extract_single_type("?item wdt:P31/wdt:P279* wd:Q41176 .")
+    assert_nil WikidataImporter.extract_single_type("?item wdt:P2048 ?height . FILTER(?height > 200)")
+  end
+
+  test "extract_types returns VALUES qids when present, single type otherwise, [] if neither" do
+    values = "VALUES ?type { wd:Q8502 wd:Q23397 } ?item wdt:P31 ?type ."
+    assert_equal %w[Q8502 Q23397], WikidataImporter.extract_types(values)
+    assert_equal %w[Q41176],       WikidataImporter.extract_types("?item wdt:P31 wd:Q41176 .")
+    assert_equal [],               WikidataImporter.extract_types("?item wdt:P2048 ?h . FILTER(?h > 200)")
+  end
+
+  test "effective_strategy auto-overrides random_sample to exhaustive on FILTER" do
+    pattern = "?item wdt:P31 wd:Q41176 ; wdt:P2048 ?h . FILTER(?h > 200)"
+    assert_equal "exhaustive", WikidataImporter.effective_strategy(pattern, "random_sample")
+  end
+
+  test "effective_strategy auto-overrides random_sample when no type extractable" do
+    pattern = "?item wdt:P2048 ?h ."  # no P31 anywhere
+    assert_equal "exhaustive", WikidataImporter.effective_strategy(pattern, "random_sample")
+  end
+
+  test "effective_strategy passes through random_sample when valid" do
+    pattern = "VALUES ?type { wd:Q8502 } ?item wdt:P31/wdt:P279* ?type ."
+    assert_equal "random_sample", WikidataImporter.effective_strategy(pattern, "random_sample")
+  end
+
+  test "effective_strategy overrides random_sample to exhaustive when multiple P31 triples outside VALUES" do
+    # strip_type_triple only catches the first; the second un-stripped
+    # triple would silently filter random_sample results.
+    pattern = "?item wdt:P31/wdt:P279* wd:Q4022 . ?item wdt:P31 wd:Q11424 . ?item wdt:P625 ?coord ."
+    assert_equal "exhaustive", WikidataImporter.effective_strategy(pattern, "random_sample")
+  end
+
+  test "effective_strategy allows random_sample for multi-type VALUES block (per-type fan-out is correct)" do
+    pattern = "VALUES ?type { wd:Q4022 wd:Q11424 } ?item wdt:P31/wdt:P279* ?type . ?item wdt:P625 ?coord ."
+    assert_equal "random_sample", WikidataImporter.effective_strategy(pattern, "random_sample")
+  end
+
+  test "strip_type_triple handles `;` (preserves subject for next predicate)" do
+    pattern  = "?item wdt:P31/wdt:P279* wd:Q41176 ; wdt:P2048 ?h ; wdt:P625 ?coord ."
+    stripped = WikidataImporter.strip_type_triple(pattern, "Q41176")
+    # `;` → `?item` so the predicate list survives
+    assert_includes stripped, "?item wdt:P2048 ?h"
+    refute_includes stripped, "wd:Q41176"
+  end
+
+  test "strip_type_triple doesn't match similar variable names like ?subitem" do
+    # Without the word-boundary guard, `\?item` would partial-match the
+    # `?item` substring inside `?subitem` and silently strip a different
+    # triple.
+    pattern  = "?subitem wdt:P31 wd:Q1 . ?item wdt:P625 ?coord ."
+    stripped = WikidataImporter.strip_type_triple(pattern, "Q1")
+    assert_includes stripped, "?subitem wdt:P31 wd:Q1", "should leave ?subitem triple alone"
+  end
+
+  test "strip_type_triple handles `.` (removes entirely)" do
+    pattern  = "?item wdt:P31/wdt:P279* wd:Q4022 . ?item wdt:P625 ?coord ."
+    stripped = WikidataImporter.strip_type_triple(pattern, "Q4022")
+    assert_includes stripped, "?item wdt:P625 ?coord"
+    refute_includes stripped, "wd:Q4022"
+  end
+
+  test "build_per_type_sparql for exhaustive substitutes QID, wraps with label outside" do
+    pattern = "VALUES ?type { wd:Q8502 } ?item wdt:P31/wdt:P279* ?type . ?item wdt:P625 ?coord ."
+    sparql  = WikidataImporter.build_per_type_sparql(
+      pattern: pattern, qid: "Q8502", strategy: "exhaustive",
+      limit: 100, with_label: true
+    )
+    assert_includes sparql, "wdt:P31/wdt:P279* wd:Q8502"
+    refute_includes sparql, "?type"
+    refute_includes sparql, "VALUES"
+    assert_includes sparql, "SERVICE wikibase:label"
+  end
+
+  test "build_per_type_sparql ?type gsub doesn't clobber similar variable names" do
+    # plain `gsub("?type", ...)` would corrupt `?typeOfThing`. The
+    # word-boundary regex must leave non-?type variables alone.
+    pattern = "VALUES ?type { wd:Q1 } ?typeOfThing wdt:P31 ?type . ?item wdt:P625 ?coord ."
+    sparql  = WikidataImporter.build_per_type_sparql(
+      pattern: pattern, qid: "Q1", strategy: "exhaustive",
+      limit: 100, with_label: false
+    )
+    # ?typeOfThing must survive; only the bare ?type gets substituted.
+    assert_includes sparql, "?typeOfThing wdt:P31 wd:Q1"
+  end
+
+  test "build_per_type_sparql for random_sample wraps inner triple in bd:sample" do
+    pattern = "VALUES ?type { wd:Q8502 } ?item wdt:P31/wdt:P279* ?type . ?item wdt:P625 ?coord ."
+    sparql  = WikidataImporter.build_per_type_sparql(
+      pattern: pattern, qid: "Q8502", strategy: "random_sample",
+      limit: 100, with_label: false
+    )
+    assert_includes sparql, "SERVICE bd:sample"
+    assert_includes sparql, "?item wdt:P31 wd:Q8502 ."
+    assert_includes sparql, "bd:sample.limit 100"
+    # The outer constraints survive
+    assert_includes sparql, "?item wdt:P625 ?coord"
+    # No P279* — bd:sample takes only a direct triple
+    refute_includes sparql, "wdt:P279*"
+  end
+
+  test "build_per_type_sparql for random_sample count_only emits COUNT" do
+    pattern = "?item wdt:P31 wd:Q8502 . ?item wdt:P625 ?coord ."
+    sparql  = WikidataImporter.build_per_type_sparql(
+      pattern: pattern, qid: "Q8502", strategy: "random_sample",
+      limit: 1000, count_only: true, with_label: false
+    )
+    assert_includes sparql, "SELECT (COUNT(*) AS ?c)"
+    assert_includes sparql, "SERVICE bd:sample"
   end
 
   # === run_query retry behavior ===

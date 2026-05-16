@@ -17,7 +17,7 @@ require "json"
 # rate-limited harder than identified traffic.
 class WikidataEntitySearch
   API = URI("https://www.wikidata.org/w/api.php").freeze
-  USER_AGENT = "landscape-guessr/ai-image-sets (https://github.com/NU-CS-Software-Studio-Spring-26/project-landscape_guessr) Ruby/#{RUBY_VERSION}".freeze
+  USER_AGENT = WikimediaUserAgent::STRING
   READ_TIMEOUT = 15
 
   # Returns up to `limit` matches. `type` filters by entity kind:

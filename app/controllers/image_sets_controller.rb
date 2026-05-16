@@ -1,6 +1,6 @@
 class ImageSetsController < ApplicationController
   before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image attach_blob processing_status remove_item map new_filtered edit_filter update_filter preview_filter_count import_status retry_import]
-  before_action :require_owner, only: %i[edit update destroy locations update_locations add_image attach_blob processing_status remove_item edit_filter update_filter preview_filter_count retry_import]
+  before_action :require_owner, only: %i[edit update destroy locations update_locations add_image attach_blob processing_status remove_item edit_filter update_filter preview_filter_count retry_import import_status]
   # Filtered sets' items are derived from the filter — any direct edit gets
   # blown away on the next materialize. Redirect those routes to the filter
   # editor instead of letting users do work that disappears.
@@ -437,16 +437,22 @@ class ImageSetsController < ApplicationController
     else
       result[:image_source]
     end
+    fetch_strategy = if %w[exhaustive random_sample].include?(result[:fetch_strategy])
+      result[:fetch_strategy]
+    else
+      "exhaustive"
+    end
 
     image_set = Current.user.image_sets.new(
-      name:            params[:name].to_s.strip.presence || result[:set_name].presence || "Untitled AI Set",
-      visibility:      %w[public private].include?(params[:visibility]) ? params[:visibility] : "private",
-      ai_prompt:       gen.user_message.to_s,
-      ai_query:        result[:sparql_pattern],
-      ai_explanation:  result[:explanation].to_s,
-      ai_model:        gen.model_used.presence || "flash",
-      ai_image_source: image_source,
-      import_state:    "pending"
+      name:              params[:name].to_s.strip.presence || result[:set_name].presence || "Untitled AI Set",
+      visibility:        %w[public private].include?(params[:visibility]) ? params[:visibility] : "private",
+      ai_prompt:         gen.user_message.to_s,
+      ai_query:          result[:sparql_pattern],
+      ai_explanation:    result[:explanation].to_s,
+      ai_model:          gen.model_used.presence || "flash",
+      ai_image_source:   image_source,
+      ai_fetch_strategy: fetch_strategy,
+      import_state:      "pending"
     )
 
     if image_set.save
@@ -459,18 +465,29 @@ class ImageSetsController < ApplicationController
 
   # POST /image_sets/1/retry_import
   #
-  # Re-runs the import for an AI set whose previous import failed —
-  # typically a transient WDQS hiccup that outlasted run_query's 3-attempt
-  # internal retry. The set already has ai_query + ai_image_source from
-  # the original creation, so we just reset the progress columns and
-  # re-enqueue. Owner-only (require_owner) and only on actually-failed
-  # AI sets (guarded below) so this can't be used to spam jobs.
+  # Re-runs the import for an AI set when the previous attempt didn't
+  # finish. Common cases:
+  #   - state == "failed": transient WDQS hiccup outlasted run_query's
+  #     3-attempt internal retry, or Gemini timed out
+  #   - state stuck in fetching/looking_up_images/inserting: worker crashed
+  #     mid-job, or the AsyncAdapter thread died, or the import is
+  #     taking longer than the user wants to wait
+  #
+  # We allow retry from any non-completed AI state for the owner. Safety:
+  #   - Image.insert_all uses unique_by: :url so two concurrent imports
+  #     racing on the same row don't duplicate Images
+  #   - ImageSetItem has a unique index on (image_set_id, image_id) so
+  #     the join rows also dedupe
+  # Worst case of a real concurrent import: the progress counter ping-pongs
+  # briefly, but the final state converges. That's an acceptable trade-off
+  # for letting the user un-stick a stuck job without us needing per-import
+  # timestamp tracking.
   def retry_import
     if @image_set.ai_query.blank?
       redirect_to @image_set, alert: "This isn't an AI-generated set, nothing to retry." and return
     end
-    unless @image_set.import_state == "failed"
-      redirect_to @image_set, alert: "Import isn't in a failed state." and return
+    if @image_set.import_state == "completed"
+      redirect_to @image_set, alert: "Import already completed — nothing to retry." and return
     end
 
     @image_set.update_columns(
@@ -512,8 +529,14 @@ class ImageSetsController < ApplicationController
   end
 
   def require_owner
-    unless @image_set.owned_by?(Current.user)
-      redirect_to @image_set, alert: "You don't have permission to edit this set."
+    return if @image_set.owned_by?(Current.user)
+    # JSON callers (poll banners, fetch-based UIs) need a JSON 403 — an
+    # HTML redirect comes back as 302→200, content-type text/html, and
+    # the poll's `res.json()` throws on the HTML body. Other formats keep
+    # the friendly redirect.
+    respond_to do |format|
+      format.json { render json: { error: "forbidden" }, status: :forbidden }
+      format.any  { redirect_to @image_set, alert: "You don't have permission to edit this set." }
     end
   end
 
