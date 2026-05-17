@@ -29,9 +29,9 @@ class HomeControllerTest < ActionDispatch::IntegrationTest
 
     get root_url
     assert_response :success
-    assert_select "a[href=?]", image_set_path(set) do
+    assert_select "a[href=?]", practice_path(practice_set_id: set.id) do
       assert_select "p", text: "Saved for Practice Set"
-      assert_select "p", text: "Image set for practice mistakes"
+      assert_select "p", text: "Practice your saved mistakes"
     end
   end
 
@@ -42,7 +42,7 @@ class HomeControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
     assert_select "a[href=?]", practice_saved_path do
       assert_select "p", text: "Saved for Practice Set"
-      assert_select "p", text: "Image set for practice mistakes"
+      assert_select "p", text: "Practice your saved mistakes"
     end
   end
 end

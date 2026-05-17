@@ -35,10 +35,8 @@ class GenerateAiHintJobTest < ActiveJob::TestCase
     location = @location
     stub_class_method(HintLocationContext, :for_image, ->(*_args) { location }) do
       stub_class_method(GeminiHintGenerator, :generate, ->(*_args) { "Steep alpine meadows with timber chalets." }) do
-        stub_class_method(HintSafetyFilter, :call, ->(*_args) { "Steep alpine meadows with timber chalets." }) do
-          assert_difference -> { ImageAiHint.count }, 1 do
-            GenerateAiHintJob.perform_now(@image.id, 1)
-          end
+        assert_difference -> { ImageAiHint.count }, 1 do
+          GenerateAiHintJob.perform_now(@image.id, 1)
         end
       end
     end
@@ -72,19 +70,17 @@ class GenerateAiHintJobTest < ActiveJob::TestCase
     assert_equal "Existing hint", ImageAiHint.find_by!(image: @image, tier: 1).body
   end
 
-  test "marks failed when safety filter rejects hint" do
+  test "marks failed when generator cannot produce a safe hint" do
     location = @location
     stub_class_method(HintLocationContext, :for_image, ->(*_args) { location }) do
-      stub_class_method(GeminiHintGenerator, :generate, ->(*_args) { "Mentions Austria clearly." }) do
-        stub_class_method(HintSafetyFilter, :call, ->(*_args) { nil }) do
-          GenerateAiHintJob.perform_now(@image.id, 2)
-        end
+      stub_class_method(GeminiHintGenerator, :generate, ->(*_args) { raise GeminiHintGenerator::ApiError, "Hint failed safety filter after 3 attempts" }) do
+        GenerateAiHintJob.perform_now(@image.id, 2)
       end
     end
 
     hint = ImageAiHint.find_by!(image: @image, tier: 2)
     assert_equal "failed", hint.status
-    assert_equal "Hint failed safety filter", hint.error_message
+    assert_match(/safety filter/, hint.error_message)
   end
 
   test "marks failed when image has no coordinates" do

@@ -1,0 +1,28 @@
+<% content_for :title, "Practice set complete" %>
+
+<div class="w-full max-w-xl mx-auto space-y-8 py-8 text-center">
+  <div class="rounded-2xl border border-forest-200 bg-gradient-to-b from-forest-50 to-white px-8 py-10 shadow-sm space-y-5">
+    <p class="eyebrow text-forest-600">Saved for practice</p>
+    <h1 class="heading-page text-3xl sm:text-4xl">Congratulations!</h1>
+    <p class="text-gray-700 text-lg leading-relaxed">
+      You finished practicing
+      <span class="font-semibold text-forest-900"><%= @practice_set.name %></span>.
+    </p>
+  </div>
+
+  <p class="text-gray-600">
+    You worked through
+    <span class="font-semibold text-forest-900"><%= @images_practiced %></span>
+    <%= "image".pluralize(@images_practiced) %> — nice work.
+  </p>
+
+  <div class="flex flex-col sm:flex-row items-center justify-center gap-3">
+    <%= link_to "Practice this set again",
+          practice_path(practice_set_id: @practice_set.id),
+          class: "btn-primary w-full sm:w-auto" %>
+    <%= link_to "Saved practice images",
+          practice_saved_path,
+          class: "btn-secondary w-full sm:w-auto" %>
+    <%= link_to "Back to home", root_path, class: "btn-ghost w-full sm:w-auto" %>
+  </div>
+</div>

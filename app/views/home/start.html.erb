@@ -30,8 +30,8 @@
         { label: "Image Sets", sub: "Browse & manage sets", path: image_sets_path },
         {
           label: "Saved for Practice Set",
-          sub: "Image set for practice mistakes",
-          path: (@saved_practice_set.present? ? image_set_path(@saved_practice_set) : practice_saved_path)
+          sub: "Practice your saved mistakes",
+          path: (@saved_practice_set.present? ? practice_path(practice_set_id: @saved_practice_set.id) : practice_saved_path)
         }
       ].each do |item| %>
         <%= link_to item[:path],

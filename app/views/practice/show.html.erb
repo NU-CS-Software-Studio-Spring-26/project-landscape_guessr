@@ -14,16 +14,28 @@
      data-practice-check-url-value="<%= practice_check_path %>"
      <% if @ai_hints_enabled %>
      data-practice-hint-url-value="<%= practice_hint_path %>"
+     data-practice-hint-quota-used-value="<%= @ai_hint_quota_used %>"
+     data-practice-hint-quota-limit-value="<%= AiHintDailyQuota::LIMIT %>"
      <% end %>
      data-practice-time-limit-value="<%= @time_limit_seconds.to_i %>"
      data-practice-attempts-value="<%= @attempts.to_i %>"
      data-practice-hint-circle-value="<%= @hint_circle_enabled ? true : false %>"
      data-practice-signed-in-value="<%= authenticated? %>"
      data-practice-initially-saved-value="<%= @saved_for_practice ? true : false %>"
+     <% if @practice_set_progress %>
+     data-practice-practice-set-id-value="<%= @practice_set.id %>"
+     <% end %>
      class="w-full space-y-6">
 
   <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-    <h1 class="heading-page">Where is this?</h1>
+    <div>
+      <h1 class="heading-page">Where is this?</h1>
+      <% if @practice_set_progress %>
+        <p class="text-sm text-gray-500 mt-1">
+          Saved practice set · <%= @practice_set_progress.position_label %>
+        </p>
+      <% end %>
+    </div>
   </div>
 
   <div class="flex flex-wrap items-center gap-2 text-xs text-gray-500">
@@ -97,6 +109,11 @@
             class="btn-secondary text-sm py-1.5 px-3 shrink-0">
       AI hint
     </button>
+    <span data-practice-target="hintQuota"
+          title="New AI hints started today"
+          class="text-xs font-medium text-gray-500 tabular-nums shrink-0">
+      (<%= @ai_hint_quota_used %>/<%= AiHintDailyQuota::LIMIT %>)
+    </span>
     <% end %>
 
     <div data-practice-target="hintRadiusPanel" class="hidden ml-2 flex items-center gap-2 shrink-0">

@@ -81,6 +81,46 @@ class GeminiHintGeneratorTest < ActiveSupport::TestCase
     end
   end
 
+  test "retries with geographic feedback when safety filter rejects leaked location" do
+    requests = []
+    stub_request(:post, %r{generativelanguage\.googleapis\.com})
+      .to_return do |request|
+        requests << request
+        body = if requests.size == 1
+                 { candidates: [ { content: { parts: [ { text: "Snowy peaks typical of Switzerland." } ] } } ] }
+               else
+                 { candidates: [ { content: { parts: [ { text: "Think of alpine timber chalets and mountain pastures." } ] } } ] }
+               end
+        { status: 200, headers: { "Content-Type" => "application/json" }, body: body.to_json }
+      end
+
+    hint = GeminiHintGenerator.generate(image: @image, tier: 2, location: @location)
+
+    assert_equal "Think of alpine timber chalets and mountain pastures.", hint
+    assert_equal 2, requests.size
+    assert_includes requests.last.body, "Revision required"
+    assert_includes requests.last.body, "continent, country, region"
+  end
+
+  test "raises when safety filter still rejects after max retries" do
+    stub_request(:post, %r{generativelanguage\.googleapis\.com})
+      .to_return(
+        status: 200,
+        headers: { "Content-Type" => "application/json" },
+        body: {
+          candidates: [
+            { content: { parts: [ { text: "Snowy peaks typical of Switzerland." } ] } }
+          ]
+        }.to_json
+      )
+
+    assert_raises(GeminiHintGenerator::ApiError, match: /safety filter after/) do
+      GeminiHintGenerator.generate(image: @image, tier: 2, location: @location)
+    end
+
+    assert_requested :post, %r{generativelanguage\.googleapis\.com}, times: GeminiHintGenerator::MAX_SAFETY_RETRIES
+  end
+
   test "raises retryable error on HTTP 429" do
     stub_request(:post, %r{generativelanguage\.googleapis\.com})
       .to_return(status: 429, body: "rate limited")

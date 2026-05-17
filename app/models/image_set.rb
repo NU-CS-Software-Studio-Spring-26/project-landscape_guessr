@@ -57,6 +57,14 @@ class ImageSet < ApplicationRecord
     self.user_id == user&.id
   end
 
+  def saved_for_practice?
+    name == SAVED_FOR_PRACTICE_NAME
+  end
+
+  def practice_set_for?(user)
+    saved_for_practice? && owned_by?(user)
+  end
+
   def playable_by?(user)
     is_system_default? || owned_by?(user) || visibility == "public"
   end

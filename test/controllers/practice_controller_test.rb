@@ -31,6 +31,8 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "Medium"
     assert_includes response.body, "Strong"
     assert_includes response.body, "data-practice-hint-url-value"
+    assert_includes response.body, "data-practice-hint-quota-used-value"
+    assert_includes response.body, "(0/100)"
   end
 
   test "show omits AI hint controls when ai hints disabled" do
@@ -136,6 +138,48 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
     get practice_path(image_id: @private_image.id)
     assert_response :success
     assert_includes response.body, "data-practice-image-id-value=\"#{@private_image.id}\""
+  end
+
+  test "practice set mode only uses saved set images" do
+    sign_in_as @alice
+    saved_set = @alice.image_sets.create!(name: "Saved for Practice", visibility: "private", map_style: "outdoor-v2")
+    saved_set.image_set_items.create!(
+      image: @public_image,
+      latitude: @public_image.latitude,
+      longitude: @public_image.longitude
+    )
+    SavedPracticeImage.create!(user: @alice, image: @public_image)
+
+    get practice_path(practice_set_id: saved_set.id)
+    assert_response :success
+    assert_includes response.body, "Saved practice set"
+    assert_includes response.body, "data-practice-image-id-value=\"#{@public_image.id}\""
+    assert_includes response.body, "data-practice-practice-set-id-value=\"#{saved_set.id}\""
+  end
+
+  test "completing saved practice set redirects to congratulations page" do
+    sign_in_as @alice
+    saved_set = @alice.image_sets.create!(name: "Saved for Practice", visibility: "private", map_style: "outdoor-v2")
+    saved_set.image_set_items.create!(
+      image: @public_image,
+      latitude: @public_image.latitude,
+      longitude: @public_image.longitude
+    )
+    SavedPracticeImage.create!(user: @alice, image: @public_image)
+
+    get practice_path(practice_set_id: saved_set.id, completed_image_id: @public_image.id)
+    assert_redirected_to practice_complete_path(practice_set_id: saved_set.id)
+
+    follow_redirect!
+    assert_response :success
+    assert_includes response.body, "Congratulations"
+  end
+
+  test "practice set mode requires sign in" do
+    saved_set = ImageSet.create!(name: "Saved for Practice", visibility: "private", map_style: "outdoor-v2", user: @alice)
+
+    get practice_path(practice_set_id: saved_set.id)
+    assert_redirected_to new_session_path
   end
 
   test "saved practice index requires authentication" do
@@ -272,6 +316,8 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
     assert_equal "ready", body["status"]
     assert_equal "Alpine terrain", body["hint"]
     assert_equal 1, body["tier"]
+    assert_equal 0, body["quota_used"]
+    assert_equal 100, body["quota_limit"]
     refute_hint_coordinate_leak(body)
   end
 
@@ -287,11 +333,58 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
     refute_hint_coordinate_leak(body)
   end
 
+  test "hint returns too many requests when daily quota is exceeded" do
+    sign_in_as @alice
+
+    with_ai_hints_config(enabled: true) do
+      with_memory_cache do
+        quota = AiHintDailyQuota.for(user: @alice)
+        AiHintDailyQuota::LIMIT.times { quota.record! }
+
+        assert_no_enqueued_jobs only: GenerateAiHintJob do
+          assert_no_difference("ImageAiHint.count") do
+            get practice_hint_path(image_id: images(:three).id, tier: 3), as: :json
+          end
+        end
+      end
+    end
+
+    assert_response :too_many_requests
+    body = JSON.parse(response.body)
+    assert_equal "failed", body["status"]
+    assert_includes body["error"], "Daily AI hint limit"
+    assert_equal 3, body["tier"]
+    assert_equal 100, body["quota_used"]
+    assert_equal 100, body["quota_limit"]
+    refute_hint_coordinate_leak(body)
+  end
+
+  test "hint serves cached ready hints when daily quota is exceeded" do
+    sign_in_as @alice
+
+    with_ai_hints_config(enabled: true) do
+      with_memory_cache do
+        quota = AiHintDailyQuota.for(user: @alice)
+        AiHintDailyQuota::LIMIT.times { quota.record! }
+
+        get practice_hint_path(image_id: @public_image.id, tier: 1), as: :json
+      end
+    end
+
+    assert_response :success
+    body = JSON.parse(response.body)
+    assert_equal "ready", body["status"]
+    assert_equal "Alpine terrain", body["hint"]
+    refute_hint_coordinate_leak(body)
+  end
+
   test "hint creates pending row and enqueues job on first request" do
     with_ai_hints_config(enabled: true) do
-      assert_enqueued_with(job: GenerateAiHintJob, args: [ @public_image.id, 3 ]) do
-        assert_difference("ImageAiHint.count", 1) do
-          get practice_hint_path(image_id: @public_image.id, tier: 3), as: :json
+      with_memory_cache do
+        assert_enqueued_with(job: GenerateAiHintJob, args: [ @public_image.id, 3 ]) do
+          assert_difference("ImageAiHint.count", 1) do
+            get practice_hint_path(image_id: @public_image.id, tier: 3), as: :json
+          end
         end
       end
     end
@@ -300,6 +393,8 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
     body = JSON.parse(response.body)
     assert_equal "pending", body["status"]
     assert_equal 3, body["tier"]
+    assert_equal 1, body["quota_used"]
+    assert_equal 100, body["quota_limit"]
     hint = ImageAiHint.find_by!(image: @public_image, tier: 3)
     assert_equal "pending", hint.status
     refute_hint_coordinate_leak(body)
@@ -340,6 +435,33 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
     refute_hint_coordinate_leak(body)
   end
 
+  test "hint retry after geographic failure does not charge quota twice" do
+    failed_image = images(:two)
+    image_ai_hints(:two_tier_1).update_columns(
+      status: "failed",
+      error_message: "Hint failed safety filter after 3 attempts",
+      updated_at: 10.minutes.ago
+    )
+
+    sign_in_as @alice
+
+    with_ai_hints_config(enabled: true) do
+      with_memory_cache do
+        get practice_hint_path(image_id: failed_image.id, tier: 1), as: :json
+        assert_equal 1, JSON.parse(response.body)["quota_used"]
+
+        image_ai_hints(:two_tier_1).update_columns(
+          status: "failed",
+          error_message: "Hint failed safety filter after 3 attempts",
+          updated_at: 1.minute.ago
+        )
+
+        get practice_hint_path(image_id: failed_image.id, tier: 1, retry: 1), as: :json
+        assert_equal 1, JSON.parse(response.body)["quota_used"]
+      end
+    end
+  end
+
   test "hint retries failed row when retry param is set" do
     failed_image = images(:two)
 
@@ -366,6 +488,14 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
   end
 
   private
+
+  def with_memory_cache
+    previous_cache = Rails.cache
+    Rails.cache = ActiveSupport::Cache.lookup_store(:memory_store)
+    yield
+  ensure
+    Rails.cache = previous_cache
+  end
 
   def with_ai_hints_config(enabled:)
     previous_enabled = ENV["AI_HINTS_ENABLED"]

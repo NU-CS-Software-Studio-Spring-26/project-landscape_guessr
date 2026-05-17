@@ -27,13 +27,22 @@ class HintSafetyFilterTest < ActiveSupport::TestCase
       HintSafetyFilter.call("Steep alpine meadows and timber chalets.", @image, tier: 2, location: @location)
   end
 
-  test "rejects hint containing country name for tier 2" do
+  test "rejects hint containing country name for all tiers" do
     assert_nil HintSafetyFilter.call("Snowy peaks typical of Austria.", @image, tier: 2, location: @location)
+    assert_nil HintSafetyFilter.call("Snowy peaks typical of Austria.", @image, tier: 3, location: @location)
   end
 
-  test "allows country name for tier 3" do
-    assert_equal "Snowy peaks typical of Austria.",
-      HintSafetyFilter.call("Snowy peaks typical of Austria.", @image, tier: 3, location: @location)
+  test "rejects hint containing continent or region for all tiers" do
+    assert_nil HintSafetyFilter.call("Classic European alpine scenery.", @image, tier: 1, location: @location)
+    assert_nil HintSafetyFilter.call("Think of the Tyrol valleys.", @image, tier: 3, location: @location)
+  end
+
+  test "rejection reports geographic leaks for model feedback" do
+    rejection = HintSafetyFilter.rejection("Snowy peaks typical of Austria.", @image, tier: 2, location: @location)
+
+    assert rejection.geographic?
+    assert_includes rejection.matched_terms, "Austria"
+    assert_includes rejection.feedback_message, "continent, country, region"
   end
 
   test "rejects hint containing city name for all tiers" do

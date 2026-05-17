@@ -3,7 +3,14 @@
 <div class="w-full max-w-5xl mx-auto space-y-6 py-4">
   <div class="flex flex-wrap items-center justify-between gap-3">
     <h1 class="heading-page">Saved for practice</h1>
-    <%= link_to "Back to practice", practice_path, class: "btn-secondary" %>
+    <div class="flex flex-wrap items-center gap-2">
+      <% if @saved_practice_set && @saved_images.any? %>
+        <%= link_to "Practice saved set",
+              practice_path(practice_set_id: @saved_practice_set.id),
+              class: "btn-primary" %>
+      <% end %>
+      <%= link_to "Free practice", practice_path, class: "btn-secondary" %>
+    </div>
   </div>
 
   <% if @saved_images.any? %>
@@ -24,7 +31,10 @@
             </div>
             <div class="flex items-center gap-2">
               <%= link_to "Practice this image",
-                    practice_path(image_id: image.id, saved: 1),
+                    practice_path(
+                      image_id: image.id,
+                      practice_set_id: @saved_practice_set&.id
+                    ),
                     class: "btn-primary text-sm" %>
               <%= button_to "Remove", practice_unsave_path(image.id),
                     method: :delete,

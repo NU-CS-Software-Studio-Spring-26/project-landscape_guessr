@@ -4,7 +4,8 @@ require "net/http"
 require "json"
 
 class GeminiHintGenerator
-  PROMPT_VERSION = 5
+  PROMPT_VERSION = 6
+  MAX_SAFETY_RETRIES = 3
   API_HOST = "generativelanguage.googleapis.com"
 
   class Error < StandardError; end
@@ -13,8 +14,9 @@ class GeminiHintGenerator
   class RetryableError < ApiError; end
 
   NEVER_IN_HINT = <<~RULES.squish
-    Never name or spell out specific landmark names, exact street addresses, or readable
-    place names. Do not quote or reference any image title or filename.
+    Never name or spell out the continent, country, region, city, town, landmark names,
+    exact street addresses, or readable place names. Do not quote or reference any image
+    title or filename.
   RULES
 
   PLAIN_LANGUAGE = <<~RULES.squish
@@ -36,13 +38,25 @@ class GeminiHintGenerator
     raise ConfigurationError, "Gemini API is not configured" unless GeminiConfig.enabled?
     raise ApiError, "Location context is required for hint generation" if @location.blank?
 
-    response = request_generate_content
-    extract_text(response)
+    rejection_feedback = nil
+
+    MAX_SAFETY_RETRIES.times do
+      raw_hint = extract_text(request_generate_content(rejection_feedback: rejection_feedback))
+      filtered_hint = HintSafetyFilter.call(raw_hint, @image, tier: @tier, location: @location)
+      return filtered_hint if filtered_hint
+
+      rejection = HintSafetyFilter.rejection(raw_hint, @image, tier: @tier, location: @location)
+      raise ApiError, "Hint failed safety filter" unless rejection
+
+      rejection_feedback = rejection.feedback_message
+    end
+
+    raise ApiError, "Hint failed safety filter after #{MAX_SAFETY_RETRIES} attempts"
   end
 
   private
 
-  def request_generate_content
+  def request_generate_content(rejection_feedback: nil)
     uri = URI::HTTPS.build(
       host: API_HOST,
       path: "/v1beta/models/#{GeminiConfig.model}:generateContent",
@@ -56,18 +70,18 @@ class GeminiHintGenerator
 
     request = Net::HTTP::Post.new(uri)
     request["Content-Type"] = "application/json"
-    request.body = JSON.generate(request_body)
+    request.body = JSON.generate(request_body(rejection_feedback: rejection_feedback))
 
     response = http.request(request)
     handle_response(response)
   end
 
-  def request_body
+  def request_body(rejection_feedback: nil)
     {
       contents: [
         {
           parts: [
-            { text: prompt_for_tier(@tier) }
+            { text: prompt_for_tier(@tier, rejection_feedback: rejection_feedback) }
           ]
         }
       ]
@@ -75,7 +89,7 @@ class GeminiHintGenerator
   end
 
   # Prompt uses geocoded location text only — never image.title, filename, or coordinates.
-  def prompt_for_tier(tier)
+  def prompt_for_tier(tier, rejection_feedback: nil)
     intensity =
       case tier
       when 1
@@ -84,23 +98,32 @@ class GeminiHintGenerator
           from common knowledge (typical school geography, widely known culture, famous foods,
           animals, exports, or stereotypes a general audience would recognize). Pick a niche,
           distinctive clue — not vague scenery like "mountainous" or "green hills." Do not use
-          obscure trivia, academic jargon, or references only locals would know. Do not name the
-          country, region, city, or any landmark.
+          obscure trivia, academic jargon, or references only locals would know. Never name or
+          imply the continent, country, region, city, town, or any landmark.
         TIER
       when 2
         <<~TIER.squish
           Give one medium-strength hint using cultural, historical, folklore, food, or
           geographic references strongly associated with this place (for example, a
           well-known children's story character for Switzerland, or a famous dish for
-          Italy) without naming the country, region, city, or any landmark.
+          Italy) without naming or implying the continent, country, region, city, town,
+          or any landmark.
         TIER
       when 3
         <<~TIER.squish
-          Give one stronger hint that may name the country or continent, but still do not
-          name any city, town, region, landmark, or street.
+          Give one stronger hint using vivid cultural, historical, folklore, food, or
+          landscape cues strongly tied to this place. Never name or imply the continent,
+          country, region, city, town, or any landmark.
         TIER
       else
         raise ArgumentError, "tier must be 1, 2, or 3"
+      end
+
+    feedback_section =
+      if rejection_feedback.present?
+        "\n\nRevision required:\n#{rejection_feedback}"
+      else
+        ""
       end
 
     <<~PROMPT.strip
@@ -113,7 +136,7 @@ class GeminiHintGenerator
       #{intensity}
       #{PLAIN_LANGUAGE}
       #{NEVER_IN_HINT}
-      Reply with only the hint sentence, no preamble.
+      Reply with only the hint sentence, no preamble.#{feedback_section}
     PROMPT
   end
 

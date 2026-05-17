@@ -45,16 +45,19 @@ const CONTINENT_BY_COUNTRY_CODE = Object.freeze({
 })
 
 export default class extends Controller {
-  static targets = ["guessBtn", "nextBtn", "result", "imageLink", "timer", "timerBar", "timerPanel", "timerOption", "attemptsOption", "hintTypeOption", "hintRadiusPanel", "hintRadiusNoHintButton", "hintRadiusSlider", "hintRadiusValue", "hintLocationPanel", "hintLocationOption", "hintVisualPanel", "hintVisualOption", "hintReadout", "saveForm", "removeForm", "saveStatus"]
+  static targets = ["guessBtn", "nextBtn", "result", "imageLink", "timer", "timerBar", "timerPanel", "timerOption", "attemptsOption", "hintTypeOption", "hintRadiusPanel", "hintRadiusNoHintButton", "hintRadiusSlider", "hintRadiusValue", "hintLocationPanel", "hintLocationOption", "hintVisualPanel", "hintVisualOption", "hintQuota", "hintReadout", "saveForm", "removeForm", "saveStatus"]
   static values = {
     imageId: Number,
     checkUrl: String,
     hintUrl: String,
+    hintQuotaUsed: { type: Number, default: 0 },
+    hintQuotaLimit: { type: Number, default: 100 },
     timeLimit: { type: Number, default: 0 },
     attempts: { type: Number, default: 1 },
     hintCircle: { type: Boolean, default: false },
     signedIn: { type: Boolean, default: false },
-    initiallySaved: { type: Boolean, default: false }
+    initiallySaved: { type: Boolean, default: false },
+    practiceSetId: Number
   }
 
   #boundKeydown
@@ -574,6 +577,24 @@ export default class extends Controller {
       this.hintReadoutTarget.textContent = message
       this.hintReadoutTarget.classList.toggle("hidden", !showReadout)
     }
+
+    this.#syncHintQuotaUi()
+  }
+
+  #syncHintQuotaUi() {
+    if (!this.hasHintQuotaTarget) return
+
+    const used = Math.min(Math.max(0, this.hintQuotaUsedValue), this.hintQuotaLimitValue)
+    const limit = this.hintQuotaLimitValue
+    this.hintQuotaTarget.textContent = `(${used}/${limit})`
+  }
+
+  #applyHintQuotaFromPayload(payload) {
+    if (payload?.quota_used == null) return
+
+    this.hintQuotaUsedValue = Number(payload.quota_used)
+    if (payload.quota_limit != null) this.hintQuotaLimitValue = Number(payload.quota_limit)
+    this.#syncHintQuotaUi()
   }
 
   #syncOptionButtonStyle(option, active) {
@@ -785,6 +806,8 @@ export default class extends Controller {
     const payload = await this.#fetchVisualHint({ retry })
     if (requestId !== this.#hintVisualRequestId || this.hintType !== "visual") return
 
+    this.#applyHintQuotaFromPayload(payload)
+
     if (payload.error) {
       this.hintVisualMessage = this.#visualHintErrorMessage(payload.error)
       this.#syncHintUi()
@@ -831,6 +854,13 @@ export default class extends Controller {
       const res = await fetch(url, { headers: { Accept: "application/json" } })
       if (res.status === 503) return { error: "disabled" }
       if (res.status === 404) return { error: "not_found" }
+      if (res.status === 429) {
+        try {
+          return await res.json()
+        } catch {
+          return { status: "failed", error: "Daily AI hint limit reached. Try again tomorrow." }
+        }
+      }
       if (!res.ok) return { error: "network" }
       return await res.json()
     } catch {
@@ -855,6 +885,8 @@ export default class extends Controller {
 
       const payload = await this.#fetchVisualHint()
       if (requestId !== this.#hintVisualRequestId || this.hintType !== "visual") return
+
+      this.#applyHintQuotaFromPayload(payload)
 
       if (payload.error) {
         this.hintVisualMessage = this.#visualHintErrorMessage(payload.error)
@@ -904,7 +936,7 @@ export default class extends Controller {
 
   #withAiCreditsNotice(message) {
     const text = String(message || "").trim()
-    if (!text || /credits|quota|Gemini/i.test(text)) return text
+    if (!text || /credits|quota|Gemini|Daily AI hint limit/i.test(text)) return text
     return `${text}${AI_HINT_CREDITS_NOTE}`
   }
 
@@ -1000,6 +1032,13 @@ export default class extends Controller {
 
   #nextRoundUrl() {
     const url = new URL(window.location.href)
+    if (this.hasPracticeSetIdValue) {
+      url.searchParams.set("practice_set_id", String(this.practiceSetIdValue))
+      url.searchParams.set("completed_image_id", String(this.imageIdValue))
+    } else {
+      url.searchParams.delete("practice_set_id")
+      url.searchParams.delete("completed_image_id")
+    }
     if (this.timeLimitValue > 0) url.searchParams.set("seconds", String(this.timeLimitValue))
     else url.searchParams.delete("seconds")
     if (this.attemptsValue > 1) url.searchParams.set("attempts", String(this.attemptsValue))
@@ -1032,6 +1071,7 @@ export default class extends Controller {
 
   async #prefetchNextRound() {
     this.#clearNextPrefetch()
+    if (this.hasPracticeSetIdValue) return
 
     const prefetchUrl = this.#nextRoundUrl().toString()
     const controller = new AbortController()

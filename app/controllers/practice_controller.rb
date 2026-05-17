@@ -8,15 +8,37 @@ class PracticeController < ApplicationController
 
   def show
     resume_session
+    if params[:practice_set_id].present?
+      return request_authentication unless authenticated?
+      if practice_set.blank?
+        redirect_to practice_saved_path, alert: "Saved practice set not found."
+        return
+      end
+    end
+
     @time_limit_seconds = practice_seconds_param
     @attempts = practice_attempts_param
     @hint_circle_enabled = practice_hint_circle_param
     @ai_hints_enabled = GeminiConfig.enabled?
+    @ai_hint_quota_used = hint_quota.used if @ai_hints_enabled
     load_random_located_image
     return if performed?
 
     @saved_for_practice =
       authenticated? && Current.user.saved_practice_items.exists?(image_id: @image.id)
+  end
+
+  def complete
+    resume_session
+    @practice_set = practice_set
+    unless @practice_set
+      redirect_to practice_saved_path, alert: "Saved practice set not found."
+      return
+    end
+
+    progress = PracticeSetProgress.for(session, set_id: @practice_set.id)
+    @images_practiced = progress&.total || PracticeSetProgress.located_image_ids_for(@practice_set).size
+    PracticeSetProgress.clear(session)
   end
 
   def saved
@@ -30,6 +52,7 @@ class PracticeController < ApplicationController
                    .where(id: saved_ids)
                    .index_by(&:id)
     @saved_images = saved_ids.filter_map { |id| visible[id] }
+    @saved_practice_set = saved_practice_set_for(Current.user)
   end
 
   def save
@@ -90,27 +113,33 @@ class PracticeController < ApplicationController
     ai_hint = ImageAiHint.find_by(image: image, tier: tier)
 
     if ai_hint&.status == "ready"
-      return render json: { status: "ready", hint: ai_hint.body, tier: tier }
+      return render_hint_json(status: "ready", hint: ai_hint.body, tier: tier)
     end
 
     if ai_hint&.status == "failed"
       if hint_retry_requested? || stale_failed_hint?(ai_hint)
+        return render_hint_quota_exceeded(tier) if hint_quota.blocked_for_new_charge?(image.id, tier)
+
+        hint_quota.charge_generation!(image_id: image.id, tier: tier)
         ai_hint.update!(status: "pending", error_message: nil)
         enqueue_hint_job!(image.id, tier)
-        return render json: { status: "pending", tier: tier }
+        return render_hint_json(status: "pending", tier: tier)
       end
 
-      return render json: { status: "failed", error: public_hint_error(ai_hint), tier: tier }
+      return render_hint_json(status: "failed", error: public_hint_error(ai_hint), tier: tier)
     end
 
     if ai_hint&.status == "pending"
       reenqueue_stale_pending_hint!(image.id, tier, ai_hint)
-      return render json: { status: "pending", tier: tier }
+      return render_hint_json(status: "pending", tier: tier)
     end
 
+    return render_hint_quota_exceeded(tier) if hint_quota.blocked_for_new_charge?(image.id, tier)
+
+    hint_quota.charge_generation!(image_id: image.id, tier: tier)
     ImageAiHint.create!(image: image, tier: tier, status: "pending")
     enqueue_hint_job!(image.id, tier)
-    render json: { status: "pending", tier: tier }
+    render_hint_json(status: "pending", tier: tier)
   end
 
   def check
@@ -142,7 +171,8 @@ class PracticeController < ApplicationController
   private
 
   def load_random_located_image
-    default_set = ImageSet.default
+    return load_practice_set_image if practice_set_mode?
+
     visible_images = Image.visible_to(Current.user)
     @image = current_image_from_params
     return if @image.present?
@@ -150,6 +180,7 @@ class PracticeController < ApplicationController
     # Practice mode shows a random image and asks for a guess, so the image
     # must have lat/lng — otherwise the "answer" is (0, 0) and every guess
     # scores arbitrarily. Filter at the DB level.
+    default_set = ImageSet.default
     located = ->(scope) { scope.where.not(latitude: nil).where.not(longitude: nil) }
     @image = located.call(default_set&.images || visible_images).order(Arel.sql("RANDOM()")).first ||
              located.call(visible_images).order(Arel.sql("RANDOM()")).first
@@ -157,6 +188,72 @@ class PracticeController < ApplicationController
     return unless @image.nil?
 
     redirect_to images_path, alert: "No images with coordinates are available yet."
+  end
+
+  def load_practice_set_image
+    @practice_set = practice_set
+    progress = PracticeSetProgress.for(session, set_id: @practice_set.id)
+    unless progress
+      if PracticeSetProgress.located_image_ids_for(@practice_set).empty?
+        redirect_to practice_saved_path,
+                    alert: "Add images with coordinates to your saved practice set first."
+        return
+      end
+
+      progress = PracticeSetProgress.start(session, @practice_set)
+    end
+
+    completed_id = params[:completed_image_id].to_i
+    progress.complete!(completed_id) if completed_id.positive?
+
+    if progress.finished?
+      redirect_to practice_complete_path(practice_set_id: @practice_set.id)
+      return
+    end
+
+    @practice_set_progress = progress
+    image_id = params[:image_id].to_i
+    next_id =
+      if image_id.positive? && progress.remaining.include?(image_id)
+        image_id
+      else
+        progress.current_image_id
+      end
+
+    @image = located_images_in_set(@practice_set).find_by(id: next_id)
+    return if @image.present?
+
+    redirect_to practice_saved_path, alert: "No images with coordinates are available in your saved practice set."
+  end
+
+  def practice_set_mode?
+    params[:practice_set_id].present?
+  end
+
+  def practice_set
+    return @practice_set if defined?(@practice_set)
+
+    @practice_set = saved_practice_set_from_params
+  end
+
+  def saved_practice_set_from_params
+    return nil unless authenticated?
+
+    set_id = params[:practice_set_id].to_i
+    return nil if set_id <= 0
+
+    set = Current.user.image_sets.find_by(id: set_id)
+    return nil unless set&.name == ImageSet::SAVED_FOR_PRACTICE_NAME
+
+    set
+  end
+
+  def located_images_in_set(set)
+    Image.visible_to(Current.user)
+         .joins(:image_set_items)
+         .where(image_set_items: { image_set_id: set.id })
+         .where.not(latitude: nil, longitude: nil)
+         .distinct
   end
 
   def practice_seconds_param
@@ -205,6 +302,23 @@ class PracticeController < ApplicationController
     AiHintPublicError.message(ai_hint.error_message)
   end
 
+  def hint_quota
+    @hint_quota ||= AiHintDailyQuota.for(user: Current.user, guest_session_id: session.id.to_s)
+  end
+
+  def render_hint_json(response_status: :ok, **payload)
+    render json: payload.merge(hint_quota.as_json), status: response_status
+  end
+
+  def render_hint_quota_exceeded(tier)
+    render_hint_json(
+      response_status: :too_many_requests,
+      status: "failed",
+      error: AiHintDailyQuota::LIMIT_EXCEEDED_MESSAGE,
+      tier: tier
+    )
+  end
+
   def visible_located_image_from_params
     image_id = params[:image_id].to_i
     return nil if image_id <= 0
@@ -240,6 +354,7 @@ class PracticeController < ApplicationController
     attempts = params[:attempts].to_i
     result[:seconds] = seconds if PRACTICE_TIMER_SECONDS.include?(seconds)
     result[:attempts] = attempts if PRACTICE_ATTEMPTS.include?(attempts) && attempts > 1
+    result[:practice_set_id] = params[:practice_set_id] if params[:practice_set_id].present?
     result
   end
 

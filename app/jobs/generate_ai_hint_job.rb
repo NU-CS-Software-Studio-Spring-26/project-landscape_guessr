@@ -31,13 +31,7 @@ class GenerateAiHintJob < ApplicationJob
       return
     end
 
-    raw_hint = GeminiHintGenerator.generate(image: image, tier: tier, location: location)
-
-    filtered_hint = HintSafetyFilter.call(raw_hint, image, tier: tier, location: location)
-    unless filtered_hint
-      mark_failed!(image, tier, "Hint failed safety filter")
-      return
-    end
+    filtered_hint = GeminiHintGenerator.generate(image: image, tier: tier, location: location)
 
     hint.update!(
       status: "ready",

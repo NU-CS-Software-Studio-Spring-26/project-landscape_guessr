@@ -74,6 +74,11 @@ class GamesController < ApplicationController
       redirect_to root_path, alert: "That image set does not exist or is not accessible." and return
     end
 
+    if image_set.practice_set_for?(Current.user)
+      redirect_to practice_path(practice_set_id: image_set.id)
+      return
+    end
+
     @game = Current.user.games.new(status: "in_progress", image_set: image_set)
 
     items = image_set.effective_items
