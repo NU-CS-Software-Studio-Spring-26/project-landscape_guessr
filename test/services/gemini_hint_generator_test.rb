@@ -86,11 +86,13 @@ class GeminiHintGeneratorTest < ActiveSupport::TestCase
     stub_request(:post, %r{generativelanguage\.googleapis\.com})
       .to_return do |request|
         requests << request
-        body = if requests.size == 1
-                 { candidates: [ { content: { parts: [ { text: "Snowy peaks typical of Switzerland." } ] } } ] }
-               else
-                 { candidates: [ { content: { parts: [ { text: "Think of alpine timber chalets and mountain pastures." } ] } } ] }
-               end
+        hint_text =
+          if requests.size == 1
+            "Snowy peaks typical of Switzerland."
+          else
+            "Think of alpine timber chalets and mountain pastures."
+          end
+        body = { candidates: [ { content: { parts: [ { text: hint_text } ] } } ] }
         { status: 200, headers: { "Content-Type" => "application/json" }, body: body.to_json }
       end
 
