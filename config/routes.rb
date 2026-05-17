@@ -56,7 +56,7 @@ Rails.application.routes.draw do
   get  "practice/saved", to: "practice#saved", as: :practice_saved
   post "practice/save",  to: "practice#save", as: :practice_save
   delete "practice/save/:image_id", to: "practice#unsave", as: :practice_unsave
-  get  "scoring",        to: "home#scoring", as: :scoring
+  get "scoring",        to: "home#scoring", as: :scoring
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.

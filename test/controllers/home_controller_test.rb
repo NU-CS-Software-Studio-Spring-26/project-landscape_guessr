@@ -29,8 +29,10 @@ class HomeControllerTest < ActionDispatch::IntegrationTest
 
     get root_url
     assert_response :success
-    assert_select "a[href=?]", image_set_path(set), text: "Saved for Practice Set"
-    assert_select "p", text: "Image set for practice mistakes"
+    assert_select "a[href=?]", image_set_path(set) do
+      assert_select "p", text: "Saved for Practice Set"
+      assert_select "p", text: "Image set for practice mistakes"
+    end
   end
 
   test "home links to saved-practice flow when image set is not created yet" do
@@ -38,6 +40,9 @@ class HomeControllerTest < ActionDispatch::IntegrationTest
 
     get root_url
     assert_response :success
-    assert_select "a[href=?]", practice_saved_path, text: "Saved for Practice Set"
+    assert_select "a[href=?]", practice_saved_path do
+      assert_select "p", text: "Saved for Practice Set"
+      assert_select "p", text: "Image set for practice mistakes"
+    end
   end
 end
