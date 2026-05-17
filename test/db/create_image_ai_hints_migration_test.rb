@@ -5,6 +5,9 @@ require "test_helper"
 require Rails.root.join("db/migrate/20260517120000_create_image_ai_hints")
 
 class CreateImageAiHintsMigrationTest < ActiveSupport::TestCase
+  # Drops/recreates image_ai_hints; must not run beside parallel workers using fixtures.
+  parallelize(workers: 1)
+
   self.fixture_table_names = []
   self.use_transactional_tests = false
 
