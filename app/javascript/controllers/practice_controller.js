@@ -5,6 +5,12 @@ const HINT_RADIUS_MIN_KM = 0
 const HINT_RADIUS_MAX_KM = 5000
 const HINT_RADIUS_STEP_KM = 50
 const HINT_RADIUS_DEFAULT_ENABLED_KM = 5000
+const HINT_CIRCLE_LEGACY_RADIUS_KM = 4000
+const HINT_VISUAL_TIERS = [ 1, 2, 3 ]
+const HINT_VISUAL_POLL_MS = 2000
+const HINT_VISUAL_POLL_MAX_ATTEMPTS = 30
+const AI_HINT_CREDITS_NOTE =
+  " This may also mean today's AI hint credits are used up (Google Gemini free tier)."
 const CONTINENT_BY_COUNTRY_CODE = Object.freeze({
   AF: "Asia", AX: "Europe", AL: "Europe", DZ: "Africa", AS: "Oceania", AD: "Europe", AO: "Africa", AI: "North America", AQ: "Antarctica",
   AG: "North America", AR: "South America", AM: "Asia", AW: "North America", AU: "Oceania", AT: "Europe", AZ: "Asia", BS: "North America",
@@ -39,10 +45,11 @@ const CONTINENT_BY_COUNTRY_CODE = Object.freeze({
 })
 
 export default class extends Controller {
-  static targets = ["guessBtn", "nextBtn", "result", "imageLink", "timer", "timerBar", "timerPanel", "timerOption", "attemptsOption", "hintTypeOption", "hintRadiusPanel", "hintRadiusNoHintButton", "hintRadiusSlider", "hintRadiusValue", "hintLocationPanel", "hintLocationOption", "hintReadout", "saveForm", "removeForm", "saveStatus"]
+  static targets = ["guessBtn", "nextBtn", "result", "imageLink", "timer", "timerBar", "timerPanel", "timerOption", "attemptsOption", "hintTypeOption", "hintRadiusPanel", "hintRadiusNoHintButton", "hintRadiusSlider", "hintRadiusValue", "hintLocationPanel", "hintLocationOption", "hintVisualPanel", "hintVisualOption", "hintReadout", "saveForm", "removeForm", "saveStatus"]
   static values = {
     imageId: Number,
     checkUrl: String,
+    hintUrl: String,
     timeLimit: { type: Number, default: 0 },
     attempts: { type: Number, default: 1 },
     hintCircle: { type: Boolean, default: false },
@@ -58,6 +65,9 @@ export default class extends Controller {
   #prefetchedNextUrl
   #prefetchedImage
   #hintLocationRequestId
+  #hintVisualRequestId
+  #hintVisualPollTimer
+  #hintVisualRetry
 
   connect() {
     this.guessLat = null
@@ -70,7 +80,11 @@ export default class extends Controller {
     this.#prefetchedImage = null
     this.#nextPrefetchController = null
     this.#hintLocationRequestId = 0
+    this.#hintVisualRequestId = 0
+    this.#hintVisualRetry = false
     this.hintLocationMessage = ""
+    this.hintVisualMessage = ""
+    this.hintVisualTier = 1
     this.hintLocationDetails = null
     this.#initializeHintStateFromUrl()
     this.#boundKeydown = this.#handleKeydown.bind(this)
@@ -88,6 +102,7 @@ export default class extends Controller {
     document.removeEventListener("keydown", this.#boundKeydown)
     this.#clearTimer()
     this.#clearNextPrefetch()
+    this.#cancelVisualHintPolling()
   }
 
   pinChanged(event) {
@@ -125,10 +140,22 @@ export default class extends Controller {
 
   setHintType(event) {
     const type = String(event.params.type || "off")
-    if (!["off", "radius", "location"].includes(type)) return
+    const allowed = ["off", "radius", "location"]
+    if (this.hasHintUrlValue) allowed.push("visual")
+    if (!allowed.includes(type)) return
     this.hintType = type
     if (type === "radius") this.hintRadiusKm = 0
     if (type === "location") this.hintLocationLevel = "none"
+    if (type === "visual") this.#hintVisualRetry = this.#shouldRetryVisualHint()
+    this.#applyHintSelection()
+  }
+
+  setHintVisualTier(event) {
+    const tier = parseInt(event.params.tier || "1", 10)
+    if (!HINT_VISUAL_TIERS.includes(tier)) return
+    this.hintType = "visual"
+    this.hintVisualTier = tier
+    this.#hintVisualRetry = this.#shouldRetryVisualHint()
     this.#applyHintSelection()
   }
 
@@ -418,13 +445,23 @@ export default class extends Controller {
     if (this.hintType === "radius") {
       url.searchParams.set("hint_type", "radius")
       url.searchParams.set("hint_radius", String(this.hintRadiusKm))
+      url.searchParams.delete("hint_location")
+      url.searchParams.delete("hint_tier")
     } else if (this.hintType === "location") {
       url.searchParams.set("hint_type", "location")
       url.searchParams.set("hint_location", this.hintLocationLevel)
+      url.searchParams.delete("hint_radius")
+      url.searchParams.delete("hint_tier")
+    } else if (this.hintType === "visual") {
+      url.searchParams.set("hint_type", "visual")
+      url.searchParams.set("hint_tier", String(this.hintVisualTier))
+      url.searchParams.delete("hint_radius")
+      url.searchParams.delete("hint_location")
     } else {
       url.searchParams.delete("hint_type")
       url.searchParams.delete("hint_radius")
       url.searchParams.delete("hint_location")
+      url.searchParams.delete("hint_tier")
     }
     url.searchParams.delete("hint_circle")
     url.searchParams.set("image_id", String(this.imageIdValue))
@@ -519,9 +556,22 @@ export default class extends Controller {
       })
     }
 
+    if (this.hasHintVisualPanelTarget) {
+      this.hintVisualPanelTarget.classList.toggle("hidden", this.hintType !== "visual")
+    }
+    if (this.hasHintVisualOptionTarget) {
+      this.hintVisualOptionTargets.forEach((option) => {
+        const tier = parseInt(option.dataset.practiceTierParam || "1", 10)
+        const active = this.hintType === "visual" && tier === this.hintVisualTier
+        option.setAttribute("aria-pressed", active ? "true" : "false")
+        this.#syncOptionButtonStyle(option, active)
+      })
+    }
+
     if (this.hasHintReadoutTarget) {
-      const showReadout = this.hintType === "location" && this.hintLocationMessage.length > 0
-      this.hintReadoutTarget.textContent = this.hintLocationMessage
+      const message = this.hintType === "visual" ? this.hintVisualMessage : this.hintLocationMessage
+      const showReadout = message.length > 0
+      this.hintReadoutTarget.textContent = message
       this.hintReadoutTarget.classList.toggle("hidden", !showReadout)
     }
   }
@@ -532,12 +582,15 @@ export default class extends Controller {
   }
 
   async #applyHintSelection() {
+    if (this.hintType !== "visual") this.#cancelVisualHintPolling()
+
     this.#syncHintUi()
     this.#syncPracticeInUrl()
     this.#clearNextPrefetch()
 
     if (this.hintType === "radius") {
       this.hintLocationMessage = ""
+      this.hintVisualMessage = ""
       this.#syncHintUi()
       await this.#showHintCircle()
       return
@@ -545,11 +598,19 @@ export default class extends Controller {
 
     this.#hideHintCircle()
     if (this.hintType === "location") {
+      this.hintVisualMessage = ""
       await this.#showLocationHint()
       return
     }
 
+    if (this.hintType === "visual") {
+      this.hintLocationMessage = ""
+      await this.#showVisualHint()
+      return
+    }
+
     this.hintLocationMessage = ""
+    this.hintVisualMessage = ""
     this.#syncHintUi()
   }
 
@@ -559,12 +620,17 @@ export default class extends Controller {
     const radius = parseInt(params.get("hint_radius") || "", 10)
     const level = params.get("hint_location")
 
+    const tier = parseInt(params.get("hint_tier") || "", 10)
+
     if (type === "radius") this.hintType = "radius"
     else if (type === "location") this.hintType = "location"
+    else if (type === "visual" && this.hasHintUrlValue) this.hintType = "visual"
     else this.hintType = this.hintCircleValue ? "radius" : "off"
 
-    this.hintRadiusKm = this.#normalizeHintRadiusKm(Number.isFinite(radius) ? radius : HINT_RADIUS_MIN_KM)
+    const defaultRadius = this.hintCircleValue ? HINT_CIRCLE_LEGACY_RADIUS_KM : HINT_RADIUS_MIN_KM
+    this.hintRadiusKm = this.#normalizeHintRadiusKm(Number.isFinite(radius) ? radius : defaultRadius)
     this.hintLocationLevel = ["none", "continent", "country"].includes(level) ? level : "none"
+    this.hintVisualTier = HINT_VISUAL_TIERS.includes(tier) ? tier : 1
   }
 
   #normalizeHintRadiusKm(radius) {
@@ -694,9 +760,152 @@ export default class extends Controller {
     if (this.hintType === "off") return
     this.hintType = "off"
     this.hintLocationMessage = ""
+    this.hintVisualMessage = ""
+    this.#cancelVisualHintPolling()
     this.#hideHintCircle()
     this.#syncHintUi()
     this.#syncPracticeInUrl()
+  }
+
+  async #showVisualHint() {
+    if (!this.hasHintUrlValue) {
+      this.hintVisualMessage = "AI hints are not available."
+      this.#syncHintUi()
+      return
+    }
+
+    this.#cancelVisualHintPolling()
+    const requestId = this.#hintVisualRequestId + 1
+    this.#hintVisualRequestId = requestId
+    this.hintVisualMessage = "Generating hint…"
+    this.#syncHintUi()
+
+    const retry = this.#hintVisualRetry
+    this.#hintVisualRetry = false
+    const payload = await this.#fetchVisualHint({ retry })
+    if (requestId !== this.#hintVisualRequestId || this.hintType !== "visual") return
+
+    if (payload.error) {
+      this.hintVisualMessage = this.#visualHintErrorMessage(payload.error)
+      this.#syncHintUi()
+      return
+    }
+
+    if (payload.status === "ready") {
+      this.hintVisualMessage = String(payload.hint || "").trim()
+      this.#syncHintUi()
+      return
+    }
+
+    if (payload.status === "failed") {
+      this.hintVisualMessage = this.#withAiCreditsNotice(
+        String(payload.error || "Couldn't load AI hint. Try again.")
+      )
+      this.#syncHintUi()
+      return
+    }
+
+    if (payload.status === "pending") {
+      this.hintVisualMessage = "Generating hint…"
+      this.#syncHintUi()
+      this.#scheduleVisualHintPoll(requestId, 0)
+      return
+    }
+
+    this.hintVisualMessage = this.#withAiCreditsNotice("Couldn't load AI hint. Try again.")
+    this.#syncHintUi()
+  }
+
+  #shouldRetryVisualHint() {
+    return this.hintVisualMessage.length > 0 &&
+      !this.hintVisualMessage.includes("Generating hint")
+  }
+
+  async #fetchVisualHint({ retry = false } = {}) {
+    const url = new URL(this.hintUrlValue, window.location.origin)
+    url.searchParams.set("image_id", String(this.imageIdValue))
+    url.searchParams.set("tier", String(this.hintVisualTier))
+    if (retry) url.searchParams.set("retry", "1")
+
+    try {
+      const res = await fetch(url, { headers: { Accept: "application/json" } })
+      if (res.status === 503) return { error: "disabled" }
+      if (res.status === 404) return { error: "not_found" }
+      if (!res.ok) return { error: "network" }
+      return await res.json()
+    } catch {
+      return { error: "network" }
+    }
+  }
+
+  #scheduleVisualHintPoll(requestId, attempt) {
+    if (requestId !== this.#hintVisualRequestId || this.hintType !== "visual") return
+
+    if (attempt >= HINT_VISUAL_POLL_MAX_ATTEMPTS) {
+      this.hintVisualMessage = this.#withAiCreditsNotice(
+        "Hint is taking longer than expected. Try again in a moment."
+      )
+      this.#syncHintUi()
+      return
+    }
+
+    this.#hintVisualPollTimer = window.setTimeout(async () => {
+      this.#hintVisualPollTimer = null
+      if (requestId !== this.#hintVisualRequestId || this.hintType !== "visual") return
+
+      const payload = await this.#fetchVisualHint()
+      if (requestId !== this.#hintVisualRequestId || this.hintType !== "visual") return
+
+      if (payload.error) {
+        this.hintVisualMessage = this.#visualHintErrorMessage(payload.error)
+        this.#syncHintUi()
+        return
+      }
+
+      if (payload.status === "ready") {
+        this.hintVisualMessage = String(payload.hint || "").trim()
+        this.#syncHintUi()
+        return
+      }
+
+      if (payload.status === "failed") {
+        this.hintVisualMessage = this.#withAiCreditsNotice(
+          String(payload.error || "Couldn't load AI hint. Try again.")
+        )
+        this.#syncHintUi()
+        return
+      }
+
+      if (payload.status === "pending") {
+        this.#scheduleVisualHintPoll(requestId, attempt + 1)
+        return
+      }
+
+      this.hintVisualMessage = this.#withAiCreditsNotice("Couldn't load AI hint. Try again.")
+      this.#syncHintUi()
+    }, HINT_VISUAL_POLL_MS)
+  }
+
+  #cancelVisualHintPolling() {
+    if (this.#hintVisualPollTimer) {
+      window.clearTimeout(this.#hintVisualPollTimer)
+      this.#hintVisualPollTimer = null
+    }
+    this.#hintVisualRequestId += 1
+  }
+
+  #visualHintErrorMessage(error) {
+    if (error === "disabled") return "AI hints are not available."
+    if (error === "not_found") {
+      return this.#withAiCreditsNotice("Couldn't load AI hint for this image.")
+    }
+    return this.#withAiCreditsNotice("Couldn't load AI hint. Try again.")
+  }
+
+  #withAiCreditsNotice(message) {
+    const text = String(message || "").trim()
+    if (!text || /credits|quota|Gemini/i.test(text)) return text
+    return `${text}${AI_HINT_CREDITS_NOTE}`
   }
 
   async #showHintCircle() {
@@ -798,13 +1007,23 @@ export default class extends Controller {
     if (this.hintType === "radius") {
       url.searchParams.set("hint_type", "radius")
       url.searchParams.set("hint_radius", String(this.hintRadiusKm))
+      url.searchParams.delete("hint_location")
+      url.searchParams.delete("hint_tier")
     } else if (this.hintType === "location") {
       url.searchParams.set("hint_type", "location")
       url.searchParams.set("hint_location", this.hintLocationLevel)
+      url.searchParams.delete("hint_radius")
+      url.searchParams.delete("hint_tier")
+    } else if (this.hintType === "visual") {
+      url.searchParams.set("hint_type", "visual")
+      url.searchParams.set("hint_tier", String(this.hintVisualTier))
+      url.searchParams.delete("hint_radius")
+      url.searchParams.delete("hint_location")
     } else {
       url.searchParams.delete("hint_type")
       url.searchParams.delete("hint_radius")
       url.searchParams.delete("hint_location")
+      url.searchParams.delete("hint_tier")
     }
     url.searchParams.delete("hint_circle")
     url.searchParams.delete("image_id")

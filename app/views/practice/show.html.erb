@@ -12,6 +12,9 @@
      data-action="guess-map:pinned->practice#pinChanged"
      data-practice-image-id-value="<%= @image.id %>"
      data-practice-check-url-value="<%= practice_check_path %>"
+     <% if @ai_hints_enabled %>
+     data-practice-hint-url-value="<%= practice_hint_path %>"
+     <% end %>
      data-practice-time-limit-value="<%= @time_limit_seconds.to_i %>"
      data-practice-attempts-value="<%= @attempts.to_i %>"
      data-practice-hint-circle-value="<%= @hint_circle_enabled ? true : false %>"
@@ -85,6 +88,16 @@
             class="btn-secondary text-sm py-1.5 px-3 shrink-0">
       Location
     </button>
+    <% if @ai_hints_enabled %>
+    <button type="button"
+            data-practice-target="hintTypeOption"
+            data-action="practice#setHintType"
+            data-practice-type-param="visual"
+            aria-pressed="false"
+            class="btn-secondary text-sm py-1.5 px-3 shrink-0">
+      AI hint
+    </button>
+    <% end %>
 
     <div data-practice-target="hintRadiusPanel" class="hidden ml-2 flex items-center gap-2 shrink-0">
       <span class="shrink-0">Radius:</span>
@@ -105,7 +118,7 @@
                data-action="input->practice#setHintRadius"
                class="w-96 sm:w-[28rem] cursor-pointer accent-forest-600" />
       </div>
-      <span data-practice-target="hintRadiusValue" class="min-w-20 text-right font-medium text-forest-800">No hint</span>
+      <span data-practice-target="hintRadiusValue" class="min-w-20 text-right font-medium text-forest-800"><%= @hint_circle_enabled ? "4000 km" : "No hint" %></span>
     </div>
 
     <div data-practice-target="hintLocationPanel" class="hidden ml-2 flex items-center gap-2 shrink-0">
@@ -134,8 +147,39 @@
               class="btn-secondary text-sm py-1.5 px-3 shrink-0">
         Country
       </button>
-      <span data-practice-target="hintReadout" class="hidden ml-2 text-sm font-medium text-forest-800 shrink-0"></span>
     </div>
+
+    <% if @ai_hints_enabled %>
+    <div data-practice-target="hintVisualPanel" class="hidden ml-2 flex items-center gap-2 shrink-0">
+      <span class="shrink-0">AI hint:</span>
+      <button type="button"
+              data-practice-target="hintVisualOption"
+              data-action="practice#setHintVisualTier"
+              data-practice-tier-param="1"
+              aria-pressed="true"
+              class="btn-primary text-sm py-1.5 px-3 shrink-0">
+        Subtle
+      </button>
+      <button type="button"
+              data-practice-target="hintVisualOption"
+              data-action="practice#setHintVisualTier"
+              data-practice-tier-param="2"
+              aria-pressed="false"
+              class="btn-secondary text-sm py-1.5 px-3 shrink-0">
+        Medium
+      </button>
+      <button type="button"
+              data-practice-target="hintVisualOption"
+              data-action="practice#setHintVisualTier"
+              data-practice-tier-param="3"
+              aria-pressed="false"
+              class="btn-secondary text-sm py-1.5 px-3 shrink-0">
+        Strong
+      </button>
+    </div>
+    <% end %>
+
+    <span data-practice-target="hintReadout" class="hidden ml-2 text-sm font-medium text-forest-800 shrink-0"></span>
   </div>
 
   <div data-practice-target="timerPanel"

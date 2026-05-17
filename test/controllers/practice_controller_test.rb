@@ -1,6 +1,7 @@
 require "test_helper"
 
 class PracticeControllerTest < ActionDispatch::IntegrationTest
+  include ActiveJob::TestHelper
   setup do
     @alice = users(:alice)
     @bob   = users(:bob)
@@ -16,6 +17,66 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
   test "show renders without auth" do
     get practice_path
     assert_response :success
+  end
+
+  test "show includes AI hint controls when ai hints enabled" do
+    with_ai_hints_config(enabled: true) do
+      get practice_path
+    end
+
+    assert_response :success
+    assert_includes response.body, 'data-practice-type-param="visual"'
+    assert_includes response.body, "AI hint"
+    assert_includes response.body, "Subtle"
+    assert_includes response.body, "Medium"
+    assert_includes response.body, "Strong"
+    assert_includes response.body, "data-practice-hint-url-value"
+  end
+
+  test "show omits AI hint controls when ai hints disabled" do
+    with_ai_hints_config(enabled: false) do
+      get practice_path
+    end
+
+    assert_response :success
+    assert_not_includes response.body, 'data-practice-type-param="visual"'
+    assert_not_includes response.body, "data-practice-hint-url-value"
+  end
+
+  test "show and check do not query image_ai_hints" do
+    with_ai_hints_config(enabled: true) do
+      hint_queries = []
+      subscriber = ActiveSupport::Notifications.subscribe("sql.active_record") do |*_, payload|
+        hint_queries << payload[:sql] if payload[:sql].include?("image_ai_hints")
+      end
+
+      get practice_path
+      get practice_check_path, params: {
+        image_id: @public_image.id,
+        lat: @public_image.latitude,
+        lng: @public_image.longitude
+      }
+
+      assert_empty hint_queries, "image_ai_hints must only load on hint requests"
+    ensure
+      ActiveSupport::Notifications.unsubscribe(subscriber) if subscriber
+    end
+  end
+
+  test "hint queries image_ai_hints" do
+    hint_queries = []
+    subscriber = ActiveSupport::Notifications.subscribe("sql.active_record") do |*_, payload|
+      hint_queries << payload[:sql] if payload[:sql].include?("image_ai_hints")
+    end
+
+    with_ai_hints_config(enabled: true) do
+      get practice_hint_path(image_id: @public_image.id, tier: 1), as: :json
+    end
+
+    assert_response :success
+    assert_not_empty hint_queries, "hint action should read image_ai_hints"
+  ensure
+    ActiveSupport::Notifications.unsubscribe(subscriber) if subscriber
   end
 
   test "practice renders with default timer when no seconds provided" do
@@ -44,11 +105,15 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "practice enables 4000km hint circle when requested" do
-    get practice_path(hint_circle: 1)
+    with_ai_hints_config(enabled: false) do
+      get practice_path(hint_circle: 1)
+    end
+
     assert_response :success
     assert_includes response.body, 'data-practice-hint-circle-value="true"'
     assert_includes response.body, "Circle radius"
     assert_includes response.body, "4000 km"
+    assert_not_includes response.body, 'data-practice-type-param="visual"'
   end
 
   test "practice falls back to one attempt on unsupported attempts value" do
@@ -186,5 +251,152 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
     body = JSON.parse(response.body)
     assert_in_delta @private_image.latitude.to_f,  body["answer_lat"], 0.0001
     assert_in_delta @private_image.longitude.to_f, body["answer_lng"], 0.0001
+  end
+
+  test "hint returns ai_hints_disabled when feature is off" do
+    with_ai_hints_config(enabled: false) do
+      get practice_hint_path(image_id: @public_image.id, tier: 1), as: :json
+    end
+
+    assert_response :service_unavailable
+    assert_equal "ai_hints_disabled", JSON.parse(response.body)["error"]
+  end
+
+  test "hint returns ready hint when cached" do
+    with_ai_hints_config(enabled: true) do
+      get practice_hint_path(image_id: @public_image.id, tier: 1), as: :json
+    end
+
+    assert_response :success
+    body = JSON.parse(response.body)
+    assert_equal "ready", body["status"]
+    assert_equal "Alpine terrain", body["hint"]
+    assert_equal 1, body["tier"]
+    refute_hint_coordinate_leak(body)
+  end
+
+  test "hint returns pending when row is pending" do
+    with_ai_hints_config(enabled: true) do
+      get practice_hint_path(image_id: @public_image.id, tier: 2), as: :json
+    end
+
+    assert_response :success
+    body = JSON.parse(response.body)
+    assert_equal "pending", body["status"]
+    assert_equal 2, body["tier"]
+    refute_hint_coordinate_leak(body)
+  end
+
+  test "hint creates pending row and enqueues job on first request" do
+    with_ai_hints_config(enabled: true) do
+      assert_enqueued_with(job: GenerateAiHintJob, args: [ @public_image.id, 3 ]) do
+        assert_difference("ImageAiHint.count", 1) do
+          get practice_hint_path(image_id: @public_image.id, tier: 3), as: :json
+        end
+      end
+    end
+
+    assert_response :success
+    body = JSON.parse(response.body)
+    assert_equal "pending", body["status"]
+    assert_equal 3, body["tier"]
+    hint = ImageAiHint.find_by!(image: @public_image, tier: 3)
+    assert_equal "pending", hint.status
+    refute_hint_coordinate_leak(body)
+  end
+
+  test "hint returns failed without retrying on every poll" do
+    failed_image = images(:two)
+
+    with_ai_hints_config(enabled: true) do
+      assert_no_enqueued_jobs only: GenerateAiHintJob do
+        get practice_hint_path(image_id: failed_image.id, tier: 1), as: :json
+      end
+    end
+
+    assert_response :success
+    body = JSON.parse(response.body)
+    assert_equal "failed", body["status"]
+    assert_includes body["error"], "Couldn't generate"
+    assert_includes body["error"], "credits"
+    assert_equal "failed", image_ai_hints(:two_tier_1).reload.status
+    refute_hint_coordinate_leak(body)
+  end
+
+  test "hint auto-retries stale failed row without retry param" do
+    failed_image = images(:two)
+    image_ai_hints(:two_tier_1).update_columns(status: "failed", updated_at: 10.minutes.ago)
+
+    with_ai_hints_config(enabled: true) do
+      assert_enqueued_with(job: GenerateAiHintJob, args: [ failed_image.id, 1 ]) do
+        get practice_hint_path(image_id: failed_image.id, tier: 1), as: :json
+      end
+    end
+
+    assert_response :success
+    body = JSON.parse(response.body)
+    assert_equal "pending", body["status"]
+    assert_equal "pending", image_ai_hints(:two_tier_1).reload.status
+    refute_hint_coordinate_leak(body)
+  end
+
+  test "hint retries failed row when retry param is set" do
+    failed_image = images(:two)
+
+    with_ai_hints_config(enabled: true) do
+      assert_enqueued_with(job: GenerateAiHintJob, args: [ failed_image.id, 1 ]) do
+        get practice_hint_path(image_id: failed_image.id, tier: 1, retry: 1), as: :json
+      end
+    end
+
+    assert_response :success
+    body = JSON.parse(response.body)
+    assert_equal "pending", body["status"]
+    assert_equal "pending", image_ai_hints(:two_tier_1).reload.status
+    refute_hint_coordinate_leak(body)
+  end
+
+  test "hint refuses unauthenticated access to a private-set image" do
+    with_ai_hints_config(enabled: true) do
+      get practice_hint_path(image_id: @private_image.id, tier: 1), as: :json
+    end
+
+    assert_response :not_found
+    assert_equal "image_not_found", JSON.parse(response.body)["error"]
+  end
+
+  private
+
+  def with_ai_hints_config(enabled:)
+    previous_enabled = ENV["AI_HINTS_ENABLED"]
+    previous_key = ENV["GEMINI_API_KEY"]
+
+    if enabled
+      ENV["AI_HINTS_ENABLED"] = "true"
+      ENV["GEMINI_API_KEY"] = "test-key"
+    else
+      ENV.delete("AI_HINTS_ENABLED")
+      ENV.delete("GEMINI_API_KEY")
+    end
+
+    yield
+  ensure
+    if previous_enabled.nil?
+      ENV.delete("AI_HINTS_ENABLED")
+    else
+      ENV["AI_HINTS_ENABLED"] = previous_enabled
+    end
+
+    if previous_key.nil?
+      ENV.delete("GEMINI_API_KEY")
+    else
+      ENV["GEMINI_API_KEY"] = previous_key
+    end
+  end
+
+  def refute_hint_coordinate_leak(body)
+    %w[answer_lat answer_lng title].each do |key|
+      assert_not body.key?(key), "response must not include #{key}"
+    end
   end
 end

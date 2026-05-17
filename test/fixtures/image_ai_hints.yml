@@ -1,0 +1,20 @@
+one_tier_1:
+  image: one
+  tier: 1
+  status: ready
+  body: Alpine terrain
+  model: gemini-2.5-flash-lite
+  prompt_version: 1
+
+one_tier_2:
+  image: one
+  tier: 2
+  status: pending
+  prompt_version: 1
+
+two_tier_1:
+  image: two
+  tier: 1
+  status: failed
+  error_message: API timeout
+  prompt_version: 1
