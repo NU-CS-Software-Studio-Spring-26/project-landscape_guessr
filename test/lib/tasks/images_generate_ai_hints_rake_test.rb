@@ -25,8 +25,9 @@ class ImagesGenerateAiHintsRakeTest < ActiveSupport::TestCase
 
   test "rake task aborts when Gemini is disabled" do
     with_ai_hints_config(enabled: false) do
-      error = assert_raises(SystemExit) { @task.invoke("1", "1", "0") }
-      assert_match(/disabled/i, error.message)
+      assert_output(nil, /disabled/i) do
+        assert_raises(SystemExit) { @task.invoke("1", "1", "0") }
+      end
     end
   end
 

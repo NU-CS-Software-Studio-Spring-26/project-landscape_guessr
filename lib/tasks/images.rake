@@ -65,7 +65,8 @@ namespace :images do
     )
     puts "[images:generate_ai_hints] tier=#{tier} enqueued #{result.enqueued}, skipped #{result.skipped}"
   rescue AiHintsBackfill::Disabled => e
-    abort "[images:generate_ai_hints] #{e.message}"
+    warn "[images:generate_ai_hints] #{e.message}"
+    exit 1
   end
 
   namespace :generate_ai_hints do

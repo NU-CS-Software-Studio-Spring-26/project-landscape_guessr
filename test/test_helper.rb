@@ -6,9 +6,29 @@ require "webmock/minitest"
 
 # PostgreSQL fixture loading normally DISABLE TRIGGER ALL (superuser) then DELETE.
 # Without superuser, use TRUNCATE CASCADE before inserting fixture rows.
-module PostgreSQLNonSuperuserFixtureLoading
+module PostgreSQLFixtureLoading
+  EXTRA_TRUNCATE_TABLES = %w[saved_practice_images].freeze
+
   def insert_fixtures_set(fixture_set, tables_to_delete = [])
-    tables_to_clear = tables_to_delete.presence || fixture_set.keys
+    if postgres_superuser?
+      super
+    else
+      insert_fixtures_set_with_truncate(fixture_set, tables_to_delete)
+    end
+  end
+
+  private
+
+  def postgres_superuser?
+    @postgres_superuser ||= begin
+      select_value("SELECT usesuper FROM pg_user WHERE usename = current_user") == true
+    rescue StandardError
+      false
+    end
+  end
+
+  def insert_fixtures_set_with_truncate(fixture_set, tables_to_delete)
+    tables_to_clear = (tables_to_delete.presence || fixture_set.keys) | EXTRA_TRUNCATE_TABLES
     quoted = tables_to_clear.map { |table| quote_table_name(table) }.join(", ")
 
     transaction(requires_new: true) do
@@ -18,7 +38,7 @@ module PostgreSQLNonSuperuserFixtureLoading
   end
 end
 
-ActiveRecord::ConnectionAdapters::PostgreSQLAdapter.prepend(PostgreSQLNonSuperuserFixtureLoading)
+ActiveRecord::ConnectionAdapters::PostgreSQLAdapter.prepend(PostgreSQLFixtureLoading)
 
 WebMock.disable_net_connect!(allow_localhost: true)
 
