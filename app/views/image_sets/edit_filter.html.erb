@@ -22,14 +22,18 @@
 
     <div>
       <label for="name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
-      <input type="text" name="name" id="name"
-             value="<%= @filtered_set.name %>"
-             class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-forest-500 focus:ring-forest-500"
-             required
-             minlength="<%= ImageSet::NAME_MIN_LENGTH %>"
-             maxlength="<%= ImageSet::NAME_MAX_LENGTH %>"
-             pattern="<%= ImageSet::NAME_HTML_PATTERN %>"
-             title="<%= ImageSet::NAME_MIN_LENGTH %>–<%= ImageSet::NAME_MAX_LENGTH %> characters. <%= ImageSet::NAME_FORMAT_MESSAGE.capitalize %>.">
+      <div class="relative" data-controller="name-constraints">
+        <input type="text" name="name" id="name"
+               value="<%= @filtered_set.name %>"
+               class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-forest-500 focus:ring-forest-500"
+               required
+               minlength="<%= ImageSet::NAME_MIN_LENGTH %>"
+               maxlength="<%= ImageSet::NAME_MAX_LENGTH %>"
+               pattern="<%= ImageSet::NAME_HTML_PATTERN %>"
+               title="<%= ImageSet::NAME_MIN_LENGTH %>–<%= ImageSet::NAME_MAX_LENGTH %> characters. <%= ImageSet::NAME_FORMAT_MESSAGE.capitalize %>."
+               data-action="mouseenter->name-constraints#show mouseleave->name-constraints#hide focus->name-constraints#show blur->name-constraints#hide">
+        <%= render "image_sets/name_constraints_tooltip" %>
+      </div>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
