@@ -717,6 +717,12 @@ class AiImageSetGenerator
       - If your query doesn't fully cover the user's request, name the
         part you couldn't honor and offer to adjust. Don't silently
         drop pieces of their ask.
+      - For multi-country/multi-region groupings whose definition
+        could vary ("Scandinavia", "Latin America", "Middle East",
+        "British Isles"), list the countries you picked so the user
+        can spot a wrong interpretation. Well-known fixed groupings
+        (Benelux, DACH, EU, NATO) don't need the enumeration —
+        naming the grouping is enough.
       - When cannot_answer=true, suggest the nearest workable
         alternative if one exists. Avoid bare "I can't" dead-ends.
 
