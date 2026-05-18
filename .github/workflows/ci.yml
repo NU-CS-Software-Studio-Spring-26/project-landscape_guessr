@@ -5,6 +5,14 @@ on:
   push:
     branches: [ main ]
 
+# Cancel an in-progress run when a newer commit is pushed to the same ref.
+# Saves CI minutes and keeps the PR status checks pointing at the latest
+# commit instead of stale ones. Per-ref groups so different branches /
+# PRs don't cancel each other.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   scan_ruby:
     runs-on: ubuntu-latest
