@@ -142,7 +142,7 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
 
   test "practice set mode only uses saved set images" do
     sign_in_as @alice
-    saved_set = @alice.image_sets.create!(name: "Saved for Practice", visibility: "private", map_style: "outdoor-v2")
+    saved_set = @alice.image_sets.create!(name: "Saved for Practice", visibility: "private", map_style: "outdoor-v2", system_managed: true)
     saved_set.image_set_items.create!(
       image: @public_image,
       latitude: @public_image.latitude,
@@ -159,7 +159,7 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
 
   test "completing saved practice set redirects to congratulations page" do
     sign_in_as @alice
-    saved_set = @alice.image_sets.create!(name: "Saved for Practice", visibility: "private", map_style: "outdoor-v2")
+    saved_set = @alice.image_sets.create!(name: "Saved for Practice", visibility: "private", map_style: "outdoor-v2", system_managed: true)
     saved_set.image_set_items.create!(
       image: @public_image,
       latitude: @public_image.latitude,
@@ -176,7 +176,7 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "practice set mode requires sign in" do
-    saved_set = ImageSet.create!(name: "Saved for Practice", visibility: "private", map_style: "outdoor-v2", user: @alice)
+    saved_set = ImageSet.create!(name: "Saved for Practice", visibility: "private", map_style: "outdoor-v2", user: @alice, system_managed: true)
 
     get practice_path(practice_set_id: saved_set.id)
     assert_redirected_to new_session_path
@@ -237,7 +237,7 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
   test "signed in user can remove saved image from saved list flow" do
     sign_in_as @alice
     SavedPracticeImage.create!(user: @alice, image: @public_image)
-    saved_set = @alice.image_sets.create!(name: "Saved for Practice", visibility: "private", map_style: "outdoor-v2")
+    saved_set = @alice.image_sets.create!(name: "Saved for Practice", visibility: "private", map_style: "outdoor-v2", system_managed: true)
     saved_set.image_set_items.create!(image: @public_image, latitude: @public_image.latitude, longitude: @public_image.longitude)
 
     assert_difference("SavedPracticeImage.count", -1) do
@@ -251,7 +251,7 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
   test "unsave responds with json for async practice remove" do
     sign_in_as @alice
     SavedPracticeImage.create!(user: @alice, image: @public_image)
-    saved_set = @alice.image_sets.create!(name: "Saved for Practice", visibility: "private", map_style: "outdoor-v2")
+    saved_set = @alice.image_sets.create!(name: "Saved for Practice", visibility: "private", map_style: "outdoor-v2", system_managed: true)
     saved_set.image_set_items.create!(image: @public_image, latitude: @public_image.latitude, longitude: @public_image.longitude)
 
     assert_difference("SavedPracticeImage.count", -1) do
