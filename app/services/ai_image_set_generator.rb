@@ -541,9 +541,17 @@ class AiImageSetGenerator
         sovereign nation (not territory/region), search for the
         sovereign-state concept Q-ID and constrain with that.
 
-      - **Multi-country regions** ("Scandinavia", "South America"):
-        `VALUES ?country { wd:QA wd:QB ... } . ?item wdt:P17 ?country` —
-        search each country Q-ID first.
+      - **Continents** (Africa, Antarctica, Asia, Europe, North America,
+        Oceania, South America): use the region_filter fields with
+        `region_admin_level: "continent"` — the backend has bboxes +
+        polygons seeded for all seven. Do NOT enumerate every country
+        with VALUES, and do NOT compose any geo constraint in the
+        sparql_pattern.
+
+      - **Other multi-country groupings** ("Scandinavia", "the Maghreb",
+        "DACH") aren't continents and aren't in our region table —
+        enumerate explicitly: `VALUES ?country { wd:QA wd:QB ... } .
+        ?item wdt:P17 ?country` — search each country Q-ID first.
 
       - **Umbrella concepts that span multiple classes.** Applies ONLY
         when the user's request is a vibe / domain / feeling and no
@@ -620,9 +628,11 @@ class AiImageSetGenerator
         plain LIMIT would give). You don't choose a "strategy" — the
         backend always samples randomly.
       - Region bbox: when region_name is set, the backend looks up the
-        region's bounding box from our Region table and prepends
-        SERVICE wikibase:box to your pattern. You MUST NOT compose
-        wdt:P131* or any other geo constraint when region_name is set.
+        region's bounding box from our Region table (continent, admin1,
+        admin2, or city) and prepends SERVICE wikibase:box to your
+        pattern, then drops rows outside the region's actual polygon.
+        You MUST NOT compose wdt:P131*, wdt:P30, or any other geo
+        constraint when region_name is set.
       - Cap warning: if a type exceeds the 10k cap, the show page
         shows the user a "this category had more than 10,000 items —
         sample shown" hint. You don't need to engineer around the cap.
@@ -662,10 +672,13 @@ class AiImageSetGenerator
       SPARQL — direct property, cheap, works in WDQS.
 
       For SUB-NATIONAL regions (US states, provinces, counties,
-      cities), DO NOT use `wdt:P131*` in your SPARQL — it reliably
-      times out WDQS. Instead set the region_name / region_parent_name
-      / region_admin_level fields. The backend looks the region up in
-      our pre-indexed region table and injects a BBOX filter for you.
+      cities) AND for continents (Africa, Asia, Europe, North America,
+      South America, Oceania, Antarctica), DO NOT use `wdt:P131*` or
+      enumerate countries — set the region_name / region_parent_name
+      / region_admin_level fields instead. The backend looks the
+      region up in our pre-indexed region table and injects a BBOX
+      filter for you (continents have bboxes + buffered polygons
+      seeded for this exact purpose).
 
       When you set the region fields, your sparql_pattern must NOT
       include any geo constraint — just class + coord:
@@ -678,13 +691,17 @@ class AiImageSetGenerator
       REGION FIELD RULES:
       - region_name: Canonical English name. "United States" not
         "USA"; "Germany" not "Deutschland"; "Bavaria" not "Bayern".
+        For continents, use exactly one of: "Africa", "Antarctica",
+        "Asia", "Europe", "North America", "Oceania", "South America".
         Lookup uses GeoNames data which only has English forms.
       - region_parent_name: Parent administrative region's English
         name. For admin1, the country ("United States"). For city,
         the admin1 or admin2 ("Massachusetts" for Cambridge MA,
-        "Cambridgeshire" for Cambridge UK).
-      - region_admin_level: exactly one of "country", "admin1"
-        (states/provinces), "admin2" (counties), "city".
+        "Cambridgeshire" for Cambridge UK). OMIT for continents
+        (they have no parent).
+      - region_admin_level: exactly one of "continent", "admin1"
+        (states/provinces), "admin2" (counties), or "city". (For
+        countries, see the next bullet — use wdt:P17 instead.)
       - Omit ALL three fields when the user's "region" isn't a formal
         admin unit ("the South", "Northern California", "the Mediterranean
         coast"). Either reinterpret as a country/state, or refuse.
@@ -730,6 +747,22 @@ class AiImageSetGenerator
           region_name: "Massachusetts",
           region_parent_name: "United States",
           region_admin_level: "admin1"
+        )
+
+      Continent (use region_* fields, NO geo in SPARQL, NO country
+      enumeration) — user: "deserts in Africa"
+
+        search_wikidata("desert") → Q8514 "type of land with sparse
+                                            vegetation" ✓
+        (no need to search "Africa" — the backend resolves it; do NOT
+         enumerate African countries with VALUES)
+        submit_answer(
+          sparql_pattern: "?item wdt:P31/wdt:P279* wd:Q8514 ; wdt:P625 ?coord .",
+          set_name: "Deserts of Africa",
+          explanation: "I'll find deserts located in Africa that have photos.",
+          cannot_answer: false,
+          region_name: "Africa",
+          region_admin_level: "continent"
         )
     PROMPT
   end
