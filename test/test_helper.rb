@@ -1,4 +1,9 @@
 ENV["RAILS_ENV"] ||= "test"
+# Tests stub the Gemini HTTP layer, but AiImageSetGenerator#initialize
+# fails fast if no key is present. Give it a placeholder so the pipeline
+# stub tests work in CI; the "key missing" path is exercised separately
+# by passing api_key: nil to the initializer directly.
+ENV["GEMINI_API_KEY"] ||= "test-placeholder"
 require_relative "../config/environment"
 require "rails/test_help"
 require "active_record/connection_adapters/postgresql_adapter"
