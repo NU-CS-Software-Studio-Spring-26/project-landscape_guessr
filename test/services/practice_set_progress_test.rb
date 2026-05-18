@@ -10,7 +10,8 @@ class PracticeSetProgressTest < ActiveSupport::TestCase
     @set = @user.image_sets.create!(
       name: ImageSet::SAVED_FOR_PRACTICE_NAME,
       visibility: "private",
-      map_style: "outdoor-v2"
+      map_style: "outdoor-v2",
+      system_managed: true
     )
     @first = Image.create!(url: "https://example.com/one.jpg", latitude: 1, longitude: 1, title: "One")
     @second = Image.create!(url: "https://example.com/two.jpg", latitude: 2, longitude: 2, title: "Two")

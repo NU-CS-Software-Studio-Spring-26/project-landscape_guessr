@@ -1,0 +1,11 @@
+<div data-name-constraints-target="tooltip"
+     role="tooltip"
+     class="hidden absolute z-20 bottom-full left-0 mb-2 w-72 rounded-md bg-white text-gray-700 text-xs shadow-lg border border-gray-200 p-3 pointer-events-none">
+  <p class="font-medium text-gray-900 mb-1">Name requirements</p>
+  <ul class="list-disc list-inside space-y-0.5">
+    <li><%= ImageSet::NAME_MIN_LENGTH %>&ndash;<%= ImageSet::NAME_MAX_LENGTH %> characters</li>
+    <li>Letters, numbers, and spaces</li>
+    <li>Allowed punctuation: <code class="font-mono">- _ . , ' &amp; ! ?</code></li>
+    <li>Must be unique among your sets</li>
+  </ul>
+</div>

@@ -3,7 +3,18 @@
 
   <div class="space-y-1">
     <%= f.label :name, class: "block text-sm font-medium text-gray-700" %>
-    <%= f.text_field :name, class: field_class(image_set, :name), placeholder: "My Landscape Set" %>
+    <div class="relative" data-controller="name-constraints">
+      <%= f.text_field :name,
+            class: field_class(image_set, :name),
+            placeholder: "My Landscape Set",
+            required: true,
+            minlength: ImageSet::NAME_MIN_LENGTH,
+            maxlength: ImageSet::NAME_MAX_LENGTH,
+            pattern: ImageSet::NAME_HTML_PATTERN,
+            title: "#{ImageSet::NAME_MIN_LENGTH}–#{ImageSet::NAME_MAX_LENGTH} characters. #{ImageSet::NAME_FORMAT_MESSAGE.capitalize}.",
+            data: { action: "mouseenter->name-constraints#show mouseleave->name-constraints#hide focus->name-constraints#show blur->name-constraints#hide" } %>
+      <%= render "image_sets/name_constraints_tooltip" %>
+    </div>
   </div>
 
   <div class="space-y-1">

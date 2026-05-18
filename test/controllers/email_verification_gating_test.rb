@@ -41,7 +41,8 @@ class EmailVerificationGatingTest < ActionDispatch::IntegrationTest
     set = @user.image_sets.create!(
       name: ImageSet::SAVED_FOR_PRACTICE_NAME,
       visibility: "private",
-      map_style: "outdoor-v2"
+      map_style: "outdoor-v2",
+      system_managed: true
     )
 
     get image_set_url(set)
