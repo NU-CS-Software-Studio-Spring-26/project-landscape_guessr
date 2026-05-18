@@ -145,6 +145,30 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
     assert_match(/Type a prompt first/i, flash[:alert])
   end
 
+  test "ai_generate rejects prompt over 250 characters" do
+    assert_no_difference("AiGeneration.count") do
+      post ai_generate_image_sets_path, params: { user_message: "a" * 251 }
+    end
+    assert_redirected_to ai_new_image_sets_path
+    assert_match(/250 characters/i, flash[:alert])
+  end
+
+  test "ai_generate rejects profanity in prompt" do
+    assert_no_difference("AiGeneration.count") do
+      post ai_generate_image_sets_path, params: { user_message: "damn volcanoes" }
+    end
+    assert_redirected_to ai_new_image_sets_path
+    assert_match(/family-friendly/i, flash[:alert])
+  end
+
+  test "ai_generate rejects markup in prompt" do
+    assert_no_difference("AiGeneration.count") do
+      post ai_generate_image_sets_path, params: { user_message: "<b>volcanoes</b>" }
+    end
+    assert_redirected_to ai_new_image_sets_path
+    assert_match(/markup/i, flash[:alert])
+  end
+
   test "ai_generate enforces daily rate limit" do
     # Burn the daily quota directly in the AiUsage table — the rate
     # limit is now AR-backed (not cache-backed), so this is enough.

@@ -360,13 +360,13 @@ class ImageSetsController < ApplicationController
       render :ai_rate_limited, status: :too_many_requests and return
     end
 
-    user_msg = params[:user_message].to_s.strip
-    if user_msg.empty?
-      redirect_to ai_new_image_sets_path, alert: "Type a prompt first." and return
+    validation = AiPromptValidator.validate(params[:user_message])
+    unless validation.ok?
+      redirect_to ai_new_image_sets_path, alert: validation.error and return
     end
 
     prior_conv = parse_conversation(params[:conversation_json])
-    bounded_msg = user_msg.first(8000)
+    bounded_msg = validation.text
 
     # Bump BEFORE enqueue (changed from prior post-success bump).
     # Async architecture needs queue-flood protection, and Gemini bills
