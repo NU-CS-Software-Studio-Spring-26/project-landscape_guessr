@@ -48,23 +48,25 @@
 
   <% elsif @ai_generation.canceled? %>
     <%# User explicitly canceled — show the conversation so they can
-        refine without losing context. No error card. %>
+        refine or retry without losing context. No error card. %>
     <%= render "ai_thread", conversation: @ai_generation.conversation %>
-    <section class="card p-4 border-amber-200 bg-amber-50">
+    <section class="card p-4 border-amber-200 bg-amber-50 space-y-3">
       <p class="text-sm text-amber-800">Generation canceled.</p>
+      <%= render "ai_try_again", conversation: @ai_generation.conversation %>
     </section>
     <%= render "ai_prompt_form", conversation: @ai_generation.conversation %>
 
   <% else %>
     <%# Failed, OR stale (status=running but updated_at >5min ago — the
         worker probably died). Same UX in both cases: tell the user it
-        didn't work, let them refine or retry. %>
+        didn't work, give them a one-click retry, and let them refine. %>
     <%= render "ai_thread", conversation: @ai_generation.conversation %>
-    <section class="card p-4 border-red-200 bg-red-50">
+    <section class="card p-4 border-red-200 bg-red-50 space-y-3">
       <p class="text-sm text-red-800 font-medium">Generation failed</p>
-      <p class="text-xs text-red-700 mt-1">
-        <%= @ai_generation.error.presence || "Something went wrong with the AI. Try again." %>
+      <p class="text-xs text-red-700">
+        <%= @ai_generation.error.presence || "Something went wrong with the AI." %>
       </p>
+      <%= render "ai_try_again", conversation: @ai_generation.conversation %>
     </section>
     <%= render "ai_prompt_form", conversation: @ai_generation.conversation %>
   <% end %>
