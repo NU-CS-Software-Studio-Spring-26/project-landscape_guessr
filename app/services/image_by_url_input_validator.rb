@@ -76,5 +76,4 @@ class ImageByUrlInputValidator
 
       value
     end
-
 end
