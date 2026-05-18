@@ -53,3 +53,20 @@ export function hideOutdoorTrails(map) {
 export function escapeText(s) {
   return String(s).replace(/</g, "&lt;")
 }
+
+// MapLibre draws LineStrings as straight segments in flat coordinate
+// space, so a line from lng=175 to lng=-178 takes the 353°-east path
+// around the world instead of the 7°-west path across the date line.
+// shorterLineCoords returns the second point with longitude shifted by
+// ±360 when that produces a shorter horizontal segment, so the line is
+// rendered the geographically-correct way. Returns the [[from], [to]]
+// pair ready to drop into a LineString's coordinates array.
+export function shorterLineCoords(from, to) {
+  const [fromLng, fromLat] = from
+  const [toLng, toLat] = to
+  const diff = toLng - fromLng
+  let adjustedLng = toLng
+  if (diff > 180) adjustedLng = toLng - 360
+  else if (diff < -180) adjustedLng = toLng + 360
+  return [[fromLng, fromLat], [adjustedLng, toLat]]
+}

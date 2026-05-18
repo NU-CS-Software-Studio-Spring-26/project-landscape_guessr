@@ -1,5 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
-import { MAPTILER_KEY, ensureMaptilerSdk, hideOutdoorTrails, escapeText } from "lib/maptiler"
+import { MAPTILER_KEY, ensureMaptilerSdk, hideOutdoorTrails, escapeText, shorterLineCoords } from "lib/maptiler"
 
 const COLORS = [
   "#3b82f6", "#ef4444", "#22c55e", "#f59e0b", "#a855f7",
@@ -72,10 +72,7 @@ export default class extends Controller {
           type: "Feature",
           geometry: {
             type: "LineString",
-            coordinates: [
-              [r.guess_lng, r.guess_lat],
-              [r.answer_lng, r.answer_lat]
-            ]
+            coordinates: shorterLineCoords([r.guess_lng, r.guess_lat], [r.answer_lng, r.answer_lat])
           }
         }
       })
@@ -125,7 +122,7 @@ export default class extends Controller {
             type: "Feature",
             geometry: {
               type: "LineString",
-              coordinates: [[pr.guess_lng, pr.guess_lat], [myRound.answer_lng, myRound.answer_lat]]
+              coordinates: shorterLineCoords([pr.guess_lng, pr.guess_lat], [myRound.answer_lng, myRound.answer_lat])
             }
           }
         })
