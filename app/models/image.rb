@@ -2,8 +2,12 @@ class Image < ApplicationRecord
   has_one_attached :photo
   has_many :guesses, dependent: :destroy
   has_many :game_images, dependent: :destroy
+  has_many :challenge_images, dependent: :destroy
   has_many :image_set_items, dependent: :destroy
   has_many :image_sets, through: :image_set_items
+  has_many :saved_practice_items, class_name: "SavedPracticeImage", dependent: :destroy
+  has_many :saved_by_users, through: :saved_practice_items, source: :user
+  has_many :ai_hints, class_name: "ImageAiHint", dependent: :destroy
 
   # Images visible to a given user: only those that live in at least one
   # set the user is allowed to see. Pass nil for the unauthenticated case.
@@ -52,6 +56,7 @@ class Image < ApplicationRecord
   def purge_if_orphan!
     return if image_set_items.exists?
     return if game_images.exists?
+    return if challenge_images.exists?
     return if guesses.exists?
     destroy
   end

@@ -34,11 +34,17 @@
           empty (or unmatched-filter) set just leads users into broken game-start
           flows or empty leaderboards. %>
       <% if @total_items.positive? %>
-        <%= button_to "Play", games_path, method: :post,
-              params: { image_set_id: @image_set.id },
-              class: "btn-primary" %>
+        <% if practice_image_set?(@image_set) %>
+          <%= link_to "Practice", practice_path(practice_set_id: @image_set.id), class: "btn-primary" %>
+        <% else %>
+          <%= button_to "Play", games_path, method: :post,
+                params: { image_set_id: @image_set.id },
+                class: "btn-primary" %>
+        <% end %>
         <%= link_to "Map", map_image_set_path(@image_set), class: "btn-secondary" %>
-        <%= link_to "Leaderboard", leaderboard_games_path(image_set_id: @image_set.id), class: "btn-secondary" %>
+        <% unless practice_image_set?(@image_set) %>
+          <%= link_to "Leaderboard", leaderboard_games_path(image_set_id: @image_set.id), class: "btn-secondary" %>
+        <% end %>
       <% end %>
       <% if @image_set.owned_by?(Current.user) %>
         <% if @image_set.filtered? %>

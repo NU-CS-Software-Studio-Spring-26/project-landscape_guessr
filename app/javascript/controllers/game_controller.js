@@ -1,18 +1,37 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
-  static targets = ["latitude", "longitude", "readout", "submit", "next", "result", "otherGuesses"]
+  static targets = ["latitude", "longitude", "readout", "submit", "next", "result", "otherGuesses", "leaveModal"]
   static values = { gamePath: String }
 
   connect() {
     this.guessLat = null
     this.guessLng = null
+    this.#pendingNavigation = null
+    this.#isBypassingGuard = false
+    this.#prefetchedNextUrl = null
+    this.#prefetchedImage = null
+    this.#nextPrefetchController = null
     this.#boundKeydown = this.#handleKeydown.bind(this)
+    this.#boundClick = this.#handleClick.bind(this)
+    this.#boundSubmit = this.#handleSubmit.bind(this)
+    this.#boundBeforeVisit = this.#handleBeforeVisit.bind(this)
+    this.#boundBeforeUnload = this.#handleBeforeUnload.bind(this)
     document.addEventListener("keydown", this.#boundKeydown)
+    document.addEventListener("click", this.#boundClick, true)
+    document.addEventListener("submit", this.#boundSubmit, true)
+    document.addEventListener("turbo:before-visit", this.#boundBeforeVisit)
+    window.addEventListener("beforeunload", this.#boundBeforeUnload)
   }
 
   disconnect() {
     document.removeEventListener("keydown", this.#boundKeydown)
+    document.removeEventListener("click", this.#boundClick, true)
+    document.removeEventListener("submit", this.#boundSubmit, true)
+    document.removeEventListener("turbo:before-visit", this.#boundBeforeVisit)
+    window.removeEventListener("beforeunload", this.#boundBeforeUnload)
+    document.body.classList.remove("overflow-hidden")
+    this.#clearNextPrefetch()
   }
 
   pinChanged(event) {
@@ -26,7 +45,7 @@ export default class extends Controller {
   }
 
   async submitGuess(event) {
-    event.preventDefault()
+    event?.preventDefault?.()
     if (this.guessLat === null) return
 
     this.submitTarget.disabled = true
@@ -94,26 +113,112 @@ export default class extends Controller {
       mapCtrl.showOtherGuesses(data.other_guesses, answerLat, answerLng)
       this.#renderOtherGuesses(data.other_guesses, answerLat, answerLng)
     }
+
+    this.#prefetchNextRound()
   }
 
   nextRound() {
     // Turbo.visit (not window.location.href) so the JS context survives
     // and the MapTiler session stays the same across rounds — a hard nav
     // would mint a new mtsid per round and burn 5× the session quota.
-    Turbo.visit(this.gamePathValue)
+    const url = this.#prefetchedNextUrl || this.gamePathValue
+    this.#clearNextPrefetch()
+    Turbo.visit(url)
   }
 
   #boundKeydown
+  #boundClick
+  #boundSubmit
+  #boundBeforeVisit
+  #boundBeforeUnload
+  #pendingNavigation
+  #isBypassingGuard
+  #nextPrefetchController
+  #prefetchedNextUrl
+  #prefetchedImage
 
   #handleKeydown(event) {
-    if (event.code !== "Space") return
-    event.preventDefault()
-
-    if (!this.submitTarget.classList.contains("hidden") && !this.submitTarget.disabled) {
-      this.submitTarget.click()
-    } else if (!this.nextTarget.classList.contains("hidden")) {
-      this.nextRound()
+    if (this.#modalOpen()) {
+      if (event.code === "Escape") {
+        event.preventDefault()
+        this.cancelLeave()
+      }
+      return
     }
+
+    if (event.defaultPrevented) return
+    if (event.altKey || event.ctrlKey || event.metaKey) return
+    if (this.#isEditableTarget(event.target)) return
+
+    const key = String(event.key || "").toLowerCase()
+    const canSubmit = !this.submitTarget.classList.contains("hidden") && !this.submitTarget.disabled
+    const canNext = !this.nextTarget.classList.contains("hidden")
+
+    if (event.code === "Space" || event.key === "Enter") {
+      event.preventDefault()
+      if (canSubmit) this.submitTarget.click()
+      else if (canNext) this.nextRound()
+      return
+    }
+
+    if (key === "n" && canNext) {
+      event.preventDefault()
+      this.nextRound()
+      return
+    }
+  }
+
+  #isEditableTarget(target) {
+    if (!(target instanceof Element)) return false
+    if (target.closest("input, textarea, select")) return true
+    return target.closest("[contenteditable=''], [contenteditable='true']") !== null
+  }
+
+  async #prefetchNextRound() {
+    this.#clearNextPrefetch()
+    const controller = new AbortController()
+    this.#nextPrefetchController = controller
+
+    try {
+      const res = await fetch(this.gamePathValue, {
+        headers: { "Accept": "text/html" },
+        credentials: "same-origin",
+        signal: controller.signal
+      })
+      if (!res.ok) return
+
+      const html = await res.text()
+      if (controller.signal.aborted) return
+
+      const nextUrl = res.url || this.gamePathValue
+      this.#prefetchedNextUrl = nextUrl
+
+      // Warm image cache only when the next response is another round page.
+      const doc = new DOMParser().parseFromString(html, "text/html")
+      const image = doc.querySelector("img[data-zoomable-target='image']")
+      const imageSrc = image?.getAttribute("src")
+      if (!imageSrc) return
+
+      this.#prefetchedImage = new Image()
+      this.#prefetchedImage.decoding = "async"
+      this.#prefetchedImage.src = imageSrc
+    } catch (error) {
+      if (error?.name !== "AbortError") this.#clearNextPrefetch()
+      return
+    } finally {
+      if (this.#nextPrefetchController === controller) {
+        this.#nextPrefetchController = null
+      }
+    }
+  }
+
+  #clearNextPrefetch() {
+    if (this.#nextPrefetchController) {
+      this.#nextPrefetchController.abort()
+      this.#nextPrefetchController = null
+    }
+    this.#prefetchedNextUrl = null
+    this.#prefetchedImage = null
   }
 
   #renderOtherGuesses(guesses, answerLat, answerLng) {
@@ -146,5 +251,106 @@ export default class extends Controller {
       Math.sin(dLat / 2) ** 2 +
       Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  }
+
+  #handleBeforeVisit(event) {
+    if (this.#isBypassingGuard) return
+
+    const destinationUrl = event.detail?.url
+    if (this.#isInGameFlow(destinationUrl)) return
+
+    event.preventDefault()
+    this.#openLeaveModal(() => {
+      this.#isBypassingGuard = true
+      Turbo.visit(destinationUrl)
+    })
+  }
+
+  #handleBeforeUnload(event) {
+    if (this.#isBypassingGuard) return
+
+    event.preventDefault()
+    // Required for browser-native "Leave site?" warning.
+    event.returnValue = ""
+  }
+
+  #handleClick(event) {
+    if (this.#isBypassingGuard) return
+    if (event.defaultPrevented || event.button !== 0) return
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    if (!(event.target instanceof Element)) return
+
+    const link = event.target.closest("a[href]")
+    if (!link) return
+    if (link.target === "_blank" || link.hasAttribute("download")) return
+
+    const destinationUrl = link.href
+    if (this.#isInGameFlow(destinationUrl)) return
+
+    event.preventDefault()
+    this.#openLeaveModal(() => {
+      this.#isBypassingGuard = true
+      window.location.href = destinationUrl
+    })
+  }
+
+  #handleSubmit(event) {
+    if (this.#isBypassingGuard) return
+
+    const form = event.target
+    if (!(form instanceof HTMLFormElement)) return
+
+    // The in-round guess form stays in-game and is handled via fetch.
+    if (form.closest("[data-controller~='game']") === this.element) return
+
+    const destinationUrl = form.action
+    if (this.#isInGameFlow(destinationUrl)) return
+
+    event.preventDefault()
+    this.#openLeaveModal(() => {
+      this.#isBypassingGuard = true
+      if (event.submitter) {
+        form.requestSubmit(event.submitter)
+      } else {
+        form.requestSubmit()
+      }
+    })
+  }
+
+  #isInGameFlow(url) {
+    if (!url) return false
+
+    const destination = new URL(url, window.location.origin)
+    if (destination.origin !== window.location.origin) return false
+
+    const allowedPaths = [this.gamePathValue, `${this.gamePathValue}/results`]
+    return allowedPaths.includes(destination.pathname)
+  }
+
+  #openLeaveModal(navigateCallback) {
+    this.#pendingNavigation = navigateCallback
+    this.leaveModalTarget.classList.remove("hidden")
+    document.body.classList.add("overflow-hidden")
+  }
+
+  #closeLeaveModal() {
+    this.leaveModalTarget.classList.add("hidden")
+    document.body.classList.remove("overflow-hidden")
+  }
+
+  #modalOpen() {
+    return this.hasLeaveModalTarget && !this.leaveModalTarget.classList.contains("hidden")
+  }
+
+  confirmLeave() {
+    const navigate = this.#pendingNavigation
+    this.#pendingNavigation = null
+    this.#closeLeaveModal()
+    if (navigate) navigate()
+  }
+
+  cancelLeave() {
+    this.#pendingNavigation = null
+    this.#closeLeaveModal()
   }
 }

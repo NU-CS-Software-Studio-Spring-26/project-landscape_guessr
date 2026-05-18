@@ -114,6 +114,58 @@
       }
 
     </style>
+    <style>
+      body {
+        background: #f3f8f4;
+        color: #163a24;
+        font-family: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+        padding: 24px;
+      }
+      main {
+        width: min(680px, 100%);
+        background: #fff;
+        border: 1px solid #c4d9c8;
+        border-radius: 18px;
+        box-shadow: 0 10px 30px rgba(14, 36, 23, 0.08);
+        padding: 28px;
+      }
+      main::before {
+        content: "Landscape Guessr";
+        display: block;
+        font-size: 12px;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        color: #3a7a52;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+      main header { display: none; }
+      main article::before {
+        content: "Error 404";
+        display: inline-block;
+        margin-bottom: 14px;
+        font-weight: 800;
+        color: #1f5234;
+        background: #e3eee5;
+        border: 1px solid #c4d9c8;
+        border-radius: 999px;
+        padding: 6px 12px;
+        font-size: 20px;
+      }
+      main article p {
+        font-size: 16px;
+        line-height: 1.6;
+        color: #2a6642;
+      }
+      main article p strong {
+        display: block;
+        font-family: "Fraunces", Georgia, serif;
+        font-size: clamp(28px, 4vw, 40px);
+        line-height: 1.2;
+        color: #163a24;
+        margin-bottom: 8px;
+      }
+    </style>
 
   </head>
 

@@ -1,42 +1,42 @@
-<% content_for :title, "Sign up" %>
+<div class="mx-auto md:w-2/3 w-full">
+  <h1 class="heading-page">Sign up</h1>
 
-<div class="min-h-[calc(100vh-12rem)] flex items-center justify-center py-12">
-  <div class="w-full max-w-sm space-y-6">
-    <div class="text-center space-y-1">
-      <h1 class="heading-page">Create an account</h1>
-      <p class="muted">Start exploring the world</p>
+  <%= form_with model: @user, url: registration_path, class: "contents" do |form| %>
+    <div class="my-5">
+      <%= form.label :email_address, "Email address", class: "block text-sm font-medium text-gray-700" %>
+      <%= form.email_field :email_address, required: true, autofocus: true, autocomplete: "email", placeholder: "Enter your email address", class: "form-input" %>
     </div>
 
-    <div class="card p-8 space-y-5">
-      <%= form_with model: @user, url: registration_path do |form| %>
-        <div>
-          <%= form.label :email_address, "Email address", class: "block text-sm font-medium text-forest-800" %>
-          <%= form.email_field :email_address, required: true, autofocus: true, autocomplete: "email",
-                placeholder: "you@example.com", class: "form-input" %>
-        </div>
-        <div>
-          <%= form.label :username, class: "block text-sm font-medium text-forest-800" %>
-          <%= form.text_field :username, required: true, autocomplete: "username",
-                placeholder: "3–20 chars: letters, digits, _ or -", class: "form-input" %>
-        </div>
-        <div>
-          <%= form.label :password, class: "block text-sm font-medium text-forest-800" %>
-          <%= form.password_field :password, required: true, autocomplete: "new-password",
-                placeholder: "Minimum 8 characters", maxlength: 72, class: "form-input" %>
-        </div>
-        <div>
-          <%= form.label :password_confirmation, "Confirm password", class: "block text-sm font-medium text-forest-800" %>
-          <%= form.password_field :password_confirmation, required: true, autocomplete: "new-password",
-                placeholder: "Repeat your password", maxlength: 72, class: "form-input" %>
-        </div>
-        <%= form.submit "Create account", class: "btn-primary w-full mt-2" %>
-      <% end %>
+    <div class="my-5">
+      <%= form.label :username, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.text_field :username, required: true, autocomplete: "username", placeholder: "Choose a username (3-20 chars: letters, digits, _ or -)", class: "form-input" %>
     </div>
 
-    <p class="text-center text-sm text-gray-500">
-      Already have an account?
-      <%= link_to "Sign in", new_session_path,
-            class: "text-forest-600 font-medium hover:text-forest-800 underline-offset-2 hover:underline" %>
-    </p>
-  </div>
+    <div class="my-5" data-controller="caps-lock">
+      <%= form.label :password, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.password_field :password, required: true, autocomplete: "new-password", placeholder: "Choose a password (min 8 chars)", maxlength: 72, class: "form-input",
+            data: { action: "keydown->caps-lock#check keyup->caps-lock#check focus->caps-lock#check blur->caps-lock#hide" } %>
+      <p data-caps-lock-target="warning" class="hidden mt-2 text-sm text-amber-700">
+        Caps Lock is on.
+      </p>
+    </div>
+
+    <div class="my-5" data-controller="caps-lock">
+      <%= form.label :password_confirmation, class: "block text-sm font-medium text-gray-700" %>
+      <%= form.password_field :password_confirmation, required: true, autocomplete: "new-password", placeholder: "Confirm password", maxlength: 72, class: "form-input",
+            data: { action: "keydown->caps-lock#check keyup->caps-lock#check focus->caps-lock#check blur->caps-lock#hide" } %>
+      <p data-caps-lock-target="warning" class="hidden mt-2 text-sm text-amber-700">
+        Caps Lock is on.
+      </p>
+    </div>
+
+    <div class="inline">
+      <%= form.submit "Sign up", class: "btn-primary w-full sm:w-auto" %>
+    </div>
+  <% end %>
+
+  <p class="mt-6 text-sm text-gray-600">
+    Already have an account?
+    <%= link_to "Sign in", new_session_path, class: "ml-1 text-sm text-forest-600 hover:text-forest-800 font-medium underline underline-offset-2 transition-colors" %>
+  </p>
 </div>

@@ -1,5 +1,7 @@
 class ImageSetsController < ApplicationController
+  skip_before_action :require_email_verified, only: %i[show]
   before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image attach_blob processing_status remove_item map new_filtered edit_filter update_filter preview_filter_count import_status retry_import]
+  before_action :require_email_verified_unless_saved_practice_set, only: %i[show]
   before_action :require_owner, only: %i[edit update destroy locations update_locations add_image attach_blob processing_status remove_item edit_filter update_filter preview_filter_count retry_import import_status]
   # Filtered sets' items are derived from the filter — any direct edit gets
   # blown away on the next materialize. Redirect those routes to the filter
@@ -174,25 +176,26 @@ class ImageSetsController < ApplicationController
   # store on S3 (Wikimedia, etc.). File uploads go through attach_blob
   # (direct-upload + ProcessImageJob), not here.
   def add_image
-    url = params[:url].to_s.strip
-    if url.empty?
-      redirect_back fallback_location: locations_image_set_path(@image_set), alert: "Please enter an image URL." and return
+    validation = ImageByUrlInputValidator.validate(params)
+    unless validation.ok?
+      redirect_back fallback_location: locations_image_set_path(@image_set), alert: validation.error and return
     end
 
-    title = params[:title].to_s.strip.presence || "Untitled"
-    lat   = params[:latitude].presence&.to_f
-    lng   = params[:longitude].presence&.to_f
+    image = Image.find_or_create_by!(url: validation.url) do |img|
+      img.title     = validation.title
+      img.latitude  = validation.latitude
+      img.longitude = validation.longitude
+    end
 
-    image = Image.find_or_create_by!(url: url) do |img|
-      img.title     = title
-      img.latitude  = lat
-      img.longitude = lng
+    # Legacy images at this URL may lack coords; backfill without touching other attrs.
+    if image.latitude.blank? || image.longitude.blank?
+      image.update!(latitude: validation.latitude, longitude: validation.longitude)
     end
 
     item = @image_set.image_set_items.find_or_initialize_by(image: image)
     if item.new_record?
-      item.latitude  = lat || image.latitude
-      item.longitude = lng || image.longitude
+      item.latitude  = validation.latitude
+      item.longitude = validation.longitude
       item.save!
       refresh_filtered_children
       redirect_back fallback_location: locations_image_set_path(@image_set), notice: "Image added to set."
@@ -630,6 +633,18 @@ class ImageSetsController < ApplicationController
   # blocking add_image / remove_item requests on Nominatim fetches.
   def refresh_filtered_children
     RematerializeFilteredSetsJob.perform_later(@image_set.id) if @image_set.filtered_sets.exists?
+  end
+
+  def require_email_verified_unless_saved_practice_set
+    return if Current.user.email_verified?
+    return if saved_practice_set?
+
+    flash[:verify_email] = true
+    redirect_to root_path
+  end
+
+  def saved_practice_set?
+    @image_set.name == ImageSet::SAVED_FOR_PRACTICE_NAME && @image_set.owned_by?(Current.user)
   end
 
   # === AI helpers ===

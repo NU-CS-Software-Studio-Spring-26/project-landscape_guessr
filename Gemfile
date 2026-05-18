@@ -47,12 +47,17 @@ gem "image_processing", "~> 1.2"
 # Read EXIF metadata (used to auto-fill GPS coords from uploaded photos)
 gem "exifr", "~> 1.4"
 
+# OAuth sign-in (Google)
+gem "omniauth"
+gem "omniauth-google-oauth2"
+gem "omniauth-rails_csrf_protection"
+
 group :development, :test do
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
   gem "debug", platforms: %i[ mri windows ], require: "debug/prelude"
 
-  # Loads .env files into ENV at boot (development + test only). Production
-  # ENV comes from heroku config:set, not .env.
+  # Loads .env files into ENV in dev/test so secrets (Google OAuth, AWS) don't
+  # need to be exported per-shell. Production reads ENV directly (Heroku config).
   gem "dotenv-rails"
 
   # Audits gems for known security defects (use config/bundler-audit.yml to ignore issues)
@@ -74,6 +79,7 @@ group :test do
   # Use system testing [https://guides.rubyonrails.org/testing.html#system-testing]
   gem "capybara"
   gem "selenium-webdriver"
+  gem "webmock"
 end
 gem "aws-sdk-s3", require: false
 

@@ -1,4 +1,23 @@
 class ImageSet < ApplicationRecord
+  SAVED_FOR_PRACTICE_NAME = "Saved for Practice".freeze
+
+  # Name validation rules — kept as constants so the form helpers can mirror
+  # the same bounds in HTML5 attrs (minlength/maxlength/pattern) without
+  # drifting out of sync with the model.
+  NAME_MIN_LENGTH = 3
+  NAME_MAX_LENGTH = 60
+  # Letters (any script), numbers, spaces, and basic punctuation: - _ . , ' & ! ?
+  NAME_ALLOWED_PATTERN = /\A[\p{L}\p{N} \-_.,'&!?]+\z/u
+  # HTML5 pattern attribute — same character class, no anchors (HTML anchors
+  # implicitly). The pattern attribute is compiled with the `v` flag, which
+  # supports \p{L}/\p{N} in modern browsers.
+  NAME_HTML_PATTERN = "[\\p{L}\\p{N} \\-_.,'&!?]+".freeze
+  NAME_FORMAT_MESSAGE = "may only contain letters, numbers, spaces, and - _ . , ' & ! ?".freeze
+
+  # Set by trusted server-side flows (e.g. the auto-created practice set)
+  # to bypass the reserved-name check. Never set from user input.
+  attr_accessor :system_managed
+
   belongs_to :user, optional: true
   belongs_to :parent_image_set, class_name: "ImageSet", optional: true
   # dependent: :delete_all (NOT :destroy) — destroying a 5000-item set
@@ -33,13 +52,24 @@ class ImageSet < ApplicationRecord
   # source — the value used to be duplicated in two places.
   DEFAULT_ROUND_COUNT = 5
 
-  validates :name, presence: true
+  before_validation :strip_name
+
+  validates :name,
+    presence: true,
+    length: { in: NAME_MIN_LENGTH..NAME_MAX_LENGTH },
+    format: { with: NAME_ALLOWED_PATTERN, message: NAME_FORMAT_MESSAGE, allow_blank: true },
+    uniqueness: { scope: :user_id, case_sensitive: false, allow_blank: true }
   validates :visibility, inclusion: { in: %w[private public] }
   validates :map_style, inclusion: { in: MAP_STYLES }
   validate :system_default_has_no_user
   validate :only_one_system_default, if: :is_system_default?
+  validate :name_not_reserved
 
-  before_destroy :capture_member_image_ids
+  # `prepend: true` so this runs BEFORE the `dependent: :delete_all` on
+  # image_set_items (declared above) — dependent destroy strategies are
+  # before_destroy callbacks added at class-load time in declaration
+  # order, so without prepend our snapshot would see an empty join table.
+  before_destroy :capture_member_image_ids, prepend: true
   after_destroy  :sweep_orphan_images
 
   scope :public_catalog, -> { where(visibility: "public") }
@@ -59,6 +89,14 @@ class ImageSet < ApplicationRecord
 
   def owned_by?(user)
     self.user_id == user&.id
+  end
+
+  def saved_for_practice?
+    name == SAVED_FOR_PRACTICE_NAME
+  end
+
+  def practice_set_for?(user)
+    saved_for_practice? && owned_by?(user)
   end
 
   def playable_by?(user)
@@ -298,6 +336,26 @@ class ImageSet < ApplicationRecord
     errors.add(:base, "a system default set already exists") if existing.exists?
   end
 
+  def strip_name
+    self.name = name.strip if name.is_a?(String)
+  end
+
+  # Reserved-name check: the auto-created "Saved for Practice" set is owned
+  # by the practice flow (see PracticeController#saved_practice_set_for).
+  # Users mustn't be able to claim that name from a form, because the
+  # presence of a set with that name is the signal that turns it into the
+  # user's practice set everywhere else in the app. The `system_managed`
+  # flag lets the trusted creator bypass this. Existing rows that already
+  # carry the reserved name (created before this validation, or by the
+  # system flow) keep working as long as the name isn't being changed —
+  # `will_save_change_to_name?` skips the check when name is untouched.
+  def name_not_reserved
+    return if system_managed || is_system_default?
+    return if name.blank?
+    return if persisted? && !will_save_change_to_name?
+    errors.add(:name, "is reserved") if name.casecmp?(SAVED_FOR_PRACTICE_NAME)
+  end
+
   # Snapshot member image_ids before dependent: :delete_all wipes the
   # join rows. Batched pluck — pulling 100k IDs at once is fine for
   # Postgres but allocates a big array.
@@ -323,6 +381,7 @@ class ImageSet < ApplicationRecord
       orphan_ids = Image.where(id: chunk)
                         .where.missing(:image_set_items)
                         .where.missing(:game_images)
+                        .where.missing(:challenge_images)
                         .where.missing(:guesses)
                         .pluck(:id)
       next if orphan_ids.empty?

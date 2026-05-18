@@ -74,6 +74,11 @@ class GamesController < ApplicationController
       redirect_to root_path, alert: "That image set does not exist or is not accessible." and return
     end
 
+    if image_set.practice_set_for?(Current.user)
+      redirect_to practice_path(practice_set_id: image_set.id)
+      return
+    end
+
     @game = Current.user.games.new(status: "in_progress", image_set: image_set)
 
     items = image_set.pick_reachable_items(count: TOTAL_ROUNDS)
@@ -153,6 +158,9 @@ class GamesController < ApplicationController
     @total_distance_km = @rounds.sum { |r| r[:distance_km] }
     @score = @rounds.sum { |r| r[:round_score] }
     @total_rounds = TOTAL_ROUNDS
+    @previous_best_score = Current.user.games.where.not(completed_at: nil).where.not(id: @game.id).maximum(:score)
+    @new_personal_best = @previous_best_score.nil? || @score > @previous_best_score
+    @personal_best_delta = @score - (@previous_best_score || 0)
 
     @map_rounds = @rounds.map do |r|
       {

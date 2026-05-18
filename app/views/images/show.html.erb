@@ -20,7 +20,7 @@
         <p class="text-sm text-amber-600 mt-0.5">No coordinates set.</p>
       <% end %>
     </div>
-    <%= link_to "← Images", images_path, class: "btn-ghost shrink-0 text-sm" %>
+    <%= link_to "← Images", images_path, class: "btn-secondary shrink-0 text-sm" %>
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -31,11 +31,11 @@
          data-zoomable-cap-width-value="<%= Image::ZOOM_CAP_WIDTH %>"
          class="lg:col-span-2 space-y-1">
       <div data-zoomable-target="viewport"
-           class="h-[60vh] flex items-center justify-center bg-gray-100 rounded-md border border-gray-200 select-none">
+           class="h-[60vh] flex items-center justify-center bg-forest-50 rounded-md border border-forest-100 select-none">
         <img src="<%= image_src(@image, width: Image::ZOOM_CAP_WIDTH) %>" alt="<%= @image.title.presence || 'Landscape image' %>"
              class="max-w-full max-h-full object-contain">
       </div>
-      <div class="flex items-center justify-between gap-2 text-xs text-gray-500">
+      <div class="flex items-center justify-between gap-2 text-xs text-forest-700/70">
         <span>scroll to zoom · drag to pan · double-click to reset</span>
         <% unless @image.photo.attached? %>
           <button type="button"
@@ -43,7 +43,7 @@
                   data-action="zoomable#loadOriginal"
                   data-zoomable-url-param="<%= image_src(@image) %>"
                   aria-label="Load full quality version of the current image"
-                  class="hidden text-gray-500 hover:text-blue-600 underline-offset-2 hover:underline cursor-pointer">
+                  class="hidden text-forest-700/80 hover:text-forest-900 underline-offset-2 hover:underline cursor-pointer">
             load full quality
           </button>
         <% end %>
@@ -69,36 +69,36 @@
           top of admin-only :url editing). %>
       <% if @image.url.present? && @image.url.match?(%r{\Ahttps?://}i) %>
         <div class="text-xs">
-          <p class="text-gray-500 mb-0.5">Source</p>
+          <p class="text-forest-700/70 mb-0.5">Source</p>
           <%= link_to @image.url, @image.url, target: "_blank", rel: "noopener",
                 aria: { label: "Source URL (opens in a new tab)" },
-                class: "text-blue-600 hover:underline break-all" %>
+                class: "text-forest-700 hover:text-forest-900 hover:underline break-all" %>
         </div>
       <% end %>
 
       <%# Inline edit — open to anyone who owns at least one set
           containing this image. See Image#editable_by? for the rule. %>
       <% if @image.editable_by?(Current.user) %>
-        <div class="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
-          <h2 class="font-semibold text-sm text-gray-700">Edit</h2>
+        <div class="rounded-lg border border-forest-100 bg-forest-50 p-3 space-y-2">
+          <h2 class="font-semibold text-sm text-forest-900">Edit</h2>
           <%= form_with model: @image, local: true, class: "space-y-2" do |f| %>
             <div class="space-y-0.5">
-              <%= f.label :title, class: "block text-xs text-gray-500" %>
+              <%= f.label :title, class: "block text-xs text-forest-700/80" %>
               <%= f.text_field :title, class: field_class(@image, :title) + " text-sm" %>
             </div>
             <div class="grid grid-cols-2 gap-2">
               <div class="space-y-0.5">
-                <%= f.label :latitude, class: "block text-xs text-gray-500" %>
+                <%= f.label :latitude, class: "block text-xs text-forest-700/80" %>
                 <%= f.number_field :latitude, step: "any",
                       class: field_class(@image, :latitude) + " text-sm" %>
               </div>
               <div class="space-y-0.5">
-                <%= f.label :longitude, class: "block text-xs text-gray-500" %>
+                <%= f.label :longitude, class: "block text-xs text-forest-700/80" %>
                 <%= f.number_field :longitude, step: "any",
                       class: field_class(@image, :longitude) + " text-sm" %>
               </div>
             </div>
-            <p class="text-[11px] text-gray-500 leading-snug">
+            <p class="text-[11px] text-forest-700/80 leading-snug">
               Edits propagate to every set this image is in. Per-set coordinate
               overrides live in each set's Manage page.
             </p>
@@ -110,16 +110,16 @@
       <%# Set memberships — every set the viewer can see this image in.
           For sets the user owns, surface a per-set "Remove" so they
           can prune from here without bouncing to the locations page. %>
-      <div class="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
-        <h2 class="font-semibold text-sm text-gray-700">
-          In sets <span class="text-gray-500 font-normal">(<%= @memberships.size %>)</span>
+      <div class="rounded-lg border border-forest-100 bg-forest-50 p-3 space-y-2">
+        <h2 class="font-semibold text-sm text-forest-900">
+          In sets <span class="text-forest-700/80 font-normal">(<%= @memberships.size %>)</span>
         </h2>
         <% if @memberships.any? %>
           <ul class="space-y-1.5">
             <% @memberships.each do |set| %>
               <% item = @items_by_set_id[set.id] %>
               <li class="flex items-center justify-between gap-2 text-sm">
-                <%= link_to set.name, set, class: "text-blue-600 hover:underline truncate" %>
+                <%= link_to set.name, set, class: "text-forest-700 hover:text-forest-900 hover:underline truncate" %>
                 <% if set.owned_by?(Current.user) && item && !set.filtered? %>
                   <%= button_to "Remove",
                         image_set_remove_item_path(set, item_id: item.id),
@@ -130,7 +130,7 @@
                         },
                         class: "rounded border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-500 hover:border-red-200 hover:bg-red-50 hover:text-red-700 cursor-pointer" %>
                 <% else %>
-                  <span class="text-xs text-gray-500 shrink-0">
+                  <span class="text-xs text-forest-700/70 shrink-0">
                     <% if set.filtered? %>filter<% elsif set.is_system_default? %>system<% else %><%= set.visibility == "public" ? "public" : "private" %><% end %>
                   </span>
                 <% end %>
@@ -138,7 +138,7 @@
             <% end %>
           </ul>
         <% else %>
-          <p class="text-xs text-gray-500">
+          <p class="text-xs text-forest-700/70">
             This image isn't in any set you can see.
           </p>
         <% end %>

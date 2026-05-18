@@ -2,14 +2,17 @@ alice:
   email_address: alice@example.com
   username: alice
   password_digest: <%= BCrypt::Password.create("password123") %>
+  email_verified_at: <%= 1.day.ago %>
 
 bob:
   email_address: bob@example.com
   username: bob
   password_digest: <%= BCrypt::Password.create("password123") %>
+  email_verified_at: <%= 1.day.ago %>
 
 admin:
   email_address: admin@example.com
   username: admin
   password_digest: <%= BCrypt::Password.create("password123") %>
   admin: true
+  email_verified_at: <%= 1.day.ago %>

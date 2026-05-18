@@ -37,7 +37,7 @@ const MAX_SCALE  = 8
 const ZOOM_SPEED = 0.0015  // wheel-delta multiplier feeding Math.exp()
 
 export default class extends Controller {
-  static targets = ["originalButton", "viewport"]
+  static targets = ["originalButton", "viewport", "image", "loader"]
   static values  = { capWidth: { type: Number, default: 0 } }
 
   connect() {
@@ -46,7 +46,7 @@ export default class extends Controller {
     this.ty    = 0
     this.dragging = false
     this.viewport = this.hasViewportTarget ? this.viewportTarget : this.element
-    this.img = this.viewport.querySelector("img")
+    this.img = this.hasImageTarget ? this.imageTarget : this.viewport.querySelector("img")
     if (!this.img) return
 
     this.viewport.style.overflow = "hidden"
@@ -61,6 +61,7 @@ export default class extends Controller {
     window.addEventListener("mousemove",        this.onMouseMove)
     window.addEventListener("mouseup",          this.onMouseUp)
 
+    this.#bindImageLoadState()
     this.#maybeRevealOriginalButton()
   }
 
@@ -164,6 +165,20 @@ export default class extends Controller {
     }
   }
 
+  #bindImageLoadState() {
+    if (!this.hasLoaderTarget) return
+
+    const hide = () => this.loaderTarget.classList.add("hidden")
+    if (this.img.complete && this.img.naturalWidth > 0) {
+      hide()
+      return
+    }
+
+    this.loaderTarget.classList.remove("hidden")
+    this.img.addEventListener("load", hide, { once: true })
+    this.img.addEventListener("error", hide, { once: true })
+  }
+
   // Swap the <img>'s src to the full-resolution original URL passed in
   // via data-zoomable-url-param. Same DOM element, just a higher-res
   // bitmap — the current zoom state (scale + translation) persists
@@ -181,9 +196,11 @@ export default class extends Controller {
     trigger.disabled = true
     trigger.classList.add("opacity-60", "pointer-events-none")
     this.img.style.opacity = "0.55"
+    if (this.hasLoaderTarget) this.loaderTarget.classList.remove("hidden")
 
     const finish = (ok) => {
       this.img.style.opacity = ""
+      if (this.hasLoaderTarget) this.loaderTarget.classList.add("hidden")
       this.img.removeEventListener("load",  onLoad)
       this.img.removeEventListener("error", onError)
       if (ok) {

@@ -10,9 +10,13 @@
     </p>
   </div>
   <div class="flex items-center gap-2 shrink-0">
-    <%= button_to "Play", games_path, method: :post,
-          params: { image_set_id: set.id },
-          class: "btn-primary text-sm py-1.5" %>
+    <% if practice_image_set?(set) %>
+      <%= link_to "Practice", practice_path(practice_set_id: set.id), class: "btn-primary text-sm py-1.5" %>
+    <% else %>
+      <%= button_to "Play", games_path, method: :post,
+            params: { image_set_id: set.id },
+            class: "btn-primary text-sm py-1.5" %>
+    <% end %>
     <div data-controller="dropdown" class="relative">
       <button type="button" data-action="click->dropdown#toggle"
               aria-label="More actions"
@@ -24,8 +28,10 @@
       </button>
       <div data-dropdown-target="menu"
            class="hidden absolute right-0 top-full mt-1 z-10 min-w-[10rem] rounded-md border border-gray-200 bg-white shadow-lg py-1">
-        <%= link_to "Leaderboard", leaderboard_games_path(image_set_id: set.id),
-              class: "block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" %>
+        <% unless practice_image_set?(set) %>
+          <%= link_to "Leaderboard", leaderboard_games_path(image_set_id: set.id),
+                class: "block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" %>
+        <% end %>
         <%= link_to "Map", map_image_set_path(set),
               class: "block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50" %>
         <% if local_assigns[:show_owner_actions] %>

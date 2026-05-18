@@ -13,10 +13,10 @@
   <%# Bulk upload — primary path. Direct-upload to S3, then a background
       job processes each (HEIC->JPEG, resize, ICC). The page polls for
       processing completion below. %>
-  <div class="rounded-xl border border-gray-200 bg-gray-50 p-5 space-y-3">
+  <div class="card p-5 space-y-3">
     <div>
-      <h2 class="font-semibold text-gray-700">Upload images</h2>
-      <p class="text-xs text-gray-500 mt-0.5">Pick one or many. Coordinates auto-fill from EXIF when present; you can edit them below after the upload.</p>
+      <h2 class="heading-section">Upload images</h2>
+      <p class="muted text-xs mt-0.5">Pick one or many. Coordinates auto-fill from EXIF when present; you can edit them below after the upload.</p>
     </div>
     <%= form_with url: attach_blob_image_set_path(@image_set), method: :post,
                   multipart: true, local: true,
@@ -27,10 +27,15 @@
                     direct_upload_redirect_url_value:      locations_image_set_path(@image_set, page: @page, per_page: @per_page)
                   },
                   class: "flex flex-col sm:flex-row items-start sm:items-end gap-3" do %>
-      <div class="flex-1 space-y-1 w-full">
-        <%= label_tag "files[]", "Image files", class: "block text-sm font-medium text-gray-700" %>
-        <%= file_field_tag "files[]", multiple: true, accept: "image/*",
-              class: "block w-full text-sm text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-blue-600 file:px-3 file:py-1.5 file:text-white file:font-medium hover:file:bg-blue-500 cursor-pointer" %>
+      <div class="flex-1 space-y-1.5 w-full min-w-0">
+        <%= tag.span "Image files", id: "manage-images-file-label", class: "block text-sm font-medium text-forest-800" %>
+        <%# Native file inputs keep a huge clickable strip; overlay the input on this compact label only. %>
+        <div class="relative inline-flex align-middle rounded-lg focus-within:ring-2 focus-within:ring-forest-400 focus-within:ring-offset-2">
+          <%= label_tag "manage-images-file-input", "Browse files", class: "btn-secondary cursor-pointer" %>
+          <%= file_field_tag "files[]", id: "manage-images-file-input", multiple: true, accept: "image/*",
+                aria: { labelledby: "manage-images-file-label" },
+                class: "absolute inset-0 z-10 block h-full w-full cursor-pointer opacity-0" %>
+        </div>
       </div>
       <%= submit_tag "Upload",
             class: "btn-primary shrink-0" %>
@@ -48,23 +53,30 @@
                     local: true, class: "grid grid-cols-1 sm:grid-cols-2 gap-3" do %>
         <div class="sm:col-span-2 space-y-1">
           <%= label_tag :url, "Image URL", class: "block text-sm font-medium text-gray-700" %>
-          <%= text_field_tag :url, nil, placeholder: "https://…",
+          <%= text_field_tag :url, nil, placeholder: "https://…", required: true,
+                maxlength: ImageByUrlInputValidator::MAX_URL_LENGTH,
                 class: "form-input mt-0 text-sm" %>
+          <p class="muted text-xs">Must be an https:// URL (max <%= ImageByUrlInputValidator::MAX_URL_LENGTH %> characters). Latitude and longitude are required.</p>
         </div>
         <div class="space-y-1">
           <%= label_tag :title, "Title (optional)", class: "block text-sm font-medium text-gray-700" %>
           <%= text_field_tag :title, nil, placeholder: "My Location",
+                maxlength: ImageByUrlInputValidator::TITLE_MAX_LENGTH,
+                pattern: ImageSet::NAME_HTML_PATTERN,
+                title: "Up to #{ImageByUrlInputValidator::TITLE_MAX_LENGTH} characters. #{ImageSet::NAME_FORMAT_MESSAGE.capitalize}.",
                 class: "form-input mt-0 text-sm" %>
         </div>
         <div class="grid grid-cols-2 gap-2">
           <div class="space-y-1">
             <%= label_tag :latitude, "Latitude", class: "block text-sm font-medium text-gray-700" %>
-            <%= number_field_tag :latitude, nil, step: "any", placeholder: "0.000",
+            <%= number_field_tag :latitude, nil, step: "any", placeholder: "e.g. 47.5",
+                  min: -90, max: 90, required: true,
                   class: "form-input mt-0 text-sm" %>
           </div>
           <div class="space-y-1">
             <%= label_tag :longitude, "Longitude", class: "block text-sm font-medium text-gray-700" %>
-            <%= number_field_tag :longitude, nil, step: "any", placeholder: "0.000",
+            <%= number_field_tag :longitude, nil, step: "any", placeholder: "e.g. 8.5",
+                  min: -180, max: 180, required: true,
                   class: "form-input mt-0 text-sm" %>
           </div>
         </div>

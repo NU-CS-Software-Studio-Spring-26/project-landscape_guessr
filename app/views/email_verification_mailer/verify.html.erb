@@ -1,0 +1,5 @@
+<p>
+  Verify your email address by visiting
+  <%= link_to "this link", email_verification_url(token: @user.email_verification_token) %>.
+</p>
+<p>This link will expire in 24 hours.</p>

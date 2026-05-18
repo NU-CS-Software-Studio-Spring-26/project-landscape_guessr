@@ -131,6 +131,19 @@ class GamesControllerTest < ActionDispatch::IntegrationTest
     assert game.image_set.is_system_default?
   end
 
+  test "create redirects saved for practice set to practice mode" do
+    sign_in_as @alice
+    set = @alice.image_sets.create!(name: ImageSet::SAVED_FOR_PRACTICE_NAME, visibility: "private", map_style: "outdoor-v2", system_managed: true)
+    image = images(:one)
+    set.image_set_items.create!(image: image, latitude: image.latitude, longitude: image.longitude)
+
+    assert_no_difference("Game.count") do
+      post games_url, params: { image_set_id: set.id }
+    end
+
+    assert_redirected_to practice_path(practice_set_id: set.id)
+  end
+
   test "create game uses specified public set" do
     sign_in_as @alice
     set = image_sets(:alice_public)
@@ -178,5 +191,30 @@ class GamesControllerTest < ActionDispatch::IntegrationTest
     end
     assert_redirected_to root_path
     assert_match(/coordinates/i, flash[:alert])
+  end
+
+  test "results shows new personal best banner" do
+    sign_in_as @alice
+
+    game = @alice.games.create!(status: "in_progress", image_set: image_sets(:default))
+    game.game_images.create!(image: images(:one), position: 1, answer_latitude: 9.99, answer_longitude: 9.99)
+    game.guesses.create!(image: images(:one), latitude: 9.99, longitude: 9.99)
+
+    get results_game_url(game)
+    assert_response :success
+    assert_select "p", text: /New personal best!/i
+  end
+
+  test "results hides personal best banner when score is lower" do
+    sign_in_as @alice
+    @alice.games.create!(status: "completed", score: 10_000, completed_at: Time.current, image_set: image_sets(:default))
+
+    game = @alice.games.create!(status: "in_progress", image_set: image_sets(:default))
+    game.game_images.create!(image: images(:one), position: 1, answer_latitude: 9.99, answer_longitude: 9.99)
+    game.guesses.create!(image: images(:one), latitude: 0.0, longitude: 0.0)
+
+    get results_game_url(game)
+    assert_response :success
+    assert_select "p", text: /New personal best!/i, count: 0
   end
 end

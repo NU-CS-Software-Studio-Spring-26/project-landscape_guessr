@@ -88,7 +88,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_18_000001) do
     t.bigint "challenger_id", null: false
     t.datetime "created_at", null: false
     t.bigint "image_set_id"
-    t.string "token", null: false
+    t.string "token", default: "", null: false
     t.datetime "updated_at", null: false
     t.index ["challenger_id"], name: "index_challenges_on_challenger_id"
     t.index ["image_set_id"], name: "index_challenges_on_image_set_id"
@@ -124,7 +124,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_18_000001) do
     t.datetime "completed_at"
     t.datetime "created_at", null: false
     t.bigint "image_set_id"
-    t.integer "score"
+    t.float "score"
     t.string "status"
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
@@ -142,6 +142,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_18_000001) do
     t.datetime "updated_at", null: false
     t.index ["game_id"], name: "index_guesses_on_game_id"
     t.index ["image_id"], name: "index_guesses_on_image_id"
+  end
+
+  create_table "image_ai_hints", force: :cascade do |t|
+    t.text "body"
+    t.datetime "created_at", null: false
+    t.text "error_message"
+    t.bigint "image_id", null: false
+    t.string "model"
+    t.integer "prompt_version", default: 1, null: false
+    t.string "status", default: "pending", null: false
+    t.integer "tier", null: false
+    t.datetime "updated_at", null: false
+    t.index ["image_id", "tier"], name: "index_image_ai_hints_on_image_id_and_tier", unique: true
+    t.index ["image_id"], name: "index_image_ai_hints_on_image_id"
   end
 
   create_table "image_set_items", force: :cascade do |t|
@@ -215,6 +229,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_18_000001) do
     t.index ["parent_id"], name: "index_regions_on_parent_id"
   end
 
+  create_table "saved_practice_images", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "image_id", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["image_id"], name: "index_saved_practice_images_on_image_id"
+    t.index ["user_id", "image_id"], name: "index_saved_practice_images_on_user_id_and_image_id", unique: true
+    t.index ["user_id"], name: "index_saved_practice_images_on_user_id"
+  end
+
   create_table "sessions", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "ip_address"
@@ -252,10 +276,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_18_000001) do
   add_foreign_key "games", "users"
   add_foreign_key "guesses", "games"
   add_foreign_key "guesses", "images"
+  add_foreign_key "image_ai_hints", "images"
   add_foreign_key "image_set_items", "image_sets"
   add_foreign_key "image_set_items", "images"
   add_foreign_key "image_sets", "image_sets", column: "parent_image_set_id"
   add_foreign_key "image_sets", "users"
   add_foreign_key "regions", "regions", column: "parent_id"
+  add_foreign_key "saved_practice_images", "images"
+  add_foreign_key "saved_practice_images", "users"
   add_foreign_key "sessions", "users"
 end

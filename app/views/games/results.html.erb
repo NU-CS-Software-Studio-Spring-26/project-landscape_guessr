@@ -16,6 +16,22 @@
     <h1 class="heading-page">Here's how you did</h1>
   </div>
 
+  <% if @new_personal_best %>
+    <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3"
+         data-controller="confetti"
+         data-confetti-colors-value='["#3b82f6","#22c55e","#f59e0b","#ef4444","#a855f7"]'>
+      <p class="text-sm font-semibold text-amber-900">New personal best!</p>
+      <% if @previous_best_score.present? %>
+        <p class="text-xs text-amber-800 mt-0.5">
+          You beat your previous best of <%= number_with_delimiter(@previous_best_score.round) %> by
+          <%= number_with_delimiter(@personal_best_delta.round) %> points.
+        </p>
+      <% else %>
+        <p class="text-xs text-amber-800 mt-0.5">This is your first completed score on record.</p>
+      <% end %>
+    </div>
+  <% end %>
+
   <%# Total score card %>
   <div class="card px-6 py-8 text-center space-y-1">
     <p class="eyebrow">Total Score</p>
