@@ -5,8 +5,19 @@ require "test_helper"
 require Rails.root.join("db/migrate/20260517120000_create_image_ai_hints")
 
 class CreateImageAiHintsMigrationTest < ActiveSupport::TestCase
-  # Drops/recreates image_ai_hints; must not run beside parallel workers using fixtures.
-  parallelize(workers: 1)
+  # Drops/recreates image_ai_hints; must run in the main process before parallel workers
+  # start (otherwise PG invalidates cached plans: PreparedStatementCacheExpired).
+  class << self
+    def run_order
+      :alpha
+    end
+
+    def run(klass, method_name, reporter)
+      with_info_handler(reporter) do
+        Minitest::Runnable.run(klass, method_name, reporter)
+      end
+    end
+  end
 
   self.fixture_table_names = []
   self.use_transactional_tests = false
