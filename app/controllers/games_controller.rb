@@ -1,5 +1,5 @@
 class GamesController < ApplicationController
-  TOTAL_ROUNDS = 5
+  TOTAL_ROUNDS = ImageSet::DEFAULT_ROUND_COUNT
 
   before_action :require_admin, only: %i[ new edit update ]
   before_action :set_game, only: %i[ show edit update destroy results ]
@@ -76,7 +76,7 @@ class GamesController < ApplicationController
 
     @game = Current.user.games.new(status: "in_progress", image_set: image_set)
 
-    items = pick_reachable_items(image_set, count: TOTAL_ROUNDS)
+    items = image_set.pick_reachable_items(count: TOTAL_ROUNDS)
 
     if items.size < TOTAL_ROUNDS
       redirect_to root_path, alert: "Not enough working images with coordinates to start a game (need #{TOTAL_ROUNDS}, found #{items.size}). Some image URLs may be broken; remove them or add more images first." and return
@@ -212,45 +212,6 @@ class GamesController < ApplicationController
       else
         ImageSet.default
       end
-    end
-
-    # Pick `count` items with reachable image URLs. Validates URLs via
-    # parallel HEAD-with-redirect — a broken Commons URL chain ends in
-    # 404, a working one in 200. ~300-500ms typical wall time for 5 URLs.
-    # When a URL fails, picks a replacement and re-validates. Capped at
-    # MAX_ATTEMPTS rounds of replacement so a wholly-broken set fails
-    # fast instead of looping. Moves the broken-image cost to game-start
-    # latency (where the user expects a brief wait) instead of mid-game
-    # disruption.
-    PICK_MAX_ATTEMPTS = 3
-
-    def pick_reachable_items(image_set, count:)
-      kept     = []
-      rejected = []
-      attempts = 0
-      while kept.size < count && attempts < PICK_MAX_ATTEMPTS
-        attempts += 1
-        needed = count - kept.size
-        candidates = image_set.effective_items
-                              .with_usable_coords
-                              .where.not(image_id: kept.map(&:image_id) + rejected)
-                              .order(Arel.sql("RANDOM()"))
-                              .limit(needed * 2)
-                              .to_a
-        break if candidates.empty?
-
-        urls_to_items = candidates.each_with_object({}) { |c, h| h[c.image.url] = c if c.image.url.present? }
-        reachable = ImageReachability.reachable(urls_to_items.keys).to_set
-        candidates.each do |c|
-          if c.image.url.blank? || reachable.include?(c.image.url)
-            kept << c
-            break if kept.size >= count
-          else
-            rejected << c.image_id
-          end
-        end
-      end
-      kept
     end
 
     # Returns { min_lat:, max_lat:, min_lng:, max_lng: } over the set's items,

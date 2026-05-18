@@ -49,7 +49,7 @@ class WikidataEntitySearch
       uselang:  "en",
       format:   "json",
       type:     type,
-      limit:    [ limit.to_i.clamp(1, 20), 20 ].min
+      limit:    limit.to_i.clamp(1, 20)
     }
     uri = API.dup
     uri.query = URI.encode_www_form(params)

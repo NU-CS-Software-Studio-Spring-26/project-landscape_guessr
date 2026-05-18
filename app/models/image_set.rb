@@ -28,6 +28,11 @@ class ImageSet < ApplicationRecord
   # the form's select.
   MAP_STYLES = %w[outdoor-v2 streets-v2 bright-v2 topo-v2 satellite hybrid].freeze
 
+  # Games and challenges both run this many rounds. Defined here so the
+  # two controllers (and the round-picking method below) share one
+  # source — the value used to be duplicated in two places.
+  DEFAULT_ROUND_COUNT = 5
+
   validates :name, presence: true
   validates :visibility, inclusion: { in: %w[private public] }
   validates :map_style, inclusion: { in: MAP_STYLES }
@@ -76,6 +81,46 @@ class ImageSet < ApplicationRecord
 
   def effective_items
     image_set_items
+  end
+
+  # Pick `count` random items with reachable image URLs. Validates URLs
+  # via parallel HEAD-with-redirect — a broken Commons URL chain ends in
+  # 404, a working one in 200. ~300-500ms typical wall time for 5 URLs.
+  # When a URL fails, picks a replacement and re-validates. Capped at
+  # MAX_ATTEMPTS rounds of replacement so a wholly-broken set fails fast
+  # instead of looping. Moves the broken-image cost to game/challenge-
+  # start latency (where the user expects a brief wait) instead of
+  # mid-game disruption. Shared between GamesController#create and
+  # ChallengesController#create — same shape, same constraints.
+  PICK_MAX_ATTEMPTS = 3
+
+  def pick_reachable_items(count:)
+    kept     = []
+    rejected = []
+    attempts = 0
+    while kept.size < count && attempts < PICK_MAX_ATTEMPTS
+      attempts += 1
+      needed = count - kept.size
+      candidates = effective_items
+                     .with_usable_coords
+                     .where.not(image_id: kept.map(&:image_id) + rejected)
+                     .order(Arel.sql("RANDOM()"))
+                     .limit(needed * 2)
+                     .to_a
+      break if candidates.empty?
+
+      urls = candidates.filter_map { |c| c.image.url.presence }
+      reachable = ImageReachability.reachable(urls).to_set
+      candidates.each do |c|
+        if c.image.url.blank? || reachable.include?(c.image.url)
+          kept << c
+          break if kept.size >= count
+        else
+          rejected << c.image_id
+        end
+      end
+    end
+    kept
   end
 
   def effective_items_count

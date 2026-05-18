@@ -96,9 +96,9 @@
       <% if @image_set.owned_by?(Current.user) && @image_set.ai_query.present? %>
         <%# Most failures here are transient (Wikidata 5xx, network blip).
             run_query already retries 3× internally; this button covers
-            the case where Wikidata was down for >5s. Reuses ai_query +
-            ai_image_source from the original creation — no re-prompting
-            the AI, no extra Gemini cost. %>
+            the case where Wikidata was down for >5s. Reuses ai_query
+            from the original creation — no re-prompting the AI, no
+            extra Gemini cost. %>
         <%= button_to "Retry import", retry_import_image_set_path(@image_set),
               method: :post, class: "btn-secondary text-sm" %>
       <% end %>

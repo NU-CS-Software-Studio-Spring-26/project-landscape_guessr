@@ -287,7 +287,6 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
   test "retry_import re-enqueues the import job and resets progress columns" do
     set = ImageSet.create!(user: @alice, name: "Failed AI Set", visibility: "private",
                             ai_query: "?item wdt:P31 wd:Q8072 .",
-                            ai_image_source: "wikipedia_pageimages",
                             import_state: "failed",
                             import_error: "WikidataImporter::Error: 502",
                             import_progress: 0, import_total: 0)

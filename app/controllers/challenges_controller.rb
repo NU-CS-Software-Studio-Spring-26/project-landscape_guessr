@@ -1,5 +1,5 @@
 class ChallengesController < ApplicationController
-  TOTAL_ROUNDS = 5
+  TOTAL_ROUNDS = ImageSet::DEFAULT_ROUND_COUNT
 
   before_action :set_challenge, only: [ :show, :play, :destroy ]
 
@@ -19,7 +19,7 @@ class ChallengesController < ApplicationController
 
   def create
     image_set = resolve_image_set
-    items = pick_items_for(image_set)
+    items = image_set.pick_reachable_items(count: TOTAL_ROUNDS)
 
     if items.size < TOTAL_ROUNDS
       flash.now[:alert] = "Not enough images with coordinates in this set (need #{TOTAL_ROUNDS}, found #{items.size})."
@@ -115,40 +115,5 @@ class ChallengesController < ApplicationController
     else
       ImageSet.default
     end
-  end
-
-  # Same shape as GamesController#pick_reachable_items — pre-validates
-  # URLs via parallel HEAD so a challenge never gets created with broken
-  # photos. Validation happens once at challenge creation; subsequent
-  # players who join just play the verified images.
-  PICK_MAX_ATTEMPTS = 3
-
-  def pick_items_for(image_set)
-    kept     = []
-    rejected = []
-    attempts = 0
-    while kept.size < TOTAL_ROUNDS && attempts < PICK_MAX_ATTEMPTS
-      attempts += 1
-      needed = TOTAL_ROUNDS - kept.size
-      candidates = image_set.effective_items
-                            .with_usable_coords
-                            .where.not(image_id: kept.map(&:image_id) + rejected)
-                            .order(Arel.sql("RANDOM()"))
-                            .limit(needed * 2)
-                            .to_a
-      break if candidates.empty?
-
-      urls_to_items = candidates.each_with_object({}) { |c, h| h[c.image.url] = c if c.image.url.present? }
-      reachable = ImageReachability.reachable(urls_to_items.keys).to_set
-      candidates.each do |c|
-        if c.image.url.blank? || reachable.include?(c.image.url)
-          kept << c
-          break if kept.size >= TOTAL_ROUNDS
-        else
-          rejected << c.image_id
-        end
-      end
-    end
-    kept
   end
 end

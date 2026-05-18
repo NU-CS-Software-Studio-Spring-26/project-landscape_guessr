@@ -12,7 +12,6 @@ export default class extends Controller {
   }
 
   // Circle radii presented as round numbers in km.
-  CIRCLE_DEFAULT_KM = 25
   CIRCLE_MIN_KM = 1
   CIRCLE_MAX_KM = 1000
 
