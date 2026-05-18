@@ -1,6 +1,10 @@
 class ImageSetsController < ApplicationController
-  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image attach_blob processing_status remove_item map]
-  before_action :require_owner, only: %i[edit update destroy locations update_locations add_image attach_blob processing_status remove_item]
+  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image attach_blob processing_status remove_item map new_filtered edit_filter update_filter preview_filter_count]
+  before_action :require_owner, only: %i[edit update destroy locations update_locations add_image attach_blob processing_status remove_item edit_filter update_filter preview_filter_count]
+  # Filtered sets' items are derived from the filter — any direct edit gets
+  # blown away on the next materialize. Redirect those routes to the filter
+  # editor instead of letting users do work that disappears.
+  before_action :block_if_filtered, only: %i[locations update_locations add_image attach_blob remove_item]
 
   # GET /image_sets
   def index
@@ -21,11 +25,9 @@ class ImageSetsController < ApplicationController
   # `loading="lazy"` on the <img> tags below defers thumbnail GETs until
   # each card scrolls into view.
   def show
-    # Eager-load photo+blob: every row calls image_src(item.image), which
-    # hits photo.attached? and would otherwise fire one ActiveStorage
-    # ::Attachment Load per item (N+1 across the full page).
     @items = paginate(
-      @image_set.image_set_items
+      @image_set.effective_items
+                .joins(:image)
                 .includes(image: { photo_attachment: :blob })
                 .order("images.title"),
       per_page: 100
@@ -40,12 +42,35 @@ class ImageSetsController < ApplicationController
   # POST /image_sets
   def create
     @image_set = Current.user.image_sets.new(image_set_params)
-    if @image_set.save
-      # Drop straight into the manage page — a freshly created set has no
-      # images, so the natural next step is to upload some.
-      redirect_to locations_image_set_path(@image_set), notice: "Set created — add some images to start."
+
+    # Filtered sets can only be built from a parent the user can play. Without
+    # this check, anyone could pass parent_image_set_id of a private set they
+    # don't own and clone its image_set_items into a set they then mark public.
+    if @image_set.parent_image_set_id.present?
+      parent = ImageSet.find_by(id: @image_set.parent_image_set_id)
+      unless parent&.playable_by?(Current.user)
+        @image_set.errors.add(:parent_image_set, "is not accessible")
+        @parent_set = parent
+        @filtered_set = @image_set
+        render :new_filtered, status: :unprocessable_entity and return
+      end
+    end
+
+    if @image_set.filtered?
+      if @image_set.save
+        @image_set.materialize_filtered_items!
+        redirect_to @image_set, notice: "Filtered set created (#{@image_set.image_set_items.count} images matched)."
+      else
+        @parent_set = @image_set.parent_image_set
+        @filtered_set = @image_set
+        render :new_filtered, status: :unprocessable_entity
+      end
     else
-      render :new, status: :unprocessable_entity
+      if @image_set.save
+        redirect_to locations_image_set_path(@image_set), notice: "Set created — add some images to start."
+      else
+        render :new, status: :unprocessable_entity
+      end
     end
   end
 
@@ -169,6 +194,7 @@ class ImageSetsController < ApplicationController
       item.latitude  = lat || image.latitude
       item.longitude = lng || image.longitude
       item.save!
+      refresh_filtered_children
       redirect_back fallback_location: locations_image_set_path(@image_set), notice: "Image added to set."
     else
       redirect_back fallback_location: locations_image_set_path(@image_set), alert: "That image is already in this set."
@@ -180,6 +206,7 @@ class ImageSetsController < ApplicationController
     item = @image_set.image_set_items.find_by(id: params[:item_id])
     if item
       item.destroy
+      refresh_filtered_children
       redirect_back fallback_location: @image_set, notice: "Image removed from set."
     else
       redirect_back fallback_location: @image_set, alert: "Image not found in this set."
@@ -188,18 +215,18 @@ class ImageSetsController < ApplicationController
 
   # GET /image_sets/1/map
   def map
-    items = @image_set.image_set_items.includes(image: { photo_attachment: :blob })
+    items = @image_set.effective_items.joins(:image).includes(image: { photo_attachment: :blob })
     @image_data = items.filter_map do |item|
       lat = item.latitude || item.image.latitude
       lng = item.longitude || item.image.longitude
       next unless lat && lng
       img = item.image
-      display_url = if img.photo.attached?
-        url_for(img.photo)
-      elsif img.url.present?
-        img.url
-      end
-      { id: img.id, lat: lat.to_f, lng: lng.to_f, title: item.title, url: display_url }
+      { id: img.id, lat: lat.to_f, lng: lng.to_f, title: item.title, url: view_context.image_src(img) }
+    end
+
+    respond_to do |format|
+      format.html
+      format.json { render json: @image_data }
     end
   end
 
@@ -220,6 +247,60 @@ class ImageSetsController < ApplicationController
       }
     end
     render json: { items: payload, processing_count: payload.count { |i| !i[:processed] } }
+  end
+
+  # GET /image_sets/1/preview_filter_count?region_ids[]=N&custom_areas=[...]
+  # Returns the number of parent-set images that would match the given regions
+  # AND custom areas, plus the matched IDs so the builder can recolor image
+  # dots on the map.
+  def preview_filter_count
+    region_ids = Array(params[:region_ids]).map(&:to_i).reject(&:zero?)
+    areas = sanitize_custom_areas(params[:custom_areas])
+    if region_ids.empty? && areas.empty?
+      render json: { count: 0, matched_ids: [] } and return
+    end
+
+    parent = @image_set.filtered? ? @image_set.parent_image_set : @image_set
+    temp = ImageSet.new(parent_image_set: parent, region_ids: region_ids, custom_areas: areas)
+    matched = temp.compute_matching_image_ids
+    render json: { count: matched.size, matched_ids: matched }
+  rescue => e
+    Rails.logger.error("[image_sets#preview_filter_count] #{e.class}: #{e.message}")
+    render json: { count: nil, error: "Unable to count matching images" }, status: :unprocessable_entity
+  end
+
+  # GET /image_sets/1/new_filtered
+  def new_filtered
+    @parent_set = @image_set
+    @filtered_set = ImageSet.new(
+      parent_image_set: @parent_set,
+      visibility: @parent_set.visibility,
+      map_style: @parent_set.map_style
+    )
+  end
+
+  # GET /image_sets/1/edit_filter
+  def edit_filter
+    @parent_set = @image_set.parent_image_set
+    @filtered_set = @image_set
+  end
+
+  # PATCH /image_sets/1/update_filter
+  def update_filter
+    region_ids = Array(params[:region_ids]).map(&:to_i).reject(&:zero?)
+    if @image_set.update(
+      name: params[:name],
+      region_ids: region_ids,
+      custom_areas: sanitize_custom_areas(params[:custom_areas]),
+      visibility: params[:visibility] || @image_set.visibility
+    )
+      @image_set.materialize_filtered_items!
+      redirect_to @image_set, notice: "Filter updated (#{@image_set.image_set_items.count} images matched)."
+    else
+      @parent_set = @image_set.parent_image_set
+      @filtered_set = @image_set
+      render :edit_filter, status: :unprocessable_entity
+    end
   end
 
   # POST /image_sets/1/attach_blob
@@ -276,7 +357,93 @@ class ImageSetsController < ApplicationController
     end
   end
 
+  def block_if_filtered
+    if @image_set.filtered?
+      msg = "This is a filtered set — edit the filter instead. Direct image changes get overwritten."
+      respond_to do |format|
+        format.html { redirect_to edit_filter_image_set_path(@image_set), alert: msg }
+        format.json { render json: { error: msg }, status: :forbidden }
+      end
+    end
+  end
+
+  # On `create`, parent_image_set_id + region_ids + custom_areas are needed
+  # (that's how a filtered set is born). On `update`, all three must be locked:
+  # the filter is only mutable through update_filter, which re-runs materialize.
+  # Allowing them through the regular update would silently desync materialized
+  # items from the recorded filter.
   def image_set_params
-    params.expect(image_set: [ :name, :visibility, :map_style ])
+    allowed = [ :name, :visibility, :map_style ]
+    if action_name == "create"
+      allowed += [ :parent_image_set_id, :custom_areas_json, { region_ids: [] } ]
+    end
+    permitted = params.expect(image_set: allowed)
+    if permitted[:region_ids].present?
+      permitted[:region_ids] = permitted[:region_ids].map(&:to_i).reject(&:zero?)
+    else
+      permitted.delete(:region_ids)
+    end
+    # The form posts custom_areas as a JSON string in a single hidden field —
+    # nested-params would require arbitrary-depth permits, but the data is
+    # client-controlled JSON anyway, so we round-trip through the sanitizer.
+    if permitted[:custom_areas_json].present?
+      permitted[:custom_areas] = sanitize_custom_areas(permitted.delete(:custom_areas_json))
+    else
+      permitted.delete(:custom_areas_json)
+    end
+    permitted
+  end
+
+  # Returns an array of validated custom-area hashes — strict shape, bounded
+  # field values. Untrusted input from the client.
+  MAX_CUSTOM_AREAS = 50
+  MIN_CIRCLE_RADIUS_M = 100
+  MAX_CIRCLE_RADIUS_M = 5_000_000
+
+  def sanitize_custom_areas(raw)
+    return [] if raw.blank?
+    raw = JSON.parse(raw) if raw.is_a?(String)
+    return [] unless raw.is_a?(Array)
+    raw.first(MAX_CUSTOM_AREAS).filter_map { |a| sanitize_custom_area(a) }
+  rescue JSON::ParserError
+    []
+  end
+
+  def sanitize_custom_area(a)
+    return nil unless a.is_a?(Hash) || a.is_a?(ActionController::Parameters)
+    h = a.respond_to?(:to_unsafe_h) ? a.to_unsafe_h : a.transform_keys(&:to_s)
+    case h["type"]
+    when "circle"
+      lat = h.dig("center", "lat")&.to_f
+      lng = h.dig("center", "lng")&.to_f
+      rad = h["radius_m"]&.to_f
+      return nil unless lat && lng && rad
+      return nil unless lat.between?(-90, 90) && lng.between?(-180, 180)
+      return nil unless rad.between?(MIN_CIRCLE_RADIUS_M, MAX_CIRCLE_RADIUS_M)
+      {
+        "id" => h["id"].to_s.presence || SecureRandom.uuid,
+        "type" => "circle",
+        "name" => h["name"].to_s.first(120).presence,
+        "center" => { "lat" => lat, "lng" => lng },
+        "radius_m" => rad
+      }
+    when "polygon"
+      # Polygon support: drawing UI not yet shipped, but data path is in place.
+      g = h["geojson"]
+      return nil unless g.is_a?(Hash) && %w[Polygon MultiPolygon].include?(g["type"])
+      return nil unless g["coordinates"].is_a?(Array)
+      {
+        "id" => h["id"].to_s.presence || SecureRandom.uuid,
+        "type" => "polygon",
+        "name" => h["name"].to_s.first(120).presence,
+        "geojson" => g
+      }
+    end
+  end
+
+  # Background — see RematerializeFilteredSetsJob. Inline rematerialization was
+  # blocking add_image / remove_item requests on Nominatim fetches.
+  def refresh_filtered_children
+    RematerializeFilteredSetsJob.perform_later(@image_set.id) if @image_set.filtered_sets.exists?
   end
 end

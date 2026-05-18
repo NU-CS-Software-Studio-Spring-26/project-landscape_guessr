@@ -1,5 +1,6 @@
 class HomeController < ApplicationController
-  allow_unauthenticated_access only: %i[ start about legal ]
+  allow_unauthenticated_access only: %i[ start about legal scoring ]
+  skip_before_action :require_email_verified
 
   def start
     if authenticated?
@@ -14,5 +15,8 @@ class HomeController < ApplicationController
   end
 
   def legal
+  end
+
+  def scoring
   end
 end

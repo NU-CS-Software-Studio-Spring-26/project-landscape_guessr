@@ -50,6 +50,12 @@ class GamesController < ApplicationController
     if @image.nil?
       redirect_to results_game_path(@game) and return
     end
+
+    # bbox of all images in the set, used to fit the guess map at round start
+    # so the user starts looking at the relevant region (e.g., a US-only set
+    # opens centered on the US instead of the world). One COALESCE'd SQL pass
+    # — much cheaper than loading the items into Ruby.
+    @set_image_bbox = compute_set_image_bbox(@game.image_set)
   end
 
   # GET /games/new
@@ -70,18 +76,10 @@ class GamesController < ApplicationController
 
     @game = Current.user.games.new(status: "in_progress", image_set: image_set)
 
-    # Skip image_set_items where no answer location is available — without
-    # this we'd silently include them and every guess for that round would
-    # be scored against (0, 0). The COALESCE checks the per-item override
-    # *or* the underlying image's coords (item.latitude falls back to
-    # item.image.latitude in our model).
-    items = image_set.image_set_items
-              .joins(:image)
-              .where("COALESCE(image_set_items.latitude,  images.latitude)  IS NOT NULL")
-              .where("COALESCE(image_set_items.longitude, images.longitude) IS NOT NULL")
-              .preload(:image)
-              .order(Arel.sql("RANDOM()"))
-              .limit(TOTAL_ROUNDS)
+    items = image_set.effective_items
+                     .with_usable_coords
+                     .order(Arel.sql("RANDOM()"))
+                     .limit(TOTAL_ROUNDS)
 
     if items.size < TOTAL_ROUNDS
       redirect_to root_path, alert: "Not enough images with coordinates to start a game (need #{TOTAL_ROUNDS}, this set has #{items.size}). Set lat/lng on more images first." and return
@@ -93,8 +91,8 @@ class GamesController < ApplicationController
         @game.game_images.create!(
           image_id: item.image_id,
           position: idx + 1,
-          answer_latitude: item.latitude || item.image.latitude,
-          answer_longitude: item.longitude || item.image.longitude
+          answer_latitude:  item.answer_lat,
+          answer_longitude: item.answer_lng
         )
       end
     end
@@ -158,6 +156,9 @@ class GamesController < ApplicationController
     @total_distance_km = @rounds.sum { |r| r[:distance_km] }
     @score = @rounds.sum { |r| r[:round_score] }
     @total_rounds = TOTAL_ROUNDS
+    @previous_best_score = Current.user.games.where.not(completed_at: nil).where.not(id: @game.id).maximum(:score)
+    @new_personal_best = @previous_best_score.nil? || @score > @previous_best_score
+    @personal_best_delta = @score - (@previous_best_score || 0)
 
     @map_rounds = @rounds.map do |r|
       {
@@ -217,5 +218,24 @@ class GamesController < ApplicationController
       else
         ImageSet.default
       end
+    end
+
+    # Returns { min_lat:, max_lat:, min_lng:, max_lng: } over the set's items,
+    # or nil if the set has no item with coords. Image lat/lng falls back to
+    # the underlying image's GPS via COALESCE. One scan over the set's items.
+    def compute_set_image_bbox(image_set)
+      return nil unless image_set
+      row = image_set.image_set_items
+                     .joins(:image)
+                     .pick(
+                       Arel.sql("MIN(COALESCE(image_set_items.latitude,  images.latitude))  AS min_lat"),
+                       Arel.sql("MAX(COALESCE(image_set_items.latitude,  images.latitude))  AS max_lat"),
+                       Arel.sql("MIN(COALESCE(image_set_items.longitude, images.longitude)) AS min_lng"),
+                       Arel.sql("MAX(COALESCE(image_set_items.longitude, images.longitude)) AS max_lng")
+                     )
+      return nil unless row && row.compact.any?
+      min_lat, max_lat, min_lng, max_lng = row
+      return nil unless min_lat && max_lat && min_lng && max_lng
+      { min_lat: min_lat.to_f, max_lat: max_lat.to_f, min_lng: min_lng.to_f, max_lng: max_lng.to_f }
     end
 end

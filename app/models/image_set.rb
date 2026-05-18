@@ -1,5 +1,6 @@
 class ImageSet < ApplicationRecord
   belongs_to :user, optional: true
+  belongs_to :parent_image_set, class_name: "ImageSet", optional: true
   # dependent: :delete_all (NOT :destroy) — destroying a 5000-item set
   # via per-row :destroy loads every row + fires ImageSetItem#after_destroy
   # for each, which runs Image#purge_if_orphan! (3 SQL counts each), which
@@ -12,6 +13,7 @@ class ImageSet < ApplicationRecord
   has_many :image_set_items, dependent: :delete_all
   has_many :images, through: :image_set_items
   has_many :games, dependent: :nullify
+  has_many :filtered_sets, class_name: "ImageSet", foreign_key: :parent_image_set_id, dependent: :destroy
 
   # MapTiler basemap styles available per set. Used by the guess /
   # results / set-map controllers — see app/javascript/controllers/*.js.
@@ -27,11 +29,23 @@ class ImageSet < ApplicationRecord
   validate :system_default_has_no_user
   validate :only_one_system_default, if: :is_system_default?
 
-  before_destroy :capture_member_image_ids
+  # `prepend: true` so this runs BEFORE the `dependent: :delete_all` on
+  # image_set_items (declared above) — dependent destroy strategies are
+  # before_destroy callbacks added at class-load time in declaration
+  # order, so without prepend our snapshot would see an empty join table.
+  before_destroy :capture_member_image_ids, prepend: true
   after_destroy  :sweep_orphan_images
 
   scope :public_catalog, -> { where(visibility: "public") }
   scope :owned_by, ->(user) { where(user: user) }
+  # Sets a given user is allowed to see. Mirrors `playable_by?` at the
+  # query level: system_default OR public OR owned. Pass nil for the
+  # unauthenticated case — effectively system_default OR public.
+  scope :visible_to, ->(user) {
+    where(is_system_default: true)
+      .or(public_catalog)
+      .or(where(user_id: user&.id))
+  }
 
   def self.default
     find_by(is_system_default: true)
@@ -45,7 +59,178 @@ class ImageSet < ApplicationRecord
     is_system_default? || owned_by?(user) || visibility == "public"
   end
 
+  def filtered?
+    parent_image_set_id.present?
+  end
+
+  def effective_items
+    image_set_items
+  end
+
+  def effective_items_count
+    image_set_items.count
+  end
+
+  def selected_regions
+    Region.where(id: region_ids)
+  end
+
+  def materialize_filtered_items!
+    return unless filtered?
+
+    # Allow Nominatim fetches when actually saving — it's a one-time cost
+    matched = compute_matching_image_ids(fetch_missing_boundaries: true)
+    transaction do
+      image_set_items.delete_all
+
+      if matched.any?
+        parent_items = parent_image_set.image_set_items
+          .where(image_id: matched)
+          .pluck(:image_id, :latitude, :longitude)
+
+        rows = parent_items.map do |image_id, lat, lng|
+          { image_set_id: id, image_id: image_id,
+            latitude: lat, longitude: lng,
+            created_at: Time.current, updated_at: Time.current }
+        end
+        ImageSetItem.insert_all(rows)
+      end
+    end
+  end
+
+  # Earth radius in metres — used for haversine distance in circle matching.
+  EARTH_RADIUS_M = 6_371_000.0
+
+  def compute_matching_image_ids(fetch_missing_boundaries: false)
+    regions = resolve_filter_regions(fetch_missing_boundaries: fetch_missing_boundaries)
+    region_geoms = build_region_geoms(regions)
+    circles = parsed_circle_areas
+    polygons = parsed_polygon_areas
+    return [] if region_geoms.empty? && circles.empty? && polygons.empty?
+
+    factory = RGeo::Geographic.spherical_factory(srid: 4326)
+    candidates = parent_image_set.image_set_items
+      .joins(:image)
+      .where.not(images: { latitude: nil, longitude: nil })
+      .pluck("images.id", "images.latitude", "images.longitude")
+
+    matched = []
+    candidates.each do |image_id, lat, lng|
+      lat = lat.to_f
+      lng = lng.to_f
+
+      # Cheap bbox-then-poly check for each region, fall through to circle/polygon
+      # custom areas if no region matched. Any match short-circuits to next image.
+      hit = image_matches_any?(image_id, lat, lng, region_geoms, circles, polygons, factory)
+      matched << image_id if hit
+    end
+
+    matched
+  end
+
+  def resolve_filter_regions(fetch_missing_boundaries: false)
+    selected = Region.where(id: region_ids).to_a
+    result = []
+
+    selected.each do |region|
+      if region.boundary.present?
+        # Continents have buffered hrbrmstr polygons (accurate enough for filtering).
+        # admin1/admin2/city use polygons we previously fetched from Nominatim.
+        result << region
+      elsif fetch_missing_boundaries
+        # admin1/admin2/city without boundary yet — fetch from Nominatim now (rate-limited).
+        # Only happens at filter save, never in the live preview path.
+        region.fetch_real_boundary!
+        result << region if region.boundary.present?
+      end
+    end
+
+    result.uniq
+  end
+
+  # Parsed view of custom_areas where type=="circle". Each entry:
+  #   { lat:, lng:, radius_m:, radius_lat_deg:, radius_lng_deg: }
+  # The "radius in degrees" fields are pre-computed for a cheap bbox pre-filter
+  # before paying for haversine; lng-radius widens at high latitudes by 1/cos(lat).
+  def parsed_circle_areas
+    Array(custom_areas).filter_map do |a|
+      next nil unless a.is_a?(Hash) && a["type"] == "circle"
+      center = a["center"] || {}
+      lat = center["lat"]&.to_f
+      lng = center["lng"]&.to_f
+      rad = a["radius_m"]&.to_f
+      next nil unless lat && lng && rad && rad.positive?
+      next nil unless lat.between?(-90, 90) && lng.between?(-180, 180)
+      rad_lat = rad / 111_320.0  # metres per degree of latitude (constant)
+      rad_lng = rad / (111_320.0 * Math.cos(lat * Math::PI / 180).abs.clamp(0.000001, 1))
+      { lat: lat, lng: lng, radius_m: rad, radius_lat_deg: rad_lat, radius_lng_deg: rad_lng }
+    end
+  end
+
+  # Parsed view of custom_areas where type=="polygon", decoded to RGeo geometry.
+  # Not user-facing yet (no drawing UI), but the data path is in place so we
+  # can ship the UI without touching matching.
+  def parsed_polygon_areas
+    Array(custom_areas).filter_map do |a|
+      next nil unless a.is_a?(Hash) && a["type"] == "polygon"
+      geom = RGeo::GeoJSON.decode(a["geojson"].to_json) rescue nil
+      next nil unless geom
+      bbox = Region.compute_bbox(a["geojson"])
+      { geom: geom, **bbox.to_h.transform_keys(&:to_sym) }
+    end
+  end
+
   private
+
+  def build_region_geoms(regions)
+    regions.filter_map do |r|
+      geom = r.rgeo_boundary
+      next nil unless geom
+      { geom: geom, min_lat: r.min_lat, max_lat: r.max_lat, min_lng: r.min_lng, max_lng: r.max_lng }
+    end
+  end
+
+  def image_matches_any?(_image_id, lat, lng, region_geoms, circles, polygons, factory)
+    point = nil
+
+    region_geoms.each do |g|
+      next if g[:min_lat] && outside_bbox?(lat, lng, g)
+      point ||= factory.point(lng, lat)
+      return true if (g[:geom].contains?(point) rescue false)
+    end
+
+    circles.each do |c|
+      # Cheap bbox pre-filter before paying for haversine.
+      next if (lat - c[:lat]).abs > c[:radius_lat_deg]
+      next if (lng - c[:lng]).abs > c[:radius_lng_deg]
+      return true if haversine_m(c[:lat], c[:lng], lat, lng) <= c[:radius_m]
+    end
+
+    polygons.each do |p|
+      next if p[:min_lat] && outside_bbox?(lat, lng, p)
+      point ||= factory.point(lng, lat)
+      return true if (p[:geom].contains?(point) rescue false)
+    end
+
+    false
+  end
+
+  def outside_bbox?(lat, lng, area)
+    lat < area[:min_lat] || lat > area[:max_lat] ||
+      lng < area[:min_lng] || lng > area[:max_lng]
+  end
+
+  # Great-circle distance in metres between two lat/lng points.
+  def haversine_m(lat1, lng1, lat2, lng2)
+    rad_per_deg = Math::PI / 180.0
+    dlat = (lat2 - lat1) * rad_per_deg
+    dlng = (lng2 - lng1) * rad_per_deg
+    a = Math.sin(dlat / 2)**2 +
+        Math.cos(lat1 * rad_per_deg) * Math.cos(lat2 * rad_per_deg) * Math.sin(dlng / 2)**2
+    2 * EARTH_RADIUS_M * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  end
+
+  public
 
   def system_default_has_no_user
     errors.add(:user, "must be blank for system default set") if is_system_default? && user_id.present?
@@ -82,6 +267,7 @@ class ImageSet < ApplicationRecord
       orphan_ids = Image.where(id: chunk)
                         .where.missing(:image_set_items)
                         .where.missing(:game_images)
+                        .where.missing(:challenge_images)
                         .where.missing(:guesses)
                         .pluck(:id)
       next if orphan_ids.empty?

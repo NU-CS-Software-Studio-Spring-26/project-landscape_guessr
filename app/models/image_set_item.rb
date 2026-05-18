@@ -6,6 +6,17 @@ class ImageSetItem < ApplicationRecord
   validates :longitude, numericality: { greater_than_or_equal_to: -180, less_than_or_equal_to: 180 }, allow_nil: true
   validates :image_id, uniqueness: { scope: :image_set_id, message: "already in this set" }
 
+  # Items that have an answer location — either a per-item override or a
+  # fallback to the underlying image's coords. Without this filter, picking
+  # rounds for a game/challenge can silently include items where both coord
+  # paths are nil, and every guess for that round scores against (0, 0).
+  scope :with_usable_coords, -> {
+    joins(:image)
+      .where("COALESCE(image_set_items.latitude,  images.latitude)  IS NOT NULL")
+      .where("COALESCE(image_set_items.longitude, images.longitude) IS NOT NULL")
+      .preload(:image)
+  }
+
   after_destroy :purge_image_if_orphan
 
   delegate :title, :url, to: :image

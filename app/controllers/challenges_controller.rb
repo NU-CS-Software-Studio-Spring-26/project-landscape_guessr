@@ -38,8 +38,8 @@ class ChallengesController < ApplicationController
         @challenge.challenge_images.create!(
           image_id:         item.image_id,
           position:         idx + 1,
-          answer_latitude:  item.latitude  || item.image.latitude,
-          answer_longitude: item.longitude || item.image.longitude
+          answer_latitude:  item.answer_lat,
+          answer_longitude: item.answer_lng
         )
       end
     end
@@ -104,10 +104,7 @@ class ChallengesController < ApplicationController
   end
 
   def available_image_sets
-    ImageSet.where(is_system_default: true)
-            .or(ImageSet.where(user: Current.user))
-            .or(ImageSet.public_catalog)
-            .order(:name)
+    ImageSet.visible_to(Current.user).order(:name)
   end
 
   def resolve_image_set
@@ -121,11 +118,8 @@ class ChallengesController < ApplicationController
   end
 
   def pick_items_for(image_set)
-    image_set.image_set_items
-             .joins(:image)
-             .where("COALESCE(image_set_items.latitude,  images.latitude)  IS NOT NULL")
-             .where("COALESCE(image_set_items.longitude, images.longitude) IS NOT NULL")
-             .preload(:image)
+    image_set.effective_items
+             .with_usable_coords
              .order(Arel.sql("RANDOM()"))
              .limit(TOTAL_ROUNDS)
   end

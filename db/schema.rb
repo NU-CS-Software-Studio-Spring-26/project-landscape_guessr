@@ -10,9 +10,11 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_12_000005) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_15_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+  enable_extension "pg_trgm"
+  enable_extension "unaccent"
 
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
@@ -64,6 +66,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_12_000005) do
     t.index ["challenger_id"], name: "index_challenges_on_challenger_id"
     t.index ["image_set_id"], name: "index_challenges_on_image_set_id"
     t.index ["token"], name: "index_challenges_on_token", unique: true
+  end
+
+  create_table "connected_services", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "email"
+    t.string "provider", null: false
+    t.string "uid", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["provider", "uid"], name: "index_connected_services_on_provider_and_uid", unique: true
+    t.index ["user_id"], name: "index_connected_services_on_user_id"
   end
 
   create_table "game_images", force: :cascade do |t|
@@ -118,13 +131,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_12_000005) do
 
   create_table "image_sets", force: :cascade do |t|
     t.datetime "created_at", null: false
+    t.jsonb "custom_areas", default: [], null: false
     t.boolean "is_system_default", default: false, null: false
     t.string "map_style", default: "outdoor-v2", null: false
     t.string "name", null: false
+    t.bigint "parent_image_set_id"
+    t.bigint "region_ids", default: [], array: true
     t.datetime "updated_at", null: false
     t.bigint "user_id"
     t.string "visibility", default: "private", null: false
     t.index ["is_system_default"], name: "index_image_sets_one_system_default", unique: true, where: "(is_system_default = true)"
+    t.index ["parent_image_set_id"], name: "index_image_sets_on_parent_image_set_id"
+    t.index ["region_ids"], name: "index_image_sets_on_region_ids", using: :gin
     t.index ["user_id"], name: "index_image_sets_on_user_id"
   end
 
@@ -135,6 +153,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_12_000005) do
     t.string "title"
     t.datetime "updated_at", null: false
     t.string "url"
+    t.index ["latitude", "longitude"], name: "index_images_on_coords_not_null", where: "((latitude IS NOT NULL) AND (longitude IS NOT NULL))"
+  end
+
+  create_table "regions", force: :cascade do |t|
+    t.string "admin_level", null: false
+    t.jsonb "boundary"
+    t.datetime "created_at", null: false
+    t.string "iso_code"
+    t.float "max_lat"
+    t.float "max_lng"
+    t.float "min_lat"
+    t.float "min_lng"
+    t.string "name", null: false
+    t.string "normalized_name"
+    t.bigint "parent_id"
+    t.integer "population"
+    t.datetime "updated_at", null: false
+    t.index ["admin_level"], name: "index_regions_on_admin_level"
+    t.index ["iso_code"], name: "index_regions_on_iso_code"
+    t.index ["name", "admin_level"], name: "index_regions_on_name_and_admin_level"
+    t.index ["parent_id", "admin_level", "normalized_name"], name: "index_regions_on_parent_level_normname"
+    t.index ["parent_id"], name: "index_regions_on_parent_id"
   end
 
   create_table "sessions", force: :cascade do |t|
@@ -150,9 +190,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_12_000005) do
     t.boolean "admin", default: false, null: false
     t.datetime "created_at", null: false
     t.string "email_address", null: false
+    t.datetime "email_verified_at"
     t.string "password_digest", null: false
     t.datetime "updated_at", null: false
-    t.string "username", null: false
+    t.string "username"
     t.index "lower((username)::text)", name: "index_users_on_lower_username", unique: true
     t.index ["email_address"], name: "index_users_on_email_address", unique: true
   end
@@ -163,6 +204,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_12_000005) do
   add_foreign_key "challenge_images", "images"
   add_foreign_key "challenges", "image_sets"
   add_foreign_key "challenges", "users", column: "challenger_id"
+  add_foreign_key "connected_services", "users"
   add_foreign_key "game_images", "games"
   add_foreign_key "game_images", "images"
   add_foreign_key "games", "challenges"
@@ -172,6 +214,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_12_000005) do
   add_foreign_key "guesses", "images"
   add_foreign_key "image_set_items", "image_sets"
   add_foreign_key "image_set_items", "images"
+  add_foreign_key "image_sets", "image_sets", column: "parent_image_set_id"
   add_foreign_key "image_sets", "users"
+  add_foreign_key "regions", "regions", column: "parent_id"
   add_foreign_key "sessions", "users"
 end

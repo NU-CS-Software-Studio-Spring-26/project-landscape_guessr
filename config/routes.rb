@@ -6,7 +6,14 @@ Rails.application.routes.draw do
   resource :session, only: %i[ new create destroy ]
   resources :passwords, param: :token, only: %i[ new create edit update ]
   resource :registration, only: %i[ new create ]
-  resource :profile, only: :show
+  resource :email_verification, only: %i[ show create ]
+  resource :profile, only: %i[ show destroy ] do
+    get   :setup_username
+    patch :setup_username, action: :update_username
+  end
+
+  get "/auth/:provider/callback", to: "sessions/omni_auths#create", as: :omniauth_callback
+  get "/auth/failure",            to: "sessions/omni_auths#failure"
 
   resources :challenges, param: :token, only: [ :index, :new, :create, :show, :destroy ] do
     member { post :play }
@@ -28,11 +35,24 @@ Rails.application.routes.draw do
       post :attach_blob
       get  :processing_status
       get  :map
+      get  :new_filtered
+      get  :edit_filter
+      patch :update_filter
+      get :preview_filter_count
+      post :preview_filter_count, action: :preview_filter_count
     end
     delete "items/:item_id", to: "image_sets#remove_item", as: :remove_item
   end
+  resources :regions, only: [] do
+    collection do
+      get :search
+      get :boundaries
+      post :resolve
+    end
+  end
   get  "practice",       to: "practice#show"
   get  "practice/check", to: "practice#check", as: :practice_check
+  get  "scoring",        to: "home#scoring", as: :scoring
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.

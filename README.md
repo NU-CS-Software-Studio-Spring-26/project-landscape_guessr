@@ -40,12 +40,15 @@ A GeoGuessr-style web game: players see a landscape photograph (mountain, lake, 
 - **MapTiler SDK JS** (wraps MapLibre GL) for all maps, with session-based tile billing and per-`ImageSet` basemap (`outdoor-v2` default; streets / bright / topo / satellite / hybrid). See *Conventions → Maps* for the loader, trail-hiding, and Turbo gotchas.
 - **Active Storage** + **AWS S3** for user uploads
 - **libvips** (via `image_processing`) for HEIC -> JPEG conversion, resize, color-space normalization
+- **rgeo** for point-in-polygon checks when materializing filtered image sets
+- **PostgreSQL extensions** (`pg_trgm`, `unaccent`) for typo-tolerant region search; **GeoNames** + **Nominatim** as data sources for the regions tree (continent → country → admin1 → admin2 → city)
 
 ## Prerequisites
 
 - Ruby 4.0.2 — install via your version manager (rbenv, asdf, mise, rvm). `.ruby-version` is honored by all of them.
 - PostgreSQL 14+ running locally. On macOS: `brew install postgresql@16 && brew services start postgresql@16`.
 - libvips for image processing. On macOS: `brew install vips`. On Linux: `apt-get install libvips42`. (Heroku gets it via `Aptfile`.)
+- libgeos for region polygon operations (used by `regions:seed_all` and the filter-set matcher). On macOS: `brew install geos`. On Linux: `apt-get install libgeos-dev`. The `rgeo` gem compiles its C extension against libgeos at install time, so make sure libgeos is present **before** running `bundle install`. (Heroku gets it via `Aptfile`.)
 
 ## Setup
 
@@ -54,6 +57,7 @@ git clone <this-repo>
 cd project-landscape_guessr
 bundle install
 bin/rails db:create db:migrate db:seed   # creates DB, migrates, fetches ~1400 images from Wikidata, adds demo users (dev only)
+bin/rails regions:seed_all               # ~10 min: seeds the GeoNames regions tree (~200k rows). Optional — needed only for filtered-set creation.
 bin/dev                                  # starts Puma (port 3000) + Tailwind watcher
 ```
 
@@ -64,6 +68,10 @@ To play, sign up at `/registration/new`. Practice mode (`/practice`) and image b
 In development, seeds also create three demo accounts so the leaderboard isn't empty: **alice**, **bob**, **charlie** (all with password `password123`). They're never seeded in production — that would mean public, world-readable creds for the deployed app.
 
 To manage the image library or edit past guesses through the UI, you need an admin account. Sign up normally, then promote yourself via `bin/rails c`: `User.find_by(email_address: "you@x").update(admin: true)`. On Heroku: `heroku run rails console`.
+
+### Google sign-in (optional)
+
+Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env` (loaded by `dotenv-rails` in dev). Get them from Google Cloud Console → Google Auth Platform → Clients → Web application; add `http://localhost:3000/auth/google_oauth2/callback` as an authorized redirect URI. Without them, the "Sign in with Google" button errors but password sign-in still works.
 
 ### S3 / Active Storage setup (for user uploads)
 
@@ -82,13 +90,15 @@ export AWS_REGION=us-east-2
 
 | Model | Belongs to | Has many | Key columns |
 |---|---|---|---|
-| `User` | — | `sessions`, `games`, `image_sets` | `email_address`, `username`, `password_digest`, `admin` |
+| `User` | — | `sessions`, `games`, `image_sets`, `connected_services` | `email_address`, `username` (nullable while OAuth users pick one), `password_digest`, `admin` |
 | `Session` | `User` | — | `ip_address`, `user_agent` |
+| `ConnectedService` | `User` | — | `provider`, `uid`, `email` (unique on `[provider, uid]`; maps OAuth identities to users) |
 | `Game` | `User`, `ImageSet?` | `game_images`, `guesses`, `images` (through `game_images`) | `status`, `score`, `completed_at` |
 | `GameImage` | `Game`, `Image` | — | `position` (1–5), `answer_latitude`, `answer_longitude` (snapshot at game-creation time) |
 | `Image` | — | `guesses`, `game_images`, `image_set_items`, `image_sets` (through items) | `url`, `latitude`, `longitude`, `title`; optional `photo` Active Storage attachment |
-| `ImageSet` | `User?` | `image_set_items`, `images` (through items), `games` | `name`, `visibility` (`private`\|`public`), `is_system_default`, `map_style` |
+| `ImageSet` | `User?`, `ImageSet?` (parent) | `image_set_items`, `images` (through items), `games`, `filtered_sets` | `name`, `visibility` (`private`\|`public`), `is_system_default`, `map_style`, `parent_image_set_id`, `region_ids` (bigint[]), `custom_areas` (jsonb), `min_lat`/`max_lat`/`min_lng`/`max_lng` |
 | `ImageSetItem` | `ImageSet`, `Image` | — | `latitude`, `longitude` (per-set override of the image's coords) |
+| `Region` | `Region?` (parent) | `children` (self-join) | `name`, `admin_level` (`continent`\|`country`\|`admin1`\|`admin2`\|`city`), `iso_code`, `boundary` (jsonb GeoJSON), `population`, `min_lat`/`max_lat`/`min_lng`/`max_lng`, `normalized_name` |
 | `Guess` | `Game`, `Image` | — | `latitude`, `longitude` (player's pick) |
 
 `GameImage.answer_latitude/longitude` snapshots the answer at game-creation time, so retroactively editing an image's coordinates doesn't change scores for already-played games.
@@ -97,7 +107,9 @@ export AWS_REGION=us-east-2
 - exactly one set has `is_system_default: true` (`Default Landscapes`, seeded from Wikidata) — public, ungated, the default for new games.
 - user-created sets are either `private` (only the owner can see/play) or `public` (anyone can play, leaderboard is shared).
 
-The `Image.visible_to(user)` scope (in `app/models/image.rb`) is the canonical way to gate image lists: it returns images that live in *at least one* set the user can see — the system default, any public set, or any set they own. `ImageSet#playable_by?(user)` is the corresponding gate for set-level access.
+The `Image.visible_to(user)` scope (in `app/models/image.rb`) is the canonical way to gate image lists: it returns images that live in *at least one* set the user can see — the system default, any public set, or any set they own. `ImageSet#playable_by?(user)` is the corresponding gate for set-level access; the matching `ImageSet.visible_to(user)` scope is used wherever a controller needs to list visible sets.
+
+**Filtered sets.** A regular `ImageSet` *owns* its image_set_items directly. A *filtered set* is a child `ImageSet` (set via `parent_image_set_id`) whose items are computed from the parent's images intersected with `region_ids` (rows from the `Region` tree) and/or `custom_areas` (user-drawn circles stored as JSONB). `ImageSet#filtered?` is the predicate; `#effective_items` returns either the directly-owned items (regular sets) or the materialized items (filtered sets). `#materialize_filtered_items!` runs the point-in-polygon match and persists the result; `RematerializeFilteredSetsJob` is enqueued asynchronously whenever the parent changes (add_image, remove_item, locations update) so children stay in sync.
 
 ## Routes (high-level)
 
@@ -105,15 +117,21 @@ The `Image.visible_to(user)` scope (in `app/models/image.rb`) is the canonical w
 |---|---|
 | `/` | Landing page; primary CTA = "Start new game" on the system-default set |
 | `/registration/new`, `/session/new`, `/passwords/new` | Sign up, sign in, password reset |
-| `/profile` | Current user's profile |
+| `/auth/google_oauth2`, `/auth/google_oauth2/callback` | OAuth sign-in entry + callback |
+| `/profile/setup_username` | Where OAuth-created users pick a username before they can do anything else |
+| `/profile` | Current user's profile (also exposes account deletion — `DELETE /profile`) |
 | `/games` | Paginated list of your games (filter by status, sort by date or score) |
 | `/games/:id` | Play the next round of an in-progress game |
 | `/games/:id/results` | Per-round breakdown + summary map after game finishes |
 | `/games/leaderboard?image_set_id=N` | Top-20 leaderboard scoped to an image set |
 | `/image_sets` | Your sets + the public catalog |
 | `/image_sets/:id` | Read-only gallery view of a set |
-| `/image_sets/:id/locations` | Owner-only: upload, edit titles/coords, remove items |
+| `/image_sets/:id/locations` | Owner-only: upload, edit titles/coords, remove items (rejected for filtered sets — edit the filter instead) |
 | `/image_sets/:id/map` | Map of all located images in a set |
+| `/image_sets/:id/new_filtered`, `/edit_filter`, `/update_filter`, `/preview_filter_count` | Build/edit a filtered set: pick regions, draw circle areas, live-preview match count |
+| `/regions/search.json?q=...` | Typeahead region search (trigram + diacritic-folded; ranks by population, similarity, optional map-center distance) |
+| `/regions/boundaries.json?ids[]=...` | Batch GeoJSON for selected regions; lazy-fetches missing polygons from Nominatim |
+| `/regions/resolve.json` | POST a Nominatim candidate (from the JS-side reverse geocode) → find-or-create the region row + ancestors |
 | `/images`, `/images/map` | Paginated images list / world map (admins see all; everyone else sees `Image.visible_to`) |
 | `/images/:id` | Image detail: photo (scroll-zoom), edit form (anyone owning a set with the image), set memberships, "Open in Google Maps" |
 | `/practice` | Single-image guessing without saving a game (no auth required) |
@@ -148,11 +166,16 @@ heroku addons:create heroku-postgresql:essential-0
 heroku buildpacks:add --index 1 heroku-community/apt   # pulls libvips42 via Aptfile
 heroku buildpacks:add heroku/ruby
 heroku config:set AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... S3_BUCKET=... AWS_REGION=...
+heroku config:set GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=...   # required for Sign in with Google in prod
 heroku config:set MALLOC_ARENA_MAX=2 ACTIVE_JOB_ASYNC_MAX_THREADS=1   # caps glibc heap fragmentation + concurrent libvips decodes; needed on 512MB dynos
 git push heroku main:main
-heroku run rails db:migrate db:seed
-heroku run rails console   # then: User.find_by(email_address: "...").update!(admin: true)
+# `Procfile` runs `release: bundle exec rails db:migrate` automatically on every deploy — no manual migrate step.
+heroku run rails db:seed                  # one-time: ~1400 Wikidata images
+heroku run rake regions:seed_all          # one-time, ~10 min: GeoNames regions tree (needed for filtered-set creation)
+heroku run rails console                  # then: User.find_by(email_address: "...").update!(admin: true)
 ```
+
+`config.force_ssl` + `assume_ssl` are on in production. Heroku terminates TLS at the router and forwards HTTP to the dyno; `assume_ssl` makes Rails see the original scheme so cookies are marked `Secure` and HSTS is sent.
 
 ### Background-processing caveats (`:async` queue)
 
@@ -160,6 +183,8 @@ Image conversion (HEIC -> JPEG, resize, ICC) runs in `ProcessImageJob` via Activ
 
 - `bin/rails images:reprocess_pending` — re-enqueue any Image whose attached blob isn't yet processed (idempotent — finished images skip themselves).
 - `bin/rails images:purge_unattached[hours]` — delete S3 blobs that were direct-uploaded but never attached (e.g. user closed the tab mid-upload). Default is 24h.
+
+`RematerializeFilteredSetsJob` is queued on the same `:async` adapter when a parent set's images change, so a deploy mid-edit can leave child filtered sets stale until the next parent mutation. Acceptable for now (the materialization runs anyway the next time someone clicks Save on the filter); revisit if it becomes noticeable.
 
 If milestone-2 needs jobs to survive restarts, swap `:async` for `solid_queue` (Rails 8 built-in, DB-backed; ~30 min including Puma plugin so no separate worker dyno is needed).
 

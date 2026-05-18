@@ -2,23 +2,18 @@ class Image < ApplicationRecord
   has_one_attached :photo
   has_many :guesses, dependent: :destroy
   has_many :game_images, dependent: :destroy
+  has_many :challenge_images, dependent: :destroy
   has_many :image_set_items, dependent: :destroy
   has_many :image_sets, through: :image_set_items
 
   # Images visible to a given user: only those that live in at least one
-  # set the user is allowed to see (system_default, public, or owned).
-  # Pass nil for the unauthenticated case — they see only system_default
-  # and public sets.
+  # set the user is allowed to see. Pass nil for the unauthenticated case.
   scope :visible_to, ->(user) {
-    joins(:image_sets).merge(
-      ImageSet.where(is_system_default: true)
-              .or(ImageSet.where(visibility: "public"))
-              .or(ImageSet.where(user_id: user&.id))
-    ).distinct
+    joins(:image_sets).merge(ImageSet.visible_to(user)).distinct
   }
 
   def visible_to?(user)
-    image_sets.any? { |s| s.is_system_default? || s.visibility == "public" || s.user_id == user&.id }
+    image_sets.any? { |s| s.playable_by?(user) }
   end
 
   # An image is editable by anyone who owns at least one set containing
@@ -58,6 +53,7 @@ class Image < ApplicationRecord
   def purge_if_orphan!
     return if image_set_items.exists?
     return if game_images.exists?
+    return if challenge_images.exists?
     return if guesses.exists?
     destroy
   end

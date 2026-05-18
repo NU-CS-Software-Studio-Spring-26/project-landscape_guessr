@@ -1,5 +1,6 @@
 class ImagesController < ApplicationController
   allow_unauthenticated_access only: %i[ index show map ]
+  skip_before_action :require_email_verified, only: %i[ index show map ]
   before_action :require_admin,    only: %i[ new create destroy ]
   before_action :set_image,        only: %i[ show edit update destroy ]
   before_action :require_editable, only: %i[ edit update ]
@@ -16,12 +17,7 @@ class ImagesController < ApplicationController
   def map
     images = (admin? ? Image.all : Image.visible_to(Current.user)).with_attached_photo
     @image_data = images.map do |img|
-      display_url = if img.photo.attached?
-        url_for(img.photo)
-      elsif img.url.present?
-        img.url
-      end
-      { id: img.id, lat: img.latitude.to_f, lng: img.longitude.to_f, title: img.title, url: display_url }
+      { id: img.id, lat: img.latitude.to_f, lng: img.longitude.to_f, title: img.title, url: view_context.image_src(img) }
     end
   end
 
@@ -118,12 +114,8 @@ class ImagesController < ApplicationController
       redirect_to @image, alert: "You don't have permission to edit this image."
     end
 
-    # Sets that the current viewer is allowed to see — same rule as
-    # Image#visible_to: system_default, public, or owned by the user.
+    # Sets the current viewer is allowed to see. Admin bypasses the scope.
     def visible_image_sets
-      return ImageSet.all if admin?
-      ImageSet.where(is_system_default: true)
-              .or(ImageSet.where(visibility: "public"))
-              .or(ImageSet.where(user_id: Current.user&.id))
+      admin? ? ImageSet.all : ImageSet.visible_to(Current.user)
     end
 end
