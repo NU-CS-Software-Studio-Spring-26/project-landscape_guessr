@@ -15,15 +15,30 @@
     turbo:before-cache so neither the snapshot nor a soft reload
     surfaces stale text. %>
 <%= form_with url: ai_generate_image_sets_path, local: true,
-      data: { controller: "ai-form-loading", action: "submit->ai-form-loading#submit" },
+      data: {
+        controller: "ai-form-loading character-limit",
+        action: "submit->ai-form-loading#submit",
+        character_limit_max_value: AiPromptValidator::MAX_LENGTH
+      },
       html: { autocomplete: "off" },
       class: "space-y-3" do |f| %>
-  <div>
-    <label class="text-sm font-medium text-forest-900">
-      <%= conversation.any? ? "Refine your request" : "Describe your image set" %>
-    </label>
-    <%= text_area_tag :user_message, "", class: "form-input", rows: 3, autocomplete: "off",
-          placeholder: conversation.any? ? "e.g. focus only on Hokkaido, or include extinct ones" : "e.g. waterfalls in Norway" %>
+  <div class="space-y-1.5">
+    <div class="flex items-baseline justify-between gap-3">
+      <label for="user_message" class="text-sm font-medium text-forest-900">
+        <%= conversation.any? ? "Refine your request" : "Describe your image set" %>
+      </label>
+      <span data-character-limit-target="counter"
+            class="text-sm font-medium tabular-nums text-forest-700 shrink-0"
+            aria-live="polite">0 / <%= AiPromptValidator::MAX_LENGTH %></span>
+    </div>
+    <%= text_area_tag :user_message, "", id: "user_message", class: "form-input", rows: 3, autocomplete: "off",
+          maxlength: AiPromptValidator::MAX_LENGTH,
+          placeholder: conversation.any? ? "e.g. focus only on Hokkaido, or include extinct ones" : "e.g. waterfalls in Norway",
+          data: {
+            character_limit_target: "input",
+            action: "input->character-limit#update"
+          } %>
+    <p class="muted text-xs">Keep it family-friendly.</p>
   </div>
   <%= hidden_field_tag :conversation_json, conversation.to_json %>
   <div class="flex justify-end items-center gap-3">
