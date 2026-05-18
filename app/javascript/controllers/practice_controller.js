@@ -9,6 +9,8 @@ const HINT_CIRCLE_LEGACY_RADIUS_KM = 4000
 const HINT_VISUAL_TIERS = [ 1, 2, 3 ]
 const HINT_VISUAL_POLL_MS = 2000
 const HINT_VISUAL_POLL_MAX_ATTEMPTS = 30
+const AI_HINT_UNAVAILABLE_MESSAGE =
+  "AI hints are unavailable at the moment; we're fixing the issue."
 const AI_HINT_CREDITS_NOTE =
   " This may also mean today's AI hint credits are used up (Google Gemini free tier)."
 const CONTINENT_BY_COUNTRY_CODE = Object.freeze({
@@ -790,7 +792,7 @@ export default class extends Controller {
 
   async #showVisualHint() {
     if (!this.hasHintUrlValue) {
-      this.hintVisualMessage = "AI hints are not available."
+      this.hintVisualMessage = AI_HINT_UNAVAILABLE_MESSAGE
       this.#syncHintUi()
       return
     }
@@ -872,9 +874,7 @@ export default class extends Controller {
     if (requestId !== this.#hintVisualRequestId || this.hintType !== "visual") return
 
     if (attempt >= HINT_VISUAL_POLL_MAX_ATTEMPTS) {
-      this.hintVisualMessage = this.#withAiCreditsNotice(
-        "Hint is taking longer than expected. Try again in a moment."
-      )
+      this.hintVisualMessage = AI_HINT_UNAVAILABLE_MESSAGE
       this.#syncHintUi()
       return
     }
@@ -927,7 +927,7 @@ export default class extends Controller {
   }
 
   #visualHintErrorMessage(error) {
-    if (error === "disabled") return "AI hints are not available."
+    if (error === "disabled" || error === "network") return AI_HINT_UNAVAILABLE_MESSAGE
     if (error === "not_found") {
       return this.#withAiCreditsNotice("Couldn't load AI hint for this image.")
     }
@@ -936,7 +936,9 @@ export default class extends Controller {
 
   #withAiCreditsNotice(message) {
     const text = String(message || "").trim()
-    if (!text || /credits|quota|Gemini|Daily AI hint limit/i.test(text)) return text
+    if (!text || /credits|quota|Gemini|Daily AI hint limit|unavailable at the moment/i.test(text)) {
+      return text
+    }
     return `${text}${AI_HINT_CREDITS_NOTE}`
   }
 

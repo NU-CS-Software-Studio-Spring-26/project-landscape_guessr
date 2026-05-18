@@ -412,8 +412,7 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
     body = JSON.parse(response.body)
     assert_equal "failed", body["status"]
-    assert_includes body["error"], "Couldn't generate"
-    assert_includes body["error"], "credits"
+    assert_equal AiHintPublicError::UNAVAILABLE_MESSAGE, body["error"]
     assert_equal "failed", image_ai_hints(:two_tier_1).reload.status
     refute_hint_coordinate_leak(body)
   end

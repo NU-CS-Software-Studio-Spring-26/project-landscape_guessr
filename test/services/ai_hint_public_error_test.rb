@@ -10,8 +10,18 @@ class AiHintPublicErrorTest < ActiveSupport::TestCase
     assert_not_includes message, AiHintPublicError::CREDITS_NOTE
   end
 
+  test "gemini connection failure shows unavailable message" do
+    message = AiHintPublicError.message("Gemini HTTP 503: service unavailable")
+    assert_equal AiHintPublicError::UNAVAILABLE_MESSAGE, message
+  end
+
+  test "timeout failure shows unavailable message" do
+    message = AiHintPublicError.message("Net::ReadTimeout with #<TCPSocket")
+    assert_equal AiHintPublicError::UNAVAILABLE_MESSAGE, message
+  end
+
   test "generic failure includes credits note" do
-    message = AiHintPublicError.message("API timeout")
+    message = AiHintPublicError.message("unexpected internal error")
     assert_includes message, "Try again"
     assert_includes message, "credits"
   end
