@@ -73,6 +73,46 @@ To manage the image library or edit past guesses through the UI, you need an adm
 
 Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env` (loaded by `dotenv-rails` in dev). Get them from Google Cloud Console → Google Auth Platform → Clients → Web application; add `http://localhost:3000/auth/google_oauth2/callback` as an authorized redirect URI. Without them, the "Sign in with Google" button errors but password sign-in still works.
 
+### AI practice hints (optional)
+
+AI-generated visual hints for practice mode use the [Gemini API](https://ai.google.dev/). This is separate from Google OAuth sign-in credentials.
+
+1. Create an API key at [Google AI Studio](https://aistudio.google.com/apikey) (sign in with a Google account; no Cloud project required for the free tier).
+2. Copy `.env.example` to `.env` (or add to your existing `.env`) and set:
+
+| Variable | Required | Default | Purpose |
+|---|---|---|---|
+| `GEMINI_API_KEY` | When hints are on | — | API key from AI Studio |
+| `GEMINI_MODEL` | No | `gemini-2.5-flash-lite` | Model id sent to the Gemini API |
+| `AI_HINTS_ENABLED` | No | off | Set to `1` (or `true`) to enable when a key is present |
+
+The app boots fine without these variables. `GeminiConfig.enabled?` is `true` only when `AI_HINTS_ENABLED` is truthy **and** `GEMINI_API_KEY` is set. Later phases call the API only when enabled.
+
+Billing and rate limits follow [Google AI pricing](https://ai.google.dev/pricing) for your key; the free tier applies unless you upgrade the project. See [AI Studio rate limits](https://ai.google.dev/gemini-api/docs/rate-limits) for RPM/TPM caps — pre-generate hints with the backfill task so practice mostly reads the cache. Concurrent practice users rarely hit the API unless many request uncached hints at once. Do not commit API keys — use `.env` locally and `heroku config:set` in production.
+
+**Backfill cached hints** (optional, after enabling Gemini): enqueue `GenerateAiHintJob` for located images in the default set, throttled for free-tier RPM. Skips rows already `ready` at the current prompt version or `pending`.
+
+```bash
+# tier 1, first 100 images, 4s between enqueues (~15 RPM)
+bin/rails "images:generate_ai_hints[1,100,4]"
+
+# all default-set images, tier 1, default 4s sleep (~93 min for ~1400 images)
+bin/rails "images:generate_ai_hints[1,,4]"
+
+# every located image (not only the default set)
+SCOPE=all bin/rails "images:generate_ai_hints[2]"
+
+bin/rails images:generate_ai_hints:stats
+```
+
+On Heroku (quote the task name so the shell does not glob brackets):
+
+```bash
+heroku run 'rails images:generate_ai_hints[1,100,4]'
+```
+
+Run a worker dyno or `bin/jobs` locally so enqueued jobs actually execute.
+
 ### S3 / Active Storage setup (for user uploads)
 
 User-uploaded images go through Active Storage's direct-upload flow. Development defaults to local disk (`storage/`) — no AWS setup required. Production uses S3.
@@ -167,6 +207,7 @@ heroku buildpacks:add --index 1 heroku-community/apt   # pulls libvips42 via Apt
 heroku buildpacks:add heroku/ruby
 heroku config:set AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... S3_BUCKET=... AWS_REGION=...
 heroku config:set GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=...   # required for Sign in with Google in prod
+heroku config:set GEMINI_API_KEY=... AI_HINTS_ENABLED=1             # optional: AI practice hints
 heroku config:set MALLOC_ARENA_MAX=2 ACTIVE_JOB_ASYNC_MAX_THREADS=1   # caps glibc heap fragmentation + concurrent libvips decodes; needed on 512MB dynos
 git push heroku main:main
 # `Procfile` runs `release: bundle exec rails db:migrate` automatically on every deploy — no manual migrate step.

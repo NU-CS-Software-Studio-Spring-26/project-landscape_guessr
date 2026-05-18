@@ -22,12 +22,17 @@
     </div>
 
     <%# Quick access cards %>
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
       <% [
         { label: "My Games",   sub: "View past results",    path: games_path },
         { label: "Challenges", sub: "Play against friends",  path: challenges_path },
-        { label: "Practice",   sub: "No saving, just play", path: practice_path },
-        { label: "Image Sets", sub: "Browse & manage sets", path: image_sets_path }
+        { label: "Practice",   sub: "Quick rounds + saved mistakes", path: practice_path },
+        { label: "Image Sets", sub: "Browse & manage sets", path: image_sets_path },
+        {
+          label: "Saved for Practice Set",
+          sub: "Practice your saved mistakes",
+          path: (@saved_practice_set.present? ? practice_path(practice_set_id: @saved_practice_set.id) : practice_saved_path)
+        }
       ].each do |item| %>
         <%= link_to item[:path],
               class: "card px-5 py-6 hover:shadow-md hover:border-forest-200 transition-all group" do %>

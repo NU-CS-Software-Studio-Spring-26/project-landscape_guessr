@@ -52,7 +52,12 @@ Rails.application.routes.draw do
   end
   get  "practice",       to: "practice#show"
   get  "practice/check", to: "practice#check", as: :practice_check
-  get  "scoring",        to: "home#scoring", as: :scoring
+  get  "practice/hint", to: "practice#hint", as: :practice_hint
+  get  "practice/saved", to: "practice#saved", as: :practice_saved
+  get  "practice/complete", to: "practice#complete", as: :practice_complete
+  post "practice/save",  to: "practice#save", as: :practice_save
+  delete "practice/save/:image_id", to: "practice#unsave", as: :practice_unsave
+  get "scoring",        to: "home#scoring", as: :scoring
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.

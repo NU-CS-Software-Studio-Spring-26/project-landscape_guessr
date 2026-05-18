@@ -12,31 +12,28 @@
      data-action="guess-map:pinned->practice#pinChanged"
      data-practice-image-id-value="<%= @image.id %>"
      data-practice-check-url-value="<%= practice_check_path %>"
+     <% if @ai_hints_enabled %>
+     data-practice-hint-url-value="<%= practice_hint_path %>"
+     data-practice-hint-quota-used-value="<%= @ai_hint_quota_used %>"
+     data-practice-hint-quota-limit-value="<%= AiHintDailyQuota::LIMIT %>"
+     <% end %>
      data-practice-time-limit-value="<%= @time_limit_seconds.to_i %>"
      data-practice-attempts-value="<%= @attempts.to_i %>"
+     data-practice-hint-circle-value="<%= @hint_circle_enabled ? true : false %>"
+     data-practice-signed-in-value="<%= authenticated? %>"
+     data-practice-initially-saved-value="<%= @saved_for_practice ? true : false %>"
+     <% if @practice_set_progress %>
+     data-practice-practice-set-id-value="<%= @practice_set.id %>"
+     <% end %>
      class="w-full space-y-6">
 
   <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-    <h1 class="heading-page">Where is this?</h1>
-    <div class="flex flex-wrap items-center gap-2 text-xs text-gray-500">
-      <span>Timer:</span>
-      <button type="button"
-              data-practice-target="timerOption"
-              data-action="practice#setTimer"
-              data-practice-seconds-param="0"
-              aria-pressed="<%= @time_limit_seconds.nil? %>"
-              class="rounded-full border px-2.5 py-1 font-medium transition-colors cursor-pointer <%= @time_limit_seconds.nil? ? 'bg-blue-100 text-blue-800 border-blue-300 shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' %>">
-        Off
-      </button>
-      <% [30, 60, 120].each do |seconds| %>
-        <button type="button"
-                data-practice-target="timerOption"
-                data-action="practice#setTimer"
-                data-practice-seconds-param="<%= seconds %>"
-                aria-pressed="<%= @time_limit_seconds == seconds %>"
-                class="rounded-full border px-2.5 py-1 font-medium transition-colors cursor-pointer <%= @time_limit_seconds == seconds ? 'bg-blue-100 text-blue-800 border-blue-300 shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' %>">
-          <%= seconds %>s
-        </button>
+    <div>
+      <h1 class="heading-page">Where is this?</h1>
+      <% if @practice_set_progress %>
+        <p class="text-sm text-gray-500 mt-1">
+          Saved practice set · <%= @practice_set_progress.position_label %>
+        </p>
       <% end %>
     </div>
   </div>
@@ -49,10 +46,157 @@
               data-action="practice#setAttempts"
               data-practice-attempts-param="<%= attempts %>"
               aria-pressed="<%= @attempts == attempts %>"
-              class="rounded-full border px-2.5 py-1 font-medium transition-colors cursor-pointer <%= @attempts == attempts ? 'bg-blue-100 text-blue-800 border-blue-300 shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' %>">
+              class="<%= @attempts == attempts ? 'btn-primary' : 'btn-secondary' %> text-sm py-1.5 px-3">
         <%= attempts %>
       </button>
     <% end %>
+
+    <div class="ml-auto flex flex-wrap items-center gap-2">
+      <span>Timer:</span>
+      <button type="button"
+              data-practice-target="timerOption"
+              data-action="practice#setTimer"
+              data-practice-seconds-param="0"
+              aria-pressed="<%= @time_limit_seconds.nil? %>"
+              class="<%= @time_limit_seconds.nil? ? 'btn-primary' : 'btn-secondary' %> text-sm py-1.5 px-3">
+        Off
+      </button>
+      <% [30, 60, 120].each do |seconds| %>
+        <button type="button"
+                data-practice-target="timerOption"
+                data-action="practice#setTimer"
+                data-practice-seconds-param="<%= seconds %>"
+                aria-pressed="<%= @time_limit_seconds == seconds %>"
+                class="<%= @time_limit_seconds == seconds ? 'btn-primary' : 'btn-secondary' %> text-sm py-1.5 px-3">
+          <%= seconds %>s
+        </button>
+      <% end %>
+    </div>
+  </div>
+
+  <div class="flex items-center gap-2 text-xs text-gray-500 min-h-14 overflow-x-auto whitespace-nowrap">
+    <span class="shrink-0">Hint type:</span>
+    <button type="button"
+            data-practice-target="hintTypeOption"
+            data-action="practice#setHintType"
+            data-practice-type-param="off"
+            aria-pressed="true"
+            class="btn-primary text-sm py-1.5 px-3 shrink-0">
+      Off
+    </button>
+    <button type="button"
+            data-practice-target="hintTypeOption"
+            data-action="practice#setHintType"
+            data-practice-type-param="radius"
+            aria-pressed="false"
+            class="btn-secondary text-sm py-1.5 px-3 shrink-0">
+      Circle radius
+    </button>
+    <button type="button"
+            data-practice-target="hintTypeOption"
+            data-action="practice#setHintType"
+            data-practice-type-param="location"
+            aria-pressed="false"
+            class="btn-secondary text-sm py-1.5 px-3 shrink-0">
+      Location
+    </button>
+    <% if @ai_hints_enabled %>
+    <button type="button"
+            data-practice-target="hintTypeOption"
+            data-action="practice#setHintType"
+            data-practice-type-param="visual"
+            aria-pressed="false"
+            class="btn-secondary text-sm py-1.5 px-3 shrink-0">
+      AI hint
+    </button>
+    <span data-practice-target="hintQuota"
+          title="New AI hints started today"
+          class="text-xs font-medium text-gray-500 tabular-nums shrink-0">
+      (<%= @ai_hint_quota_used %>/<%= AiHintDailyQuota::LIMIT %>)
+    </span>
+    <% end %>
+
+    <div data-practice-target="hintRadiusPanel" class="hidden ml-2 flex items-center gap-2 shrink-0">
+      <span class="shrink-0">Radius:</span>
+      <button type="button"
+              data-practice-target="hintRadiusNoHintButton"
+              data-action="practice#toggleHintRadiusNoHint"
+              aria-pressed="true"
+              class="btn-primary text-sm py-1.5 px-3 shrink-0">
+        No hint
+      </button>
+      <div class="inline-flex items-center rounded-lg border border-forest-200 bg-white shadow-sm px-3 py-2">
+        <input type="range"
+               min="500"
+               max="5000"
+               step="50"
+               value="5000"
+               data-practice-target="hintRadiusSlider"
+               data-action="input->practice#setHintRadius"
+               class="w-96 sm:w-[28rem] cursor-pointer accent-forest-600" />
+      </div>
+      <span data-practice-target="hintRadiusValue" class="min-w-20 text-right font-medium text-forest-800"><%= @hint_circle_enabled ? "4000 km" : "No hint" %></span>
+    </div>
+
+    <div data-practice-target="hintLocationPanel" class="hidden ml-2 flex items-center gap-2 shrink-0">
+      <span class="shrink-0">Location hint:</span>
+      <button type="button"
+              data-practice-target="hintLocationOption"
+              data-action="practice#setHintLocationLevel"
+              data-practice-level-param="none"
+              aria-pressed="true"
+              class="btn-primary text-sm py-1.5 px-3 shrink-0">
+        No hint
+      </button>
+      <button type="button"
+              data-practice-target="hintLocationOption"
+              data-action="practice#setHintLocationLevel"
+              data-practice-level-param="continent"
+              aria-pressed="false"
+              class="btn-secondary text-sm py-1.5 px-3 shrink-0">
+        Continent
+      </button>
+      <button type="button"
+              data-practice-target="hintLocationOption"
+              data-action="practice#setHintLocationLevel"
+              data-practice-level-param="country"
+              aria-pressed="false"
+              class="btn-secondary text-sm py-1.5 px-3 shrink-0">
+        Country
+      </button>
+    </div>
+
+    <% if @ai_hints_enabled %>
+    <div data-practice-target="hintVisualPanel" class="hidden ml-2 flex items-center gap-2 shrink-0">
+      <span class="shrink-0">AI hint:</span>
+      <button type="button"
+              data-practice-target="hintVisualOption"
+              data-action="practice#setHintVisualTier"
+              data-practice-tier-param="1"
+              aria-pressed="true"
+              class="btn-primary text-sm py-1.5 px-3 shrink-0">
+        Subtle
+      </button>
+      <button type="button"
+              data-practice-target="hintVisualOption"
+              data-action="practice#setHintVisualTier"
+              data-practice-tier-param="2"
+              aria-pressed="false"
+              class="btn-secondary text-sm py-1.5 px-3 shrink-0">
+        Medium
+      </button>
+      <button type="button"
+              data-practice-target="hintVisualOption"
+              data-action="practice#setHintVisualTier"
+              data-practice-tier-param="3"
+              aria-pressed="false"
+              class="btn-secondary text-sm py-1.5 px-3 shrink-0">
+        Strong
+      </button>
+    </div>
+    <% end %>
+
+    <span data-practice-target="hintReadout" class="hidden ml-2 text-sm font-medium text-forest-800 shrink-0"></span>
   </div>
 
   <div data-practice-target="timerPanel"
@@ -78,10 +222,15 @@
          data-zoomable-cap-width-value="<%= Image::ZOOM_CAP_WIDTH %>"
          class="space-y-1">
       <div data-zoomable-target="viewport"
-           class="max-h-[60vh] rounded-md border border-gray-200 overflow-hidden select-none">
-        <img src="<%= image_src(@image, width: Image::ZOOM_CAP_WIDTH) %>"
+           class="relative max-h-[60vh] rounded-md border border-gray-200 overflow-hidden select-none">
+        <img data-zoomable-target="image"
+             src="<%= image_src(@image, width: Image::ZOOM_CAP_WIDTH) %>"
              alt="Guess this location"
              class="max-w-full max-h-[60vh] block mx-auto" />
+        <div data-zoomable-target="loader"
+             class="absolute inset-0 z-10 flex items-center justify-center bg-white/70">
+          <div class="h-8 w-8 animate-spin rounded-full border-4 border-gray-300 border-t-blue-600"></div>
+        </div>
       </div>
       <div class="flex items-center justify-between gap-2 text-xs text-gray-500">
         <span>scroll to zoom · drag to pan · double-click to reset</span>
@@ -107,25 +256,49 @@
 
   <%# Controls %>
   <div class="flex items-center gap-4">
-    <button data-practice-target="guessBtn"
-            data-action="practice#submitGuess"
-            disabled
-            class="btn-primary disabled:opacity-40 disabled:cursor-not-allowed">
-      <%= @attempts == 2 ? "Submit first attempt" : "Submit guess" %>
-    </button>
-
-    <button data-practice-target="nextBtn"
-            data-action="practice#next"
-            class="btn-secondary hidden">
-      Next image
-    </button>
-
     <p data-practice-target="result" class="text-lg font-medium"></p>
 
-    <%= link_to "View image details", @image,
-          target: "_blank",
-          aria: { label: "View image details (opens in a new tab)" },
-          data: { practice_target: "imageLink" },
-          class: "hidden text-blue-600 hover:underline font-medium" %>
+    <div class="ml-auto flex items-center gap-4">
+      <button data-practice-target="guessBtn"
+              data-action="practice#submitGuess"
+              disabled
+              class="btn-primary disabled:opacity-40 disabled:cursor-not-allowed">
+        <%= @attempts == 2 ? "Submit first attempt" : "Submit guess" %>
+      </button>
+
+      <%= link_to "View image details", @image,
+            target: "_blank",
+            aria: { label: "View image details (opens in a new tab)" },
+            data: { practice_target: "imageLink" },
+            class: "btn-secondary hidden" %>
+
+      <% if authenticated? %>
+        <%= form_with url: practice_save_path, method: :post,
+              data: { practice_target: "saveForm", action: "submit->practice#saveForPractice" },
+              class: "hidden" do |f| %>
+          <%= f.hidden_field :image_id, value: @image.id %>
+          <%= f.hidden_field :seconds, value: @time_limit_seconds %>
+          <%= f.hidden_field :attempts, value: @attempts %>
+          <%= f.submit "Add to practice image set", class: "btn-secondary" %>
+        <% end %>
+
+        <%= form_with url: practice_unsave_path(@image.id), method: :delete,
+              data: { practice_target: "removeForm", action: "submit->practice#removeFromSaved" },
+              class: "hidden" do |f| %>
+          <%= f.hidden_field :seconds, value: @time_limit_seconds %>
+          <%= f.hidden_field :attempts, value: @attempts %>
+          <%= f.hidden_field :from_saved, value: params[:saved].present? ? 1 : nil %>
+          <%= f.submit "Remove from saved", class: "btn-secondary" %>
+        <% end %>
+
+        <p data-practice-target="saveStatus" class="hidden text-sm font-medium"></p>
+      <% end %>
+
+      <button data-practice-target="nextBtn"
+              data-action="practice#next"
+              class="btn-primary hidden">
+        Next image
+      </button>
+    </div>
   </div>
 </div>

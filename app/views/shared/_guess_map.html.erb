@@ -3,6 +3,10 @@
 <div data-controller="guess-map"
      data-guess-map-style-value="<%= local_assigns[:style] || 'outdoor-v2' %>"
      <% if local_assigns[:bbox] %>data-guess-map-bbox-value="<%= local_assigns[:bbox].to_json %>"<% end %>
-     class="<%= local_assigns[:class] || 'w-full h-[60vh]' %>">
+     class="<%= local_assigns[:class] || 'w-full h-[60vh]' %> relative">
   <div data-guess-map-target="container" class="w-full h-full rounded-md border border-gray-200"></div>
+  <div data-guess-map-target="loader"
+       class="absolute inset-0 z-10 flex items-center justify-center rounded-md bg-white/70">
+    <div class="h-8 w-8 animate-spin rounded-full border-4 border-gray-300 border-t-blue-600"></div>
+  </div>
 </div>
