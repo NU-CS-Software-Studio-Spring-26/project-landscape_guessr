@@ -58,7 +58,7 @@ module ActiveSupport
     # FK-safe order without .sort (Rails' fixtures helper sorts alphabetically,
     # which inserts game_images before games when RI cannot be disabled).
     FIXTURE_TABLE_NAMES = %w[
-      users image_sets images image_set_items
+      users regions image_sets images image_set_items
       games game_images guesses image_ai_hints
     ].freeze
     self.fixture_table_names = FIXTURE_TABLE_NAMES.dup
