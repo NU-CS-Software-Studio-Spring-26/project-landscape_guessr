@@ -123,4 +123,44 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
     assert_match(/locked.*default set/i, flash.now[:alert].to_s)
     assert_equal original_title, item.image.reload.title
   end
+
+  test "add_image creates item with validated https URL and coordinates" do
+    set = image_sets(:alice_private)
+    url = "https://example.com/unique-#{SecureRandom.hex(4)}.jpg"
+
+    assert_difference("ImageSetItem.count", 1) do
+      post add_image_image_set_path(set),
+           params: {
+             url: url, title: "New spot",
+             latitude: "46.2", longitude: "7.1"
+           },
+           headers: { "Referer" => locations_image_set_path(set) }
+    end
+
+    item = set.image_set_items.joins(:image).find_by!(images: { url: url })
+    assert_in_delta 46.2, item.latitude.to_f
+    assert_in_delta 7.1, item.longitude.to_f
+    assert_equal "New spot", item.image.title
+  end
+
+  test "add_image rejects http URL and missing coordinates" do
+    set = image_sets(:alice_private)
+
+    assert_no_difference("ImageSetItem.count") do
+      post add_image_image_set_path(set),
+           params: { url: "http://example.com/bad.jpg", title: "X" },
+           headers: { "Referer" => locations_image_set_path(set) }
+    end
+    assert_match(/https/i, flash[:alert])
+
+    assert_no_difference("ImageSetItem.count") do
+      post add_image_image_set_path(set),
+           params: {
+             url: "https://example.com/ok.jpg", title: "X",
+             latitude: "", longitude: "7.0"
+           },
+           headers: { "Referer" => locations_image_set_path(set) }
+    end
+    assert_match(/required/i, flash[:alert])
+  end
 end
