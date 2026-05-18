@@ -3,7 +3,14 @@
 
   <div class="space-y-1">
     <%= f.label :name, class: "block text-sm font-medium text-gray-700" %>
-    <%= f.text_field :name, class: field_class(image_set, :name), placeholder: "My Landscape Set" %>
+    <%= f.text_field :name,
+          class: field_class(image_set, :name),
+          placeholder: "My Landscape Set",
+          required: true,
+          minlength: ImageSet::NAME_MIN_LENGTH,
+          maxlength: ImageSet::NAME_MAX_LENGTH,
+          pattern: ImageSet::NAME_HTML_PATTERN,
+          title: "#{ImageSet::NAME_MIN_LENGTH}–#{ImageSet::NAME_MAX_LENGTH} characters. #{ImageSet::NAME_FORMAT_MESSAGE.capitalize}." %>
   </div>
 
   <div class="space-y-1">

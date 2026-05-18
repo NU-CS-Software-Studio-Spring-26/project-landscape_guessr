@@ -362,6 +362,7 @@ class PracticeController < ApplicationController
     user.image_sets.find_or_create_by!(name: ImageSet::SAVED_FOR_PRACTICE_NAME) do |set|
       set.visibility = "private"
       set.map_style = "outdoor-v2"
+      set.system_managed = true
     end
   end
 end

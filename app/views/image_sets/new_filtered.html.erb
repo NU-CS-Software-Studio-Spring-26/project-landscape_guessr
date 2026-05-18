@@ -26,7 +26,11 @@
              data-name-prefix="<%= @parent_set.name %>"
              data-action="input->region-filter#onNameEdit"
              class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-forest-500 focus:ring-forest-500"
-             required>
+             required
+             minlength="<%= ImageSet::NAME_MIN_LENGTH %>"
+             maxlength="<%= ImageSet::NAME_MAX_LENGTH %>"
+             pattern="<%= ImageSet::NAME_HTML_PATTERN %>"
+             title="<%= ImageSet::NAME_MIN_LENGTH %>–<%= ImageSet::NAME_MAX_LENGTH %> characters. <%= ImageSet::NAME_FORMAT_MESSAGE.capitalize %>.">
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">

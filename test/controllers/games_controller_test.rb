@@ -133,7 +133,7 @@ class GamesControllerTest < ActionDispatch::IntegrationTest
 
   test "create redirects saved for practice set to practice mode" do
     sign_in_as @alice
-    set = @alice.image_sets.create!(name: ImageSet::SAVED_FOR_PRACTICE_NAME, visibility: "private", map_style: "outdoor-v2")
+    set = @alice.image_sets.create!(name: ImageSet::SAVED_FOR_PRACTICE_NAME, visibility: "private", map_style: "outdoor-v2", system_managed: true)
     image = images(:one)
     set.image_set_items.create!(image: image, latitude: image.latitude, longitude: image.longitude)
 

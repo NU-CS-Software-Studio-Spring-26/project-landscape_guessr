@@ -24,7 +24,8 @@ class HomeControllerTest < ActionDispatch::IntegrationTest
     set = alice.image_sets.create!(
       name: ImageSet::SAVED_FOR_PRACTICE_NAME,
       visibility: "private",
-      map_style: "outdoor-v2"
+      map_style: "outdoor-v2",
+      system_managed: true
     )
 
     get root_url
