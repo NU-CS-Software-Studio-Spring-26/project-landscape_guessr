@@ -58,6 +58,74 @@
     </div>
   </div>
 
+  <%# AI-import progress banner. Polls /import_status until the job
+      hits "completed" or "failed", then reloads. The "X of Y" counter
+      hides during phases (fetching / looking_up_images) where we don't
+      yet know the total — sitting on "0 / ?" looks stuck even though
+      the job is making progress on the Wikidata/Wikipedia side. %>
+  <% if @image_set.import_in_progress? %>
+    <div class="rounded-xl border border-forest-200 bg-forest-50 px-6 py-5 space-y-3"
+         data-controller="ai-import-poll"
+         data-ai-import-poll-url-value="<%= import_status_image_set_path(@image_set) %>">
+      <p class="text-sm text-forest-800">
+        <span data-ai-import-poll-target="status">Starting import…</span>
+        <span class="muted hidden" data-counter>
+          (<span data-ai-import-poll-target="progress">0</span> /
+          <span data-ai-import-poll-target="total">?</span>)
+        </span>
+      </p>
+      <progress data-ai-import-poll-target="bar" value="0" max="100" class="w-full h-2"></progress>
+      <p class="muted text-xs">
+        This can take a minute or two for big sets. You can leave this page —
+        the import keeps running in the background.
+      </p>
+      <% if @image_set.owned_by?(Current.user) && @image_set.ai_query.present? %>
+        <%# Visible escape hatch for stuck imports — a Heroku dyno restart
+            or worker crash can leave us in fetching/looking_up_images/inserting
+            with nothing actually running. retry_import accepts any non-
+            completed state and is safe to spam (unique constraints on
+            images.url and image_set_items dedupe). %>
+        <%= button_to "Restart import", retry_import_image_set_path(@image_set),
+              method: :post, class: "btn-ghost text-xs",
+              data: { turbo_confirm: "Restart the import? Use this if it looks stuck." } %>
+      <% end %>
+    </div>
+  <% elsif @image_set.import_state == "failed" %>
+    <div class="rounded-xl border border-red-300 bg-red-50 px-6 py-5 space-y-3">
+      <p class="text-sm text-red-800 font-medium">Import failed</p>
+      <%# import_error contains the raw "#{class}: #{message}" — useful to
+          the owner for debugging, but leaks internal class names + paths
+          to anyone viewing a public failed set. Owner-only. %>
+      <% if @image_set.owned_by?(Current.user) %>
+        <p class="text-xs text-red-700"><%= @image_set.import_error.presence || "Unknown error" %></p>
+      <% end %>
+      <% if @image_set.owned_by?(Current.user) && @image_set.ai_query.present? %>
+        <%# Most failures here are transient (Wikidata 5xx, network blip).
+            run_query already retries 3× internally; this button covers
+            the case where Wikidata was down for >5s. Reuses ai_query
+            from the original creation — no re-prompting the AI, no
+            extra Gemini cost. %>
+        <%= button_to "Retry import", retry_import_image_set_path(@image_set),
+              method: :post, class: "btn-secondary text-sm" %>
+      <% end %>
+    </div>
+  <% elsif (failed = @image_set.import_warnings&.dig("failed_types")).present? && @image_set.owned_by?(Current.user) %>
+    <%# Partial-success: most categories imported but some failed at
+        WDQS (timeout, 5xx past retries). Owner-only — non-owners
+        don't need diagnostic noise, the set itself is fine to play. %>
+    <div class="rounded-xl border border-amber-300 bg-amber-50 px-6 py-4 space-y-3 text-sm">
+      <p class="font-medium text-amber-900">Import notes</p>
+      <p class="text-amber-800">
+        <strong><%= failed.size %></strong>
+        <%= "category".pluralize(failed.size) %> failed at Wikidata (timeout or 5xx):
+        <span class="font-mono text-xs"><%= failed.keys.join(", ") %></span>.
+        Retries often clear it on the second try.
+      </p>
+      <%= button_to "Retry import", retry_import_image_set_path(@image_set),
+            method: :post, class: "btn-secondary text-xs" %>
+    </div>
+  <% end %>
+
   <% if @total_items.zero? %>
     <div class="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-6 py-10 text-center space-y-3">
       <% if @image_set.filtered? %>
@@ -65,6 +133,8 @@
         <% if @image_set.owned_by?(Current.user) %>
           <%= link_to "Edit filter", edit_filter_image_set_path(@image_set), class: "btn-primary inline-block" %>
         <% end %>
+      <% elsif @image_set.import_in_progress? %>
+        <%# Banner above already explains; no extra empty-state needed. %>
       <% else %>
         <p class="text-gray-600">No images in this set yet.</p>
         <% if @image_set.owned_by?(Current.user) %>
@@ -84,6 +154,7 @@
     <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
       <% @items.each do |item| %>
         <%= link_to item.image,
+              data: { controller: "hide-broken-image" },
               class: "block rounded-md overflow-hidden border border-gray-200 hover:border-blue-300 transition" do %>
           <img src="<%= image_src(item.image, width: 400) %>" alt="<%= item.title.presence || 'Landscape image' %>"
                loading="lazy" decoding="async"

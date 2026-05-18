@@ -7,6 +7,7 @@ class User < ApplicationRecord
   has_many :image_sets, dependent: :destroy
   has_many :connected_services, dependent: :destroy
   has_many :challenges, foreign_key: :challenger_id, dependent: :destroy
+  has_many :ai_generations, dependent: :destroy
   has_many :saved_practice_items, class_name: "SavedPracticeImage", dependent: :destroy
   has_many :saved_practice_images, through: :saved_practice_items, source: :image
 

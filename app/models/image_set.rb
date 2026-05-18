@@ -32,6 +32,11 @@ class ImageSet < ApplicationRecord
   has_many :image_set_items, dependent: :delete_all
   has_many :images, through: :image_set_items
   has_many :games, dependent: :nullify
+  # Challenges have their own materialized challenge_images, so they
+  # can survive after the source set is deleted — just nil out the FK.
+  # Without this `dependent: :nullify`, deleting an image_set with any
+  # challenge attached raises PG::ForeignKeyViolation.
+  has_many :challenges, dependent: :nullify
   has_many :filtered_sets, class_name: "ImageSet", foreign_key: :parent_image_set_id, dependent: :destroy
 
   # MapTiler basemap styles available per set. Used by the guess /
@@ -41,6 +46,11 @@ class ImageSet < ApplicationRecord
   # (satellite, hybrid) sets. Adding more = same line + one option in
   # the form's select.
   MAP_STYLES = %w[outdoor-v2 streets-v2 bright-v2 topo-v2 satellite hybrid].freeze
+
+  # Games and challenges both run this many rounds. Defined here so the
+  # two controllers (and the round-picking method below) share one
+  # source — the value used to be duplicated in two places.
+  DEFAULT_ROUND_COUNT = 5
 
   before_validation :strip_name
 
@@ -97,8 +107,58 @@ class ImageSet < ApplicationRecord
     parent_image_set_id.present?
   end
 
+  # AI-import states that mean a background job is mid-flight (or just
+  # crashed and left us here). Centralized so the show view, the retry
+  # button gate, and any future caller stay in sync — duplicating the
+  # %w[...] list across views invariably drifts.
+  IMPORT_IN_PROGRESS_STATES = %w[pending importing fetching looking_up_images inserting].freeze
+
+  def import_in_progress?
+    IMPORT_IN_PROGRESS_STATES.include?(import_state)
+  end
+
   def effective_items
     image_set_items
+  end
+
+  # Pick `count` random items with reachable image URLs. Validates URLs
+  # via parallel HEAD-with-redirect — a broken Commons URL chain ends in
+  # 404, a working one in 200. ~300-500ms typical wall time for 5 URLs.
+  # When a URL fails, picks a replacement and re-validates. Capped at
+  # MAX_ATTEMPTS rounds of replacement so a wholly-broken set fails fast
+  # instead of looping. Moves the broken-image cost to game/challenge-
+  # start latency (where the user expects a brief wait) instead of
+  # mid-game disruption. Shared between GamesController#create and
+  # ChallengesController#create — same shape, same constraints.
+  PICK_MAX_ATTEMPTS = 3
+
+  def pick_reachable_items(count:)
+    kept     = []
+    rejected = []
+    attempts = 0
+    while kept.size < count && attempts < PICK_MAX_ATTEMPTS
+      attempts += 1
+      needed = count - kept.size
+      candidates = effective_items
+                     .with_usable_coords
+                     .where.not(image_id: kept.map(&:image_id) + rejected)
+                     .order(Arel.sql("RANDOM()"))
+                     .limit(needed * 2)
+                     .to_a
+      break if candidates.empty?
+
+      urls = candidates.filter_map { |c| c.image.url.presence }
+      reachable = ImageReachability.reachable(urls).to_set
+      candidates.each do |c|
+        if c.image.url.blank? || reachable.include?(c.image.url)
+          kept << c
+          break if kept.size >= count
+        else
+          rejected << c.image_id
+        end
+      end
+    end
+    kept
   end
 
   def effective_items_count

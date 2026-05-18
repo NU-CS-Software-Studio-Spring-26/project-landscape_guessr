@@ -1,0 +1,34 @@
+<%# Prompt / refinement form. Posts to ai_generate, which creates a new
+    AiGeneration and redirects to /ai_new?generation_id=N. The redirect
+    means Turbo's "must redirect" rule is satisfied (unlike the prior
+    inline-rerender flow), so `data: { turbo: false }` is no longer
+    needed.
+
+    The ai_form_loading controller still disables the button on submit
+    to cover the ~50ms gap between click and the redirect arriving —
+    after the redirect, the poll banner on the new page takes over
+    progress UI. %>
+<%# autocomplete="off" disables the browser's form-history restore,
+    which otherwise refills the textarea with the previously typed
+    value on back-navigation — independent of Turbo's snapshot cache.
+    ai-form-loading additionally resets the textarea on submit and on
+    turbo:before-cache so neither the snapshot nor a soft reload
+    surfaces stale text. %>
+<%= form_with url: ai_generate_image_sets_path, local: true,
+      data: { controller: "ai-form-loading", action: "submit->ai-form-loading#submit" },
+      html: { autocomplete: "off" },
+      class: "space-y-3" do |f| %>
+  <div>
+    <label class="text-sm font-medium text-forest-900">
+      <%= conversation.any? ? "Refine your request" : "Describe your image set" %>
+    </label>
+    <%= text_area_tag :user_message, "", class: "form-input", rows: 3, autocomplete: "off",
+          placeholder: conversation.any? ? "e.g. focus only on Hokkaido, or include extinct ones" : "e.g. waterfalls in Norway" %>
+  </div>
+  <%= hidden_field_tag :conversation_json, conversation.to_json %>
+  <div class="flex justify-end items-center gap-3">
+    <%= submit_tag(conversation.any? ? "Send" : "Generate",
+          class: "btn-primary cursor-pointer",
+          data: { ai_form_loading_target: "submit" }) %>
+  </div>
+<% end %>

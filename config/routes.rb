@@ -28,6 +28,11 @@ Rails.application.routes.draw do
     collection { get :map }
   end
   resources :image_sets do
+    collection do
+      get  :ai_new
+      post :ai_generate
+      post :ai_create
+    end
     member do
       get  :locations
       put  :locations, action: :update_locations
@@ -40,6 +45,8 @@ Rails.application.routes.draw do
       patch :update_filter
       get :preview_filter_count
       post :preview_filter_count, action: :preview_filter_count
+      get :import_status
+      post :retry_import
     end
     delete "items/:item_id", to: "image_sets#remove_item", as: :remove_item
   end
@@ -50,6 +57,12 @@ Rails.application.routes.draw do
       post :resolve
     end
   end
+  # AI-generation progress poll (read-only JSON). Lives outside the
+  # image_sets resource because an AiGeneration isn't tied to a specific
+  # set — it's the AI's PROPOSAL, before any ImageSet has been created.
+  get "/ai_generations/:id/status", to: "image_sets#ai_generation_status", as: :ai_generation_status
+  post "/ai_generations/:id/cancel", to: "image_sets#ai_generation_cancel", as: :ai_generation_cancel
+
   get  "practice",       to: "practice#show"
   get  "practice/check", to: "practice#check", as: :practice_check
   get  "practice/hint", to: "practice#hint", as: :practice_hint
