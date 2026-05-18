@@ -98,4 +98,17 @@
   .card {
     @apply bg-white rounded-2xl border border-forest-100 shadow-sm;
   }
+
+  /* ------------------------------------------------------------------
+     File upload (hidden native input + styled drop zone)
+  ------------------------------------------------------------------ */
+  .file-upload-dropzone {
+    @apply flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed
+           border-forest-200 bg-forest-50/60 px-6 py-8 text-center cursor-pointer
+           hover:border-forest-400 hover:bg-forest-50 transition-colors duration-150;
+  }
+  .peer:focus-visible + .file-upload-dropzone,
+  .file-upload-dropzone.file-upload-dropzone--active {
+    @apply border-forest-500 bg-forest-50 ring-2 ring-forest-200;
+  }
 }

@@ -176,25 +176,26 @@ class ImageSetsController < ApplicationController
   # store on S3 (Wikimedia, etc.). File uploads go through attach_blob
   # (direct-upload + ProcessImageJob), not here.
   def add_image
-    url = params[:url].to_s.strip
-    if url.empty?
-      redirect_back fallback_location: locations_image_set_path(@image_set), alert: "Please enter an image URL." and return
+    validation = ImageByUrlInputValidator.validate(params)
+    unless validation.ok?
+      redirect_back fallback_location: locations_image_set_path(@image_set), alert: validation.error and return
     end
 
-    title = params[:title].to_s.strip.presence || "Untitled"
-    lat   = params[:latitude].presence&.to_f
-    lng   = params[:longitude].presence&.to_f
+    image = Image.find_or_create_by!(url: validation.url) do |img|
+      img.title     = validation.title
+      img.latitude  = validation.latitude
+      img.longitude = validation.longitude
+    end
 
-    image = Image.find_or_create_by!(url: url) do |img|
-      img.title     = title
-      img.latitude  = lat
-      img.longitude = lng
+    # Legacy images at this URL may lack coords; backfill without touching other attrs.
+    if image.latitude.blank? || image.longitude.blank?
+      image.update!(latitude: validation.latitude, longitude: validation.longitude)
     end
 
     item = @image_set.image_set_items.find_or_initialize_by(image: image)
     if item.new_record?
-      item.latitude  = lat || image.latitude
-      item.longitude = lng || image.longitude
+      item.latitude  = validation.latitude
+      item.longitude = validation.longitude
       item.save!
       refresh_filtered_children
       redirect_back fallback_location: locations_image_set_path(@image_set), notice: "Image added to set."
