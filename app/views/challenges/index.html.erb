@@ -10,12 +10,48 @@
   <div class="card px-5 py-4 space-y-2">
     <p class="text-sm font-semibold text-forest-800">Have a friend's link?</p>
     <p class="muted text-xs">Paste their challenge link or 8-character code below.</p>
-    <form onsubmit="event.preventDefault(); var raw = this.querySelector('input').value.trim(); var token = raw.split('/').pop(); if (token) window.location = '/challenges/' + token;"
-          class="flex gap-2">
-      <input type="text" placeholder="Paste link or code (e.g. abc12345)"
-             class="form-input flex-1 mt-0" autocomplete="off">
-      <button type="submit" class="btn-secondary shrink-0">Go</button>
+    <form onsubmit="return handleChallengeJoin(event, this)" class="flex gap-2 flex-wrap">
+      <div class="flex gap-2 flex-1">
+        <input type="text" placeholder="Paste link or code (e.g. abc12345)"
+               class="form-input flex-1 mt-0" autocomplete="off"
+               oninput="validateChallengeJoin(this)">
+        <button type="submit" class="btn-secondary shrink-0">Go</button>
+      </div>
+      <p id="challenge-join-error" class="text-xs text-red-500 hidden w-full mt-0.5"></p>
     </form>
+    <script>
+      function extractChallengeToken(raw) {
+        if (/^[A-Za-z0-9]{8}$/.test(raw)) return raw;
+        var m = raw.match(/\/challenges\/([A-Za-z0-9]{8})(?:[?#].*)?$/);
+        return m ? m[1] : null;
+      }
+
+      function validateChallengeJoin(input) {
+        var raw = input.value.trim();
+        var error = document.getElementById('challenge-join-error');
+        if (!raw) { error.textContent = ''; error.classList.add('hidden'); return true; }
+        if (extractChallengeToken(raw)) { error.textContent = ''; error.classList.add('hidden'); return true; }
+        var msg;
+        if (raw.includes('/')) {
+          msg = 'Must be a full challenge link ending with /challenges/ followed by an 8-character code.';
+        } else {
+          msg = 'Code must be exactly 8 characters — you entered ' + raw.length + '.';
+        }
+        error.textContent = msg;
+        error.classList.remove('hidden');
+        return false;
+      }
+
+      function handleChallengeJoin(event, form) {
+        event.preventDefault();
+        var input = form.querySelector('input');
+        var raw = input.value.trim();
+        var token = extractChallengeToken(raw);
+        if (!token) { validateChallengeJoin(input); return false; }
+        window.location = '/challenges/' + token;
+        return false;
+      }
+    </script>
   </div>
 
   <% if @challenges.any? %>
