@@ -25,8 +25,9 @@
 
   <body class="font-sans antialiased bg-white text-forest-900 min-h-screen flex flex-col">
 
-    <header class="sticky top-0 z-20 bg-white/95 backdrop-blur-sm border-b border-forest-100"
-            data-controller="mobile-menu">
+    <header class="sticky top-0 z-20 bg-white/95 backdrop-blur-sm border-b border-forest-100 relative"
+            data-controller="mobile-menu"
+            data-action="keydown.esc@window->mobile-menu#closeOnEscape click@window->mobile-menu#closeOnOutside">
       <%# Desktop + mobile top bar %>
       <nav aria-label="Primary" class="container mx-auto px-5 h-14 flex justify-between items-center">
         <div class="flex items-center gap-6">
@@ -34,7 +35,6 @@
                 class: "font-display font-semibold text-forest-800 text-lg tracking-tight hover:text-forest-600 transition-colors" %>
           <%# Desktop nav links %>
           <div class="hidden sm:flex items-center gap-5">
-            <%= link_to "How scoring works", scoring_path, class: "text-sm text-forest-700 hover:text-forest-900 font-medium transition-colors" %>
             <% if authenticated? %>
               <%= link_to "Games",       games_path,      class: "text-sm text-forest-700 hover:text-forest-900 font-medium transition-colors" %>
               <%= link_to "Image Sets",  image_sets_path, class: "text-sm text-forest-700 hover:text-forest-900 font-medium transition-colors" %>
@@ -53,14 +53,19 @@
                     class: "btn-secondary text-sm py-1.5 px-3" %>
             <% else %>
               <%= link_to "Sign in",  new_session_path,      class: "btn-secondary text-sm py-1.5 px-3" %>
-              <%= link_to "Sign up",  new_registration_path, class: "btn-primary  text-sm py-1.5 px-3" %>
+              <%= link_to "Sign up",  new_registration_path, class: "btn-primary text-sm py-1.5 px-3" %>
             <% end %>
           </div>
 
           <%# Mobile hamburger %>
-          <button type="button" data-action="mobile-menu#toggle"
-                  class="sm:hidden p-2 rounded-lg text-forest-700 hover:bg-forest-50 transition-colors"
-                  aria-label="Toggle menu">
+          <button type="button"
+                  data-mobile-menu-target="toggleButton"
+                  data-action="mobile-menu#toggle"
+                  class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-forest-200 bg-white text-forest-700 hover:bg-forest-50 transition-colors cursor-pointer shadow-sm"
+                  aria-label="Toggle menu"
+                  aria-controls="mobile-primary-menu"
+                  aria-expanded="false">
+            <span class="text-xs font-semibold uppercase tracking-wide">Menu</span>
             <%# Hamburger icon %>
             <svg data-mobile-menu-target="hamburger" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
@@ -74,14 +79,17 @@
       </nav>
 
       <%# Mobile dropdown menu %>
-      <div data-mobile-menu-target="menu" class="hidden sm:hidden border-t border-forest-100 bg-white">
-        <div class="container mx-auto px-5 py-4 space-y-1">
+      <div id="mobile-primary-menu"
+           data-mobile-menu-target="menu"
+           class="hidden absolute right-5 top-[calc(100%+0.5rem)] w-72 max-w-[calc(100vw-2.5rem)] rounded-xl border border-forest-100 bg-white shadow-xl"
+           hidden>
+        <div class="px-4 py-3 space-y-1">
           <% if authenticated? %>
-            <%= link_to "How scoring works", scoring_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <%= link_to "Games",      games_path,      data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <%= link_to "Image Sets", image_sets_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <%= link_to "Challenges", challenges_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <%= link_to "Practice",   practice_path,   data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
+            <%= link_to "How scoring works", scoring_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <div class="pt-3 border-t border-forest-100 flex items-center justify-between">
               <%= link_to Current.user.username, profile_path,
                     data: { action: "mobile-menu#close" },
@@ -90,11 +98,12 @@
                     class: "btn-secondary text-sm py-1.5 px-3" %>
             </div>
           <% else %>
-            <%= link_to "Sign in",  new_session_path,      data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
-            <%= link_to "How scoring works", scoring_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
+            <%= link_to "Sign in",  new_session_path,      data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-600 hover:text-forest-800 underline underline-offset-2 transition-colors" %>
+            <%= link_to "Practice", practice_path,         data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <%= link_to "About",    about_path,            data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
+            <%= link_to "How scoring works", scoring_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <div class="pt-3">
-              <%= link_to "Sign up free", new_registration_path, class: "btn-primary w-full text-center block" %>
+              <%= link_to "Sign up", new_registration_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-600 hover:text-forest-800 underline underline-offset-2 transition-colors" %>
             </div>
           <% end %>
         </div>

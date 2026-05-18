@@ -41,4 +41,41 @@ namespace :images do
     end
     puts "[images:mark_legacy_processed] marked #{fixed} JPEG blob(s) as processed (out of #{scope.count})"
   end
+
+  desc <<~DESC.squish
+    Pre-generate cached AI hints for located images (default: system default ImageSet;
+    SCOPE=all for every located image). Args: tier (1–3, required), limit (optional),
+    sleep_seconds (default 4, ~15 RPM on Gemini free tier). Idempotent — skips ready
+    hints at the current prompt version and pending rows. ~1400 images × 4s ≈ 93 min/tier.
+  DESC
+  task :generate_ai_hints, %i[tier limit sleep_seconds] => :environment do |_t, args|
+    tier = args[:tier].to_i
+    unless ImageAiHint::TIERS.include?(tier)
+      abort "[images:generate_ai_hints] tier is required and must be 1, 2, or 3"
+    end
+
+    limit = args[:limit].presence&.to_i
+    sleep_seconds = args[:sleep_seconds].presence&.to_f || 4.0
+
+    result = AiHintsBackfill.run(
+      tier: tier,
+      limit: limit,
+      sleep_seconds: sleep_seconds,
+      scope: ENV["SCOPE"]
+    )
+    puts "[images:generate_ai_hints] tier=#{tier} enqueued #{result.enqueued}, skipped #{result.skipped}"
+  rescue AiHintsBackfill::Disabled => e
+    warn "[images:generate_ai_hints] #{e.message}"
+    exit 1
+  end
+
+  namespace :generate_ai_hints do
+    desc "Count image_ai_hints rows by tier and status (ready / pending / failed)"
+    task stats: :environment do
+      AiHintsBackfill.stats.each do |tier, statuses|
+        puts "[images:generate_ai_hints:stats] tier #{tier}: " \
+             "ready=#{statuses['ready']} pending=#{statuses['pending']} failed=#{statuses['failed']}"
+      end
+    end
+  end
 end

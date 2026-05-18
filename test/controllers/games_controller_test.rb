@@ -131,6 +131,19 @@ class GamesControllerTest < ActionDispatch::IntegrationTest
     assert game.image_set.is_system_default?
   end
 
+  test "create redirects saved for practice set to practice mode" do
+    sign_in_as @alice
+    set = @alice.image_sets.create!(name: ImageSet::SAVED_FOR_PRACTICE_NAME, visibility: "private", map_style: "outdoor-v2")
+    image = images(:one)
+    set.image_set_items.create!(image: image, latitude: image.latitude, longitude: image.longitude)
+
+    assert_no_difference("Game.count") do
+      post games_url, params: { image_set_id: set.id }
+    end
+
+    assert_redirected_to practice_path(practice_set_id: set.id)
+  end
+
   test "create game uses specified public set" do
     sign_in_as @alice
     set = image_sets(:alice_public)

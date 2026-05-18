@@ -26,4 +26,8 @@ module ApplicationHelper
   def field_class(record, field)
     record.errors[field].any? ? "form-input-error" : "form-input"
   end
+
+  def practice_image_set?(image_set, user: Current.user)
+    image_set.practice_set_for?(user)
+  end
 end

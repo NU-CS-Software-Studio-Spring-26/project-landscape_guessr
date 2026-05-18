@@ -1,4 +1,6 @@
 class ImageSet < ApplicationRecord
+  SAVED_FOR_PRACTICE_NAME = "Saved for Practice".freeze
+
   belongs_to :user, optional: true
   belongs_to :parent_image_set, class_name: "ImageSet", optional: true
   # dependent: :delete_all (NOT :destroy) — destroying a 5000-item set
@@ -53,6 +55,14 @@ class ImageSet < ApplicationRecord
 
   def owned_by?(user)
     self.user_id == user&.id
+  end
+
+  def saved_for_practice?
+    name == SAVED_FOR_PRACTICE_NAME
+  end
+
+  def practice_set_for?(user)
+    saved_for_practice? && owned_by?(user)
   end
 
   def playable_by?(user)

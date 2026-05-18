@@ -8,6 +8,7 @@ class ProfilesController < ApplicationController
     @games_played = completed.count
     @best_score   = completed.maximum(:score)
     @avg_score    = completed.average(:score)&.round
+    @saved_practice_set = @user.image_sets.find_by(name: ImageSet::SAVED_FOR_PRACTICE_NAME)
   end
 
   def setup_username
