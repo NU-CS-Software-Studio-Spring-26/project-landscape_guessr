@@ -314,11 +314,15 @@ class WikidataImporter
   # reliably times out WDQS for sub-national regions. The backend takes
   # over geo filtering whenever region_filter is set.
 
-  # Exact AR lookup. Region.search's relevance ranking favours high-
-  # population countries (tested: "Massachusetts United States" returns
-  # United States first). For our disambiguation use case we need the
-  # AI's structured fields → exact match. parent_name is optional; for
-  # countries it's typically nil.
+  # Exact AR lookup on name+admin_level, then verify parent_name appears
+  # anywhere in the ancestor chain (not just the direct parent). The AI
+  # describes cities as "in <state>" or "in <country>", but our DB hierarchy
+  # is country → admin1 → admin2 → city, so e.g. Chicago's direct parent is
+  # Cook County, not Illinois. A direct parent_id check would fail when the
+  # AI sends `parent_name: "Illinois"`. Walking the chain follows the AI's
+  # mental model. Region.search's relevance ranking favours high-population
+  # countries (tested: "Massachusetts United States" returns United States
+  # first), so we use the AI's structured fields for an exact name match.
   def self.resolve_region_filter(region_filter)
     return nil if region_filter.blank?
     rf = region_filter.transform_keys(&:to_sym) rescue region_filter
@@ -326,9 +330,23 @@ class WikidataImporter
     level = rf[:admin_level].to_s.strip.presence
     parent_name = rf[:parent_name].to_s.strip.presence
     return nil unless name && level
-    scope = Region.where(name: name, admin_level: level)
-    scope = scope.where(parent_id: Region.where(name: parent_name).select(:id)) if parent_name
-    scope.first
+    candidates = Region.where(name: name, admin_level: level)
+    return candidates.first if parent_name.blank?
+    candidates.detect { |r| ancestor_named?(r, parent_name) }
+  end
+
+  # True if any region in r's parent chain has the given name. Bounded walk
+  # (country chains are at most ~4 levels) — also cycle-safe via seen-set,
+  # since a corrupted parent_id loop would otherwise spin forever.
+  def self.ancestor_named?(region, target_name)
+    seen = Set.new
+    current = region.parent
+    while current && !seen.include?(current.id)
+      return true if current.name == target_name
+      seen << current.id
+      current = current.parent
+    end
+    false
   end
 
   def self.with_region_bbox(pattern, region_filter)

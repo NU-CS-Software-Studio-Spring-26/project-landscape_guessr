@@ -44,3 +44,34 @@ georgia_state:
   max_lat: 34.99
   min_lng: -85.6
   max_lng: -80.8
+
+# admin2 + city fixtures for the parent-chain walk test below. Cities in
+# our GeoNames seed always have an admin2 (county) as direct parent, never
+# the state — but the AI describes cities as "in <state>", so the resolver
+# has to walk the chain.
+illinois:
+  name: Illinois
+  normalized_name: illinois
+  admin_level: admin1
+  iso_code: US.IL
+  parent: united_states
+  min_lat: 36.97
+  max_lat: 42.51
+  min_lng: -91.51
+  max_lng: -87.50
+
+cook_county:
+  name: Cook County
+  normalized_name: cook county
+  admin_level: admin2
+  parent: illinois
+
+chicago_city:
+  name: Chicago
+  normalized_name: chicago
+  admin_level: city
+  parent: cook_county
+  min_lat: 41.64
+  max_lat: 42.02
+  min_lng: -87.94
+  max_lng: -87.52

@@ -251,6 +251,31 @@ class WikidataImporterTest < ActiveSupport::TestCase
     assert_nil WikidataImporter.resolve_region_filter(name: nil, admin_level: "admin1")
   end
 
+  test "resolve_region_filter walks parent chain so cities can be matched by their state or country" do
+    # In our GeoNames seed, a city's direct parent is always its admin2
+    # (county), never the state. But the AI describes cities as "in <state>"
+    # or "in <country>" — the resolver has to walk the ancestor chain so
+    # both spellings work for the same row.
+    expected = regions(:chicago_city)
+    by_state   = WikidataImporter.resolve_region_filter(
+      name: "Chicago", parent_name: "Illinois", admin_level: "city"
+    )
+    by_county  = WikidataImporter.resolve_region_filter(
+      name: "Chicago", parent_name: "Cook County", admin_level: "city"
+    )
+    by_country = WikidataImporter.resolve_region_filter(
+      name: "Chicago", parent_name: "United States", admin_level: "city"
+    )
+    assert_equal expected.id, by_state&.id
+    assert_equal expected.id, by_county&.id
+    assert_equal expected.id, by_country&.id
+
+    # Sibling state must NOT match — disambiguation guard.
+    assert_nil WikidataImporter.resolve_region_filter(
+      name: "Chicago", parent_name: "Georgia", admin_level: "city"
+    )
+  end
+
   test "resolve_region_filter accepts both symbol and string keys" do
     via_symbols = WikidataImporter.resolve_region_filter(
       name: "Massachusetts", parent_name: "United States", admin_level: "admin1"
