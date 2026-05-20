@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_17_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_18_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -42,6 +42,33 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_17_120000) do
     t.bigint "blob_id", null: false
     t.string "variation_digest", null: false
     t.index ["blob_id", "variation_digest"], name: "index_active_storage_variant_records_uniqueness", unique: true
+  end
+
+  create_table "ai_generations", force: :cascade do |t|
+    t.text "conversation_json"
+    t.datetime "created_at", null: false
+    t.text "error"
+    t.string "model_used"
+    t.string "phase"
+    t.text "preview_json"
+    t.string "progress_message"
+    t.bigint "result_count"
+    t.text "result_json"
+    t.string "status", default: "pending", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.text "user_message"
+    t.index ["user_id", "created_at"], name: "index_ai_generations_on_user_id_and_created_at"
+    t.index ["user_id"], name: "index_ai_generations_on_user_id"
+  end
+
+  create_table "ai_usages", force: :cascade do |t|
+    t.integer "count", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.date "day", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["user_id", "day"], name: "index_ai_usages_on_user_id_and_day", unique: true
   end
 
   create_table "challenge_images", force: :cascade do |t|
@@ -144,8 +171,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_17_120000) do
   end
 
   create_table "image_sets", force: :cascade do |t|
+    t.text "ai_explanation"
+    t.string "ai_model"
+    t.text "ai_prompt"
+    t.text "ai_query"
+    t.jsonb "ai_region_filter"
     t.datetime "created_at", null: false
     t.jsonb "custom_areas", default: [], null: false
+    t.text "import_error"
+    t.integer "import_progress", default: 0, null: false
+    t.string "import_state"
+    t.integer "import_total"
+    t.jsonb "import_warnings"
     t.boolean "is_system_default", default: false, null: false
     t.string "map_style", default: "outdoor-v2", null: false
     t.string "name", null: false
@@ -168,6 +205,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_17_120000) do
     t.datetime "updated_at", null: false
     t.string "url"
     t.index ["latitude", "longitude"], name: "index_images_on_coords_not_null", where: "((latitude IS NOT NULL) AND (longitude IS NOT NULL))"
+    t.index ["url"], name: "index_images_on_url", unique: true, where: "(url IS NOT NULL)"
   end
 
   create_table "regions", force: :cascade do |t|
@@ -224,6 +262,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_17_120000) do
 
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
+  add_foreign_key "ai_generations", "users"
+  add_foreign_key "ai_usages", "users"
   add_foreign_key "challenge_images", "challenges"
   add_foreign_key "challenge_images", "images"
   add_foreign_key "challenges", "image_sets"

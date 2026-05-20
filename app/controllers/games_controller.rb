@@ -1,5 +1,5 @@
 class GamesController < ApplicationController
-  TOTAL_ROUNDS = 5
+  TOTAL_ROUNDS = ImageSet::DEFAULT_ROUND_COUNT
 
   before_action :require_admin, only: %i[ new edit update ]
   before_action :set_game, only: %i[ show edit update destroy results ]
@@ -81,13 +81,10 @@ class GamesController < ApplicationController
 
     @game = Current.user.games.new(status: "in_progress", image_set: image_set)
 
-    items = image_set.effective_items
-                     .with_usable_coords
-                     .order(Arel.sql("RANDOM()"))
-                     .limit(TOTAL_ROUNDS)
+    items = image_set.pick_reachable_items(count: TOTAL_ROUNDS)
 
     if items.size < TOTAL_ROUNDS
-      redirect_to root_path, alert: "Not enough images with coordinates to start a game (need #{TOTAL_ROUNDS}, this set has #{items.size}). Set lat/lng on more images first." and return
+      redirect_to root_path, alert: "Not enough working images with coordinates to start a game (need #{TOTAL_ROUNDS}, found #{items.size}). Some image URLs may be broken; remove them or add more images first." and return
     end
 
     Game.transaction do

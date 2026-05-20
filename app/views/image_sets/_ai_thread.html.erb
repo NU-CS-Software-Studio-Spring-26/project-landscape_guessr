@@ -1,0 +1,25 @@
+<%# Conversation thread — user turns + earlier AI turns. The current
+    (latest) AI turn is omitted because the result card below renders
+    its explanation more prominently; for in-progress / failed states,
+    there's no current AI turn to omit. `conversation:` is an array of
+    { role:, text: } hashes. %>
+<% if conversation.any? %>
+  <% last_model_idx = conversation.rindex { |t| t[:role] == "model" } %>
+  <section class="card p-4 space-y-3">
+    <% conversation.each_with_index do |turn, i| %>
+      <% next if local_assigns[:hide_latest_model] && turn[:role] == "model" && i == last_model_idx %>
+      <% if turn[:role] == "user" %>
+        <div class="text-sm">
+          <span class="eyebrow">You</span>
+          <p class="mt-1 text-forest-900"><%= turn[:text] %></p>
+        </div>
+      <% elsif turn[:role] == "model" %>
+        <% parsed = (JSON.parse(turn[:text]) rescue {}) %>
+        <div class="text-sm">
+          <span class="eyebrow">AI</span>
+          <p class="mt-1 text-forest-900"><%= parsed["explanation"].presence || turn[:text] %></p>
+        </div>
+      <% end %>
+    <% end %>
+  </section>
+<% end %>

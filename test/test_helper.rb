@@ -1,4 +1,9 @@
 ENV["RAILS_ENV"] ||= "test"
+# Tests stub the Gemini HTTP layer, but AiImageSetGenerator#initialize
+# fails fast if no key is present. Give it a placeholder so the pipeline
+# stub tests work in CI; the "key missing" path is exercised separately
+# by passing api_key: nil to the initializer directly.
+ENV["GEMINI_API_KEY"] ||= "test-placeholder"
 require_relative "../config/environment"
 require "rails/test_help"
 require "active_record/connection_adapters/postgresql_adapter"
@@ -58,13 +63,22 @@ module ActiveSupport
     # FK-safe order without .sort (Rails' fixtures helper sorts alphabetically,
     # which inserts game_images before games when RI cannot be disabled).
     FIXTURE_TABLE_NAMES = %w[
-      users image_sets images image_set_items
+      users regions image_sets images image_set_items
       games game_images guesses image_ai_hints
     ].freeze
     self.fixture_table_names = FIXTURE_TABLE_NAMES.dup
     setup_fixture_accessors(FIXTURE_TABLE_NAMES)
 
     # Add more helper methods to be used by all tests here...
+
+    # By default, treat all image URLs as reachable in test env. The
+    # game/challenge create paths use ImageReachability to filter broken
+    # URLs via HEAD; test fixtures use example.com placeholders that
+    # would actually return 404 against a real network. Tests that want
+    # to exercise the broken-URL branch can override per-test.
+    setup do
+      ImageReachability.singleton_class.define_method(:reachable) { |urls| urls.to_a }
+    end
   end
 end
 

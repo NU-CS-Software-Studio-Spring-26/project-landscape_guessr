@@ -75,7 +75,7 @@ Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env` (loaded by `dotenv-r
 
 ### AI practice hints (optional)
 
-AI-generated visual hints for practice mode use the [Gemini API](https://ai.google.dev/). This is separate from Google OAuth sign-in credentials.
+AI-generated visual hints for practice mode use the [Gemini API](https://ai.google.dev/). This is separate from Google OAuth sign-in credentials. The same key powers [AI-generated image sets](#ai-generated-image-sets-optional) below.
 
 1. Create an API key at [Google AI Studio](https://aistudio.google.com/apikey) (sign in with a Google account; no Cloud project required for the free tier).
 2. Copy `.env.example` to `.env` (or add to your existing `.env`) and set:
@@ -83,7 +83,7 @@ AI-generated visual hints for practice mode use the [Gemini API](https://ai.goog
 | Variable | Required | Default | Purpose |
 |---|---|---|---|
 | `GEMINI_API_KEY` | When hints are on | — | API key from AI Studio |
-| `GEMINI_MODEL` | No | `gemini-2.5-flash-lite` | Model id sent to the Gemini API |
+| `GEMINI_MODEL` | No | `gemini-2.5-flash-lite` | Model id sent to the Gemini API (hints only — image-set generation pins its own Flash/Pro models) |
 | `AI_HINTS_ENABLED` | No | off | Set to `1` (or `true`) to enable when a key is present |
 
 The app boots fine without these variables. `GeminiConfig.enabled?` is `true` only when `AI_HINTS_ENABLED` is truthy **and** `GEMINI_API_KEY` is set. Later phases call the API only when enabled.
@@ -113,6 +113,14 @@ heroku run 'rails images:generate_ai_hints[1,100,4]'
 
 Run a worker dyno or `bin/jobs` locally so enqueued jobs actually execute.
 
+### AI-generated image sets (optional)
+
+Signed-in users can build an image set from a natural-language prompt ("volcanoes in Japan") at `/image_sets/ai_new`. A Gemini agent (`AiImageSetGenerator`) translates the prompt into a Wikidata SPARQL pattern via function-calling, the pipeline counts and previews matches, and the user confirms before the import job creates the set.
+
+- **Enabled when `GEMINI_API_KEY` is set** — no separate flag (independent of `AI_HINTS_ENABLED`, which only gates practice hints).
+- Capped at **20 generations per user per day** (`AI_DAILY_LIMIT` in `ImageSetsController`); counter persists in the `ai_usages` table so it survives dyno restarts.
+- Agent loop and import run inside `AiGenerationJob` / `AiImportImagesJob` on the `:async` queue, so the browser polls `/ai_generations/:id/status` while it works — see the dyno-restart caveat under *Background-processing caveats* below.
+
 ### S3 / Active Storage setup (for user uploads)
 
 User-uploaded images go through Active Storage's direct-upload flow. Development defaults to local disk (`storage/`) — no AWS setup required. Production uses S3.
@@ -136,10 +144,12 @@ export AWS_REGION=us-east-2
 | `Game` | `User`, `ImageSet?` | `game_images`, `guesses`, `images` (through `game_images`) | `status`, `score`, `completed_at` |
 | `GameImage` | `Game`, `Image` | — | `position` (1–5), `answer_latitude`, `answer_longitude` (snapshot at game-creation time) |
 | `Image` | — | `guesses`, `game_images`, `image_set_items`, `image_sets` (through items) | `url`, `latitude`, `longitude`, `title`; optional `photo` Active Storage attachment |
-| `ImageSet` | `User?`, `ImageSet?` (parent) | `image_set_items`, `images` (through items), `games`, `filtered_sets` | `name`, `visibility` (`private`\|`public`), `is_system_default`, `map_style`, `parent_image_set_id`, `region_ids` (bigint[]), `custom_areas` (jsonb), `min_lat`/`max_lat`/`min_lng`/`max_lng` |
+| `ImageSet` | `User?`, `ImageSet?` (parent) | `image_set_items`, `images` (through items), `games`, `filtered_sets` | `name`, `visibility` (`private`\|`public`), `is_system_default`, `map_style`, `parent_image_set_id`, `region_ids` (bigint[]), `custom_areas` (jsonb), AI-import bookkeeping (`ai_prompt`, `ai_query`, `ai_model`, `ai_region_filter`, `import_state`, `import_progress`, `import_total`, `import_warnings`) |
 | `ImageSetItem` | `ImageSet`, `Image` | — | `latitude`, `longitude` (per-set override of the image's coords) |
 | `Region` | `Region?` (parent) | `children` (self-join) | `name`, `admin_level` (`continent`\|`country`\|`admin1`\|`admin2`\|`city`), `iso_code`, `boundary` (jsonb GeoJSON), `population`, `min_lat`/`max_lat`/`min_lng`/`max_lng`, `normalized_name` |
 | `Guess` | `Game`, `Image` | — | `latitude`, `longitude` (player's pick) |
+| `AiGeneration` | `User` | — | `user_message`, `conversation_json`, `status` (`pending`/`running`/`completed`/`failed`/`canceled`), `phase`, `progress_message`, `result_json` + `result_count` + `preview_json` (filled as the job runs), `error`, `model_used` |
+| `AiUsage` | `User` | — | `day`, `count` (unique on `[user_id, day]`) — daily counter for the AI image-set rate limit |
 
 `GameImage.answer_latitude/longitude` snapshots the answer at game-creation time, so retroactively editing an image's coordinates doesn't change scores for already-played games.
 
@@ -169,6 +179,7 @@ The `Image.visible_to(user)` scope (in `app/models/image.rb`) is the canonical w
 | `/image_sets/:id/locations` | Owner-only: upload, edit titles/coords, remove items (rejected for filtered sets — edit the filter instead) |
 | `/image_sets/:id/map` | Map of all located images in a set |
 | `/image_sets/:id/new_filtered`, `/edit_filter`, `/update_filter`, `/preview_filter_count` | Build/edit a filtered set: pick regions, draw circle areas, live-preview match count |
+| `/image_sets/ai_new`, `/ai_generate`, `/ai_create` | Build a set from a natural-language prompt via Gemini + Wikidata; browser polls `/ai_generations/:id/status` while the background job runs |
 | `/regions/search.json?q=...` | Typeahead region search (trigram + diacritic-folded; ranks by population, similarity, optional map-center distance) |
 | `/regions/boundaries.json?ids[]=...` | Batch GeoJSON for selected regions; lazy-fetches missing polygons from Nominatim |
 | `/regions/resolve.json` | POST a Nominatim candidate (from the JS-side reverse geocode) → find-or-create the region row + ancestors |
@@ -207,7 +218,7 @@ heroku buildpacks:add --index 1 heroku-community/apt   # pulls libvips42 via Apt
 heroku buildpacks:add heroku/ruby
 heroku config:set AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... S3_BUCKET=... AWS_REGION=...
 heroku config:set GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=...   # required for Sign in with Google in prod
-heroku config:set GEMINI_API_KEY=... AI_HINTS_ENABLED=1             # optional: AI practice hints
+heroku config:set GEMINI_API_KEY=... AI_HINTS_ENABLED=1             # optional: AI image-set generation (key alone) + AI practice hints (key + flag)
 heroku config:set MALLOC_ARENA_MAX=2 ACTIVE_JOB_ASYNC_MAX_THREADS=1   # caps glibc heap fragmentation + concurrent libvips decodes; needed on 512MB dynos
 git push heroku main:main
 # `Procfile` runs `release: bundle exec rails db:migrate` automatically on every deploy — no manual migrate step.

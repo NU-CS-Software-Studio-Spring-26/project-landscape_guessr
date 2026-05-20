@@ -1,0 +1,73 @@
+<% content_for :title, "AI Image Set" %>
+
+<div class="w-full max-w-2xl mx-auto py-6 space-y-6">
+  <div class="flex items-center justify-between">
+    <h1 class="heading-page">AI Image Set</h1>
+    <% if @ai_generation&.in_progress? %>
+      <%# Real cancel: POSTs to the cancel endpoint so the pipeline bails
+          at its next checkpoint. The browser back arrow remains a plain
+          navigation (does NOT cancel) — by design, so users can leave
+          and come back. %>
+      <%= button_to "Cancel", ai_generation_cancel_path(@ai_generation),
+            method: :post, class: "btn-ghost" %>
+    <% else %>
+      <%= link_to "Cancel", image_sets_path, class: "btn-ghost" %>
+    <% end %>
+  </div>
+
+  <% if @ai_generation.nil? %>
+    <p class="muted">
+      Describe the kind of images you want and the AI will build a set for you.
+      Try things like "volcanoes in Japan", "castles in Germany", or "lighthouses worldwide".
+    </p>
+    <%= render "ai_prompt_form", conversation: [] %>
+
+  <% elsif @ai_generation.in_progress? %>
+    <%# Show the conversation as it stood when the user hit submit.
+        Suppress the AI's latest turn because while in-progress there
+        IS no latest AI turn yet — the progress banner stands in for it. %>
+    <%= render "ai_thread", conversation: @ai_generation.conversation %>
+    <%= render "ai_progress", generation: @ai_generation %>
+
+  <% elsif @ai_generation.status == "completed" && (result = @ai_generation.result) %>
+    <% if result[:cannot_answer] %>
+      <%# AI declined (e.g. "restaurants aren't comprehensively in Wikidata").
+          The explanation IS the model turn; hide it from the thread so we
+          don't render it twice. %>
+      <%= render "ai_thread", conversation: @ai_generation.conversation, hide_latest_model: true %>
+      <section class="card p-4">
+        <p class="text-sm text-amber-800"><%= result[:explanation] %></p>
+      </section>
+    <% else %>
+      <%# Completed with a usable answer. The result card already shows
+          the AI's explanation, so hide that turn from the thread. %>
+      <%= render "ai_thread", conversation: @ai_generation.conversation, hide_latest_model: true %>
+      <%= render "ai_result", generation: @ai_generation %>
+    <% end %>
+    <%= render "ai_prompt_form", conversation: @ai_generation.conversation %>
+
+  <% elsif @ai_generation.canceled? %>
+    <%# User explicitly canceled — show the conversation so they can
+        refine or retry without losing context. No error card. %>
+    <%= render "ai_thread", conversation: @ai_generation.conversation %>
+    <section class="card p-4 border-amber-200 bg-amber-50 space-y-3">
+      <p class="text-sm text-amber-800">Generation canceled.</p>
+      <%= render "ai_try_again", conversation: @ai_generation.conversation %>
+    </section>
+    <%= render "ai_prompt_form", conversation: @ai_generation.conversation %>
+
+  <% else %>
+    <%# Failed, OR stale (status=running but updated_at >5min ago — the
+        worker probably died). Same UX in both cases: tell the user it
+        didn't work, give them a one-click retry, and let them refine. %>
+    <%= render "ai_thread", conversation: @ai_generation.conversation %>
+    <section class="card p-4 border-red-200 bg-red-50 space-y-3">
+      <p class="text-sm text-red-800 font-medium">Generation failed</p>
+      <p class="text-xs text-red-700">
+        <%= @ai_generation.error.presence || "Something went wrong with the AI." %>
+      </p>
+      <%= render "ai_try_again", conversation: @ai_generation.conversation %>
+    </section>
+    <%= render "ai_prompt_form", conversation: @ai_generation.conversation %>
+  <% end %>
+</div>

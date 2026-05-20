@@ -1,8 +1,8 @@
 class ImageSetsController < ApplicationController
   skip_before_action :require_email_verified, only: %i[show]
-  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image attach_blob processing_status remove_item map new_filtered edit_filter update_filter preview_filter_count]
+  before_action :set_image_set, only: %i[show edit update destroy locations update_locations add_image attach_blob processing_status remove_item map new_filtered edit_filter update_filter preview_filter_count import_status retry_import]
   before_action :require_email_verified_unless_saved_practice_set, only: %i[show]
-  before_action :require_owner, only: %i[edit update destroy locations update_locations add_image attach_blob processing_status remove_item edit_filter update_filter preview_filter_count]
+  before_action :require_owner, only: %i[edit update destroy locations update_locations add_image attach_blob processing_status remove_item edit_filter update_filter preview_filter_count retry_import import_status]
   # Filtered sets' items are derived from the filter — any direct edit gets
   # blown away on the next materialize. Redirect those routes to the filter
   # editor instead of letting users do work that disappears.
@@ -340,6 +340,185 @@ class ImageSetsController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
+  # GET /image_sets/ai_new
+  # Renders either the fresh form, an in-progress poll banner, or the
+  # completed/failed result — branched on the optional ?generation_id
+  # param. Each `Send` click creates a NEW AiGeneration record and
+  # redirects here with its id; the page state is entirely driven by
+  # that record.
+  def ai_new
+    @ai_generation = load_ai_generation(params[:generation_id])
+  end
+
+  # POST /image_sets/ai_generate
+  #
+  # Creates one AiGeneration record per submit, enqueues the
+  # AiGenerationJob to actually run Gemini + Wikidata off-thread, then
+  # redirects to ai_new with the new record's id. The browser polls
+  # /ai_generations/:id/status and reloads when the job finishes.
+  def ai_generate
+    if ai_rate_limited?
+      @ai_daily_limit = AI_DAILY_LIMIT
+      @ai_used_today  = AiUsage.today_count(user: Current.user)
+      render :ai_rate_limited, status: :too_many_requests and return
+    end
+
+    user_msg = params[:user_message].to_s.strip
+    if user_msg.empty?
+      redirect_to ai_new_image_sets_path, alert: "Type a prompt first." and return
+    end
+
+    prior_conv = parse_conversation(params[:conversation_json])
+    bounded_msg = user_msg.first(8000)
+
+    # Bump BEFORE enqueue (changed from prior post-success bump).
+    # Async architecture needs queue-flood protection, and Gemini bills
+    # us per attempt regardless of success — counting attempts is more
+    # honest. A user who hits a transient failure can retry within
+    # their remaining quota; transient failures are rare in practice.
+    bump_ai_rate_limit_counter
+
+    # Include the new user turn in conversation_json AT CREATE TIME, not
+    # in the job. Otherwise the brief pending/running window between
+    # redirect and the job's first tick would show the thread missing
+    # the message the user just typed.
+    new_conv = prior_conv + [ { role: "user", text: bounded_msg } ]
+
+    gen = Current.user.ai_generations.create!(
+      status:            "pending",
+      conversation_json: new_conv.to_json,
+      user_message:      bounded_msg
+    )
+    AiGenerationJob.perform_later(gen.id)
+    redirect_to ai_new_image_sets_path(generation_id: gen.id)
+  end
+
+  # GET /ai_generations/:id/status
+  #
+  # Lightweight JSON the poll controller hits every ~1.5s while the
+  # AiGenerationJob runs. Scoped to current user via the association
+  # — cross-user IDs 404 by way of ActiveRecord::RecordNotFound. The
+  # `stale?` check downgrades stuck-running records (worker crash, queue
+  # offline) to a synthetic `failed` so the UI eventually unfreezes.
+  def ai_generation_status
+    gen = Current.user.ai_generations.find(params[:id])
+    effective = gen.stale? ? "failed" : gen.status
+    render json: {
+      status:           effective,
+      phase:            gen.phase,
+      progress_message: gen.progress_message,
+      result_count:     gen.result_count, # known once counting phase finishes
+      error:            gen.stale? ? "Generation timed out — try again." : gen.error
+    }
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: "not found" }, status: :not_found
+  end
+
+  # POST /image_sets/ai_create
+  #
+  # User has approved the preview. We source the AI fields (sparql
+  # pattern, explanation, model) from the AiGeneration record — not
+  # from hidden form fields — so a user can't bypass parse_submit's
+  # SPARQL validation by editing the hidden `ai_query` in devtools.
+  def ai_create
+    gen = Current.user.ai_generations.find_by(id: params[:generation_id])
+    if gen.nil? || gen.status != "completed" || gen.result.nil? ||
+       gen.result[:cannot_answer] ||
+       gen.result[:sparql_pattern].to_s.strip.empty?
+      # Last condition guards against a generation that completed but
+      # whose result has no usable pattern (would create a set whose
+      # import job runs nil SPARQL).
+      redirect_to ai_new_image_sets_path, alert: "No AI proposal to import." and return
+    end
+
+    result = gen.result
+    image_set = Current.user.image_sets.new(
+      name:             params[:name].to_s.strip.presence || result[:set_name].presence || "Untitled AI Set",
+      visibility:       %w[public private].include?(params[:visibility]) ? params[:visibility] : "private",
+      ai_prompt:        gen.user_message.to_s,
+      ai_query:         result[:sparql_pattern],
+      ai_explanation:   result[:explanation].to_s,
+      ai_model:         gen.model_used.presence || "flash",
+      ai_region_filter: result[:region_filter],
+      import_state:     "pending"
+    )
+
+    if image_set.save
+      AiImportImagesJob.perform_later(image_set.id)
+      redirect_to image_set, notice: "Set created — importing images in the background."
+    else
+      redirect_to ai_new_image_sets_path, alert: image_set.errors.full_messages.join("; ")
+    end
+  end
+
+  # POST /ai_generations/:id/cancel
+  #
+  # Flip the row to "canceled" so the polling UI stops + the pipeline
+  # bails at its next phase checkpoint. In-flight Wikidata threads
+  # finish on their own (we can't interrupt mid-Net::HTTP cleanly) but
+  # their results are discarded. Idempotent: cancelling an already-
+  # completed/failed generation is a no-op.
+  def ai_generation_cancel
+    gen = Current.user.ai_generations.find(params[:id])
+    if gen.in_progress?
+      gen.update!(status: "canceled", phase: nil, progress_message: nil)
+    end
+    redirect_to ai_new_image_sets_path
+  rescue ActiveRecord::RecordNotFound
+    redirect_to ai_new_image_sets_path
+  end
+
+  # POST /image_sets/1/retry_import
+  #
+  # Re-runs the import for an AI set when the previous attempt didn't
+  # finish. Common cases:
+  #   - state == "failed": transient WDQS hiccup outlasted run_query's
+  #     3-attempt internal retry, or Gemini timed out
+  #   - state stuck in fetching/looking_up_images/inserting: worker crashed
+  #     mid-job, or the AsyncAdapter thread died, or the import is
+  #     taking longer than the user wants to wait
+  #
+  # We allow retry from any non-completed AI state for the owner. Safety:
+  #   - Image.insert_all uses unique_by: :url so two concurrent imports
+  #     racing on the same row don't duplicate Images
+  #   - ImageSetItem has a unique index on (image_set_id, image_id) so
+  #     the join rows also dedupe
+  # Worst case of a real concurrent import: the progress counter ping-pongs
+  # briefly, but the final state converges. That's an acceptable trade-off
+  # for letting the user un-stick a stuck job without us needing per-import
+  # timestamp tracking.
+  def retry_import
+    if @image_set.ai_query.blank?
+      redirect_to @image_set, alert: "This isn't an AI-generated set, nothing to retry." and return
+    end
+    if @image_set.import_state == "completed"
+      redirect_to @image_set, alert: "Import already completed — nothing to retry." and return
+    end
+
+    @image_set.update_columns(
+      import_state:    "pending",
+      import_error:    nil,
+      import_progress: 0,
+      import_total:    0
+    )
+    AiImportImagesJob.perform_later(@image_set.id)
+    redirect_to @image_set, notice: "Re-importing images in the background."
+  end
+
+  # GET /image_sets/1/import_status
+  #
+  # Lightweight JSON for the show page's polling banner. Returns the
+  # current import state + progress so the UI can render a progress bar
+  # without a full page reload.
+  def import_status
+    render json: {
+      state:    @image_set.import_state,
+      progress: @image_set.import_progress.to_i,
+      total:    @image_set.import_total.to_i,
+      error:    @image_set.import_error
+    }
+  end
+
   private
 
   def set_image_set
@@ -355,8 +534,14 @@ class ImageSetsController < ApplicationController
   end
 
   def require_owner
-    unless @image_set.owned_by?(Current.user)
-      redirect_to @image_set, alert: "You don't have permission to edit this set."
+    return if @image_set.owned_by?(Current.user)
+    # JSON callers (poll banners, fetch-based UIs) need a JSON 403 — an
+    # HTML redirect comes back as 302→200, content-type text/html, and
+    # the poll's `res.json()` throws on the HTML body. Other formats keep
+    # the friendly redirect.
+    respond_to do |format|
+      format.json { render json: { error: "forbidden" }, status: :forbidden }
+      format.any  { redirect_to @image_set, alert: "You don't have permission to edit this set." }
     end
   end
 
@@ -460,5 +645,50 @@ class ImageSetsController < ApplicationController
 
   def saved_practice_set?
     @image_set.name == ImageSet::SAVED_FOR_PRACTICE_NAME && @image_set.owned_by?(Current.user)
+  end
+
+  # === AI helpers ===
+
+  # Per-user daily cap. With $0.01-0.05 per call on Flash, 20 calls/day
+  # caps a single user at ~$1/day worst case. Persisted in postgres
+  # (AiUsage) — earlier version stored counts in Rails.cache, but the
+  # configured :memory_store is process-local, so multi-worker puma
+  # counted separately per worker (effectively 2-4x the limit), and
+  # dyno restarts wiped the count entirely.
+  AI_DAILY_LIMIT = 20
+
+  def ai_rate_limited?
+    AiUsage.exceeded?(user: Current.user, daily_limit: AI_DAILY_LIMIT)
+  end
+
+  def bump_ai_rate_limit_counter
+    AiUsage.bump!(user: Current.user)
+  end
+
+  # Parse the hidden conversation field. Bounded length so a giant
+  # forged payload can't blow up the Gemini request.
+  MAX_CONVERSATION_TURNS = 10
+
+  def parse_conversation(raw)
+    return [] if raw.blank?
+    parsed = JSON.parse(raw)
+    return [] unless parsed.is_a?(Array)
+    parsed.first(MAX_CONVERSATION_TURNS).filter_map do |turn|
+      next unless turn.is_a?(Hash)
+      role = turn["role"]
+      text = turn["text"].to_s
+      next unless %w[user model].include?(role) && !text.empty?
+      { role: role, text: text.first(8000) }
+    end
+  rescue JSON::ParserError
+    []
+  end
+
+  # Look up the AiGeneration the view should render. Scoped to
+  # current_user so a forged ?generation_id pointing at another user's
+  # record degrades to "no generation" rather than leaking content.
+  def load_ai_generation(id)
+    return nil if id.blank?
+    Current.user.ai_generations.find_by(id: id)
   end
 end

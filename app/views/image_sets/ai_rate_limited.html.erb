@@ -1,0 +1,21 @@
+<% content_for :title, "AI Image Set" %>
+
+<div class="w-full max-w-xl mx-auto py-12 space-y-6 text-center">
+  <h1 class="heading-page">Daily AI limit reached</h1>
+
+  <p class="muted">
+    You've used <strong class="text-forest-900"><%= @ai_used_today %></strong>
+    of <strong class="text-forest-900"><%= @ai_daily_limit %></strong> AI
+    generations today. The counter resets at midnight.
+  </p>
+
+  <p class="muted text-sm">
+    This limit exists to keep AI costs bounded. You can still create image
+    sets manually in the meantime.
+  </p>
+
+  <div class="flex justify-center gap-2 pt-2">
+    <%= link_to "Back to sets", image_sets_path, class: "btn-secondary" %>
+    <%= link_to "Create one manually", new_image_set_path, class: "btn-primary" %>
+  </div>
+</div>

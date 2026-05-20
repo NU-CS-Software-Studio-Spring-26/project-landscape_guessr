@@ -1,0 +1,17 @@
+<%# Re-submits the most recent user message as a fresh AiGeneration so
+    a user doesn't have to retype the prompt after a transient failure
+    (Gemini 5xx, timeout, stale) or after canceling. Posts to ai_generate
+    — same path the refine form uses — so rate-limiting and conversation
+    bookkeeping stay in one place.
+
+    Skips itself if conversation has no user turn (pathological — only
+    possible if conversation_json got hand-mutated to []). %>
+<% idx = conversation.rindex { |t| t[:role] == "user" } %>
+<% if idx %>
+  <%= button_to "Try again", ai_generate_image_sets_path,
+        method: :post, class: "btn-secondary text-sm",
+        params: {
+          user_message:      conversation[idx][:text],
+          conversation_json: conversation[0...idx].to_json
+        } %>
+<% end %>

@@ -163,4 +163,290 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
     end
     assert_match(/required/i, flash[:alert])
   end
+
+  # === AI flow ===
+
+  test "ai_new requires authentication" do
+    delete session_path # log out
+    get ai_new_image_sets_path
+    assert_redirected_to new_session_path
+  end
+
+  test "ai_new renders the prompt form for logged-in user" do
+    get ai_new_image_sets_path
+    assert_response :success
+    assert_match(/AI Image Set/i, response.body)
+    assert_match(/user_message/, response.body)
+  end
+
+  test "ai_generate rejects empty prompt" do
+    post ai_generate_image_sets_path, params: { user_message: "" }
+    assert_redirected_to ai_new_image_sets_path
+    assert_match(/Type a prompt first/i, flash[:alert])
+  end
+
+  test "ai_generate enforces daily rate limit" do
+    # Burn the daily quota directly in the AiUsage table — the rate
+    # limit is now AR-backed (not cache-backed), so this is enough.
+    AiUsage.create!(user: @alice, day: Date.current, count: 20)
+    post ai_generate_image_sets_path, params: { user_message: "volcanoes" }
+    assert_response :too_many_requests
+    assert_match(/Daily AI limit reached/, response.body)
+  end
+
+  test "ai_generate creates an AiGeneration, enqueues the job, and redirects" do
+    assert_difference("AiGeneration.count", 1) do
+      assert_enqueued_with(job: AiGenerationJob) do
+        post ai_generate_image_sets_path, params: { user_message: "volcanoes in Japan" }
+      end
+    end
+    gen = AiGeneration.last
+    assert_equal @alice, gen.user
+    assert_equal "pending", gen.status
+    assert_equal "volcanoes in Japan", gen.user_message
+    assert_redirected_to ai_new_image_sets_path(generation_id: gen.id)
+  end
+
+  test "ai_generate bumps the daily counter before enqueueing" do
+    assert_difference("AiUsage.where(user: @alice, day: Date.current).sum(:count)", 1) do
+      post ai_generate_image_sets_path, params: { user_message: "volcanoes" }
+    end
+  end
+
+  test "ai_new with ?generation_id renders the progress banner for in-progress" do
+    gen = AiGeneration.create!(user: @alice, status: "running", phase: "thinking",
+                                user_message: "volcanoes")
+    get ai_new_image_sets_path(generation_id: gen.id)
+    assert_response :success
+    assert_match(/ai-generation-poll/, response.body)
+  end
+
+  test "ai_new with ?generation_id for another user falls through to fresh form" do
+    gen = AiGeneration.create!(user: @bob, status: "running", user_message: "x")
+    get ai_new_image_sets_path(generation_id: gen.id)
+    assert_response :success
+    # No poll controller — view rendered the empty prompt form instead.
+    refute_match(/ai-generation-poll/, response.body)
+  end
+
+  test "ai_generation_status returns JSON for owner" do
+    gen = AiGeneration.create!(user: @alice, status: "running", phase: "counting",
+                                progress_message: "Counting matches…",
+                                user_message: "x")
+    get ai_generation_status_path(gen.id)
+    assert_response :success
+    body = JSON.parse(response.body)
+    assert_equal "running",          body["status"]
+    assert_equal "counting",         body["phase"]
+    assert_equal "Counting matches…", body["progress_message"]
+  end
+
+  test "ai_generation_status 404s for another user's record" do
+    gen = AiGeneration.create!(user: @bob, status: "running", user_message: "x")
+    get ai_generation_status_path(gen.id)
+    assert_response :not_found
+  end
+
+  test "ai_generation_status reports stuck-running record as failed" do
+    gen = AiGeneration.create!(user: @alice, status: "running", user_message: "x")
+    gen.update_columns(updated_at: 10.minutes.ago)
+    get ai_generation_status_path(gen.id)
+    body = JSON.parse(response.body)
+    assert_equal "failed", body["status"]
+    assert_match(/timed out/i, body["error"])
+  end
+
+  test "ai_create rejects missing generation_id" do
+    post ai_create_image_sets_path, params: { name: "x" }
+    assert_redirected_to ai_new_image_sets_path
+    assert_match(/No AI proposal to import/i, flash[:alert])
+  end
+
+  test "ai_create rejects an unfinished generation" do
+    gen = AiGeneration.create!(user: @alice, status: "running", user_message: "x")
+    post ai_create_image_sets_path, params: { generation_id: gen.id, name: "x" }
+    assert_redirected_to ai_new_image_sets_path
+  end
+
+  test "ai_create makes a set from the AiGeneration record, enqueues import, redirects to show" do
+    gen = AiGeneration.create!(
+      user: @alice, status: "completed", user_message: "volcanoes in Japan",
+      model_used: "flash",
+      conversation_json: [ { role: "user", text: "volcanoes in Japan" } ].to_json,
+      result_json: {
+        sparql_pattern: "?item wdt:P31 wd:Q8072 .",
+        set_name:       "Volcanoes of Japan",
+        explanation:    "Finding volcanoes.",
+        cannot_answer:  false
+      }.to_json
+    )
+
+    assert_difference("ImageSet.count", 1) do
+      assert_enqueued_with(job: AiImportImagesJob) do
+        post ai_create_image_sets_path, params: {
+          generation_id: gen.id,
+          name:          "Volcanoes of Japan",
+          visibility:    "private"
+        }
+      end
+    end
+    set = ImageSet.last
+    assert_equal "Volcanoes of Japan", set.name
+    assert_equal "?item wdt:P31 wd:Q8072 .", set.ai_query
+    assert_equal "flash", set.ai_model
+    assert_equal "pending", set.import_state
+    assert_redirected_to set
+  end
+
+  test "ai_create defaults to private and rejects invalid visibility" do
+    gen = AiGeneration.create!(
+      user: @alice, status: "completed", user_message: "x",
+      result_json: { sparql_pattern: "?item wdt:P31 wd:Q8072 .",
+                     set_name: "X", explanation: "x",
+                     cannot_answer: false }.to_json
+    )
+    post ai_create_image_sets_path, params: {
+      generation_id: gen.id, name: "X", visibility: "wide-open"
+    }
+    assert_equal "private", ImageSet.last.visibility
+  end
+
+  test "ai_create ignores cross-user generation_id" do
+    gen = AiGeneration.create!(
+      user: @bob, status: "completed", user_message: "x",
+      result_json: { sparql_pattern: "?item wdt:P31 wd:Q1 .",
+                     set_name: "X", explanation: "x",
+                     cannot_answer: false }.to_json
+    )
+    assert_no_difference("ImageSet.count") do
+      post ai_create_image_sets_path, params: { generation_id: gen.id, name: "X" }
+    end
+    assert_redirected_to ai_new_image_sets_path
+  end
+
+  test "retry_import re-enqueues the import job and resets progress columns" do
+    set = ImageSet.create!(user: @alice, name: "Failed AI Set", visibility: "private",
+                            ai_query: "?item wdt:P31 wd:Q8072 .",
+                            import_state: "failed",
+                            import_error: "WikidataImporter::Error: 502",
+                            import_progress: 0, import_total: 0)
+
+    assert_enqueued_with(job: AiImportImagesJob) do
+      post retry_import_image_set_path(set)
+    end
+    set.reload
+    assert_equal "pending", set.import_state
+    assert_nil set.import_error
+    assert_redirected_to set
+  end
+
+  test "retry_import refuses completed sets" do
+    set = ImageSet.create!(user: @alice, name: "Done AI Set", visibility: "private",
+                            ai_query: "?item wdt:P31 wd:Q8072 .",
+                            import_state: "completed")
+    assert_no_enqueued_jobs do
+      post retry_import_image_set_path(set)
+    end
+    assert_redirected_to set
+    assert_match(/already completed/i, flash[:alert])
+  end
+
+  test "retry_import allows stuck non-failed sub-states (worker crash recovery)" do
+    %w[pending fetching looking_up_images inserting].each do |stuck_state|
+      set = ImageSet.create!(user: @alice, name: "Stuck #{stuck_state}", visibility: "private",
+                              ai_query: "?item wdt:P31 wd:Q8072 .",
+                              import_state: stuck_state, import_progress: 42, import_total: 100)
+      assert_enqueued_with(job: AiImportImagesJob) do
+        post retry_import_image_set_path(set)
+      end
+      set.reload
+      assert_equal "pending", set.import_state, "expected #{stuck_state} → pending"
+      assert_equal 0, set.import_progress
+      assert_redirected_to set
+    end
+  end
+
+  test "retry_import refuses non-AI sets" do
+    set = ImageSet.create!(user: @alice, name: "Manual Set", visibility: "private",
+                            import_state: "failed")
+    assert_no_enqueued_jobs do
+      post retry_import_image_set_path(set)
+    end
+    assert_redirected_to set
+    assert_match(/isn't an AI-generated set/i, flash[:alert])
+  end
+
+  test "retry_import is owner-only" do
+    set = ImageSet.create!(user: @bob, name: "Bob's Failed", visibility: "public",
+                            ai_query: "?item wdt:P31 wd:Q8072 .",
+                            import_state: "failed")
+    assert_no_enqueued_jobs do
+      post retry_import_image_set_path(set)
+    end
+    assert_redirected_to set
+    assert_match(/permission/i, flash[:alert])
+  end
+
+  test "import_status returns JSON for owner" do
+    set = ImageSet.create!(user: @alice, name: "AI Set",
+                            visibility: "private", import_state: "importing",
+                            import_progress: 10, import_total: 50)
+    get import_status_image_set_path(set)
+    assert_response :success
+    body = JSON.parse(response.body)
+    assert_equal "importing", body["state"]
+    assert_equal 10, body["progress"]
+    assert_equal 50, body["total"]
+  end
+
+  test "import_status is owner-only (no info leak to other users)" do
+    sign_in_as @bob
+    set = ImageSet.create!(user: @alice, name: "Alice's failing set",
+                            visibility: "public", import_state: "failed",
+                            import_error: "Net::ReadTimeout: query.wikidata.org timed out at /app/lib/foo.rb")
+    get import_status_image_set_path(set)
+    # @bob shouldn't see Alice's import_error message — require_owner
+    # redirects with an alert.
+    assert_redirected_to set
+    assert_match(/permission/i, flash[:alert])
+  end
+
+  test "import_status returns JSON 403 (not HTML redirect) for non-owner JSON request" do
+    # The poll banner fetches with Accept: application/json. Without the
+    # respond_to in require_owner, the auth failure returned a 302→200 HTML
+    # body and the client's res.json() threw.
+    sign_in_as @bob
+    set = ImageSet.create!(user: @alice, name: "Alice's set",
+                            visibility: "public", import_state: "importing")
+    get import_status_image_set_path(set), headers: { "Accept" => "application/json" }
+    assert_response :forbidden
+    assert_equal "application/json", response.media_type
+  end
+
+  # === Cancel an in-flight AI generation ===
+
+  test "ai_generation_cancel flips an in-progress record to canceled and redirects" do
+    gen = AiGeneration.create!(user: @alice, status: "running", phase: "counting",
+                                user_message: "x")
+    post ai_generation_cancel_path(gen.id)
+    assert_redirected_to ai_new_image_sets_path
+    gen.reload
+    assert_equal "canceled", gen.status
+    assert_nil gen.phase
+  end
+
+  test "ai_generation_cancel is a no-op on already-completed records" do
+    gen = AiGeneration.create!(user: @alice, status: "completed", user_message: "x")
+    post ai_generation_cancel_path(gen.id)
+    gen.reload
+    assert_equal "completed", gen.status
+  end
+
+  test "ai_generation_cancel 404s (silently redirects) for another user's record" do
+    gen = AiGeneration.create!(user: @bob, status: "running", user_message: "x")
+    post ai_generation_cancel_path(gen.id)
+    assert_redirected_to ai_new_image_sets_path
+    # Bob's record was NOT canceled — alice can't cancel it.
+    assert_equal "running", gen.reload.status
+  end
 end

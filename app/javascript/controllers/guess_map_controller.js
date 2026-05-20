@@ -1,5 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
-import { MAPTILER_KEY, ensureMaptilerSdk, hideOutdoorTrails, escapeText } from "lib/maptiler"
+import { MAPTILER_KEY, ensureMaptilerSdk, hideOutdoorTrails, escapeText, shorterLineCoords } from "lib/maptiler"
 
 export default class extends Controller {
   static targets = ["container", "loader"]
@@ -37,7 +37,13 @@ export default class extends Controller {
     this.map.on("click", (e) => {
       if (this.locked) return
 
-      const { lng, lat } = e.lngLat
+      // Wrap longitude into [-180, 180] before doing anything else.
+      // MapLibre returns unwrapped lngLat when the user has panned past
+      // the antimeridian (e.g. lng=-184.93 after panning west past the
+      // date line). The server-side Guess validates longitude is in
+      // [-180, 180] and would 422 otherwise; flat-coord line draws
+      // would also take the long way around the world.
+      const { lng, lat } = e.lngLat.wrap()
       this.placePin(lat, lng)
 
       this.dispatch("pinned", { detail: { lat, lng } })
@@ -141,10 +147,7 @@ export default class extends Controller {
           type: "Feature",
           geometry: {
             type: "LineString",
-            coordinates: [
-              [guessLngLat.lng, guessLngLat.lat],
-              [lng, lat]
-            ]
+            coordinates: shorterLineCoords([guessLngLat.lng, guessLngLat.lat], [lng, lat])
           }
         }
       })
@@ -195,7 +198,7 @@ export default class extends Controller {
         type: "geojson",
         data: {
           type: "Feature",
-          geometry: { type: "LineString", coordinates: [[lng, lat], [answerLng, answerLat]] }
+          geometry: { type: "LineString", coordinates: shorterLineCoords([lng, lat], [answerLng, answerLat]) }
         }
       })
       this.map.addLayer({

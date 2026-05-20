@@ -1,5 +1,5 @@
 class ChallengesController < ApplicationController
-  TOTAL_ROUNDS = 5
+  TOTAL_ROUNDS = ImageSet::DEFAULT_ROUND_COUNT
 
   before_action :set_challenge, only: [ :show, :play, :destroy ]
 
@@ -19,7 +19,7 @@ class ChallengesController < ApplicationController
 
   def create
     image_set = resolve_image_set
-    items = pick_items_for(image_set)
+    items = image_set.pick_reachable_items(count: TOTAL_ROUNDS)
 
     if items.size < TOTAL_ROUNDS
       flash.now[:alert] = "Not enough images with coordinates in this set (need #{TOTAL_ROUNDS}, found #{items.size})."
@@ -115,12 +115,5 @@ class ChallengesController < ApplicationController
     else
       ImageSet.default
     end
-  end
-
-  def pick_items_for(image_set)
-    image_set.effective_items
-             .with_usable_coords
-             .order(Arel.sql("RANDOM()"))
-             .limit(TOTAL_ROUNDS)
   end
 end
