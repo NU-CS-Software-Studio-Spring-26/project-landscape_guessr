@@ -302,6 +302,10 @@ Reusable styles live in `app/assets/tailwind/application.css` as `@apply` compon
 
 `db/seeds.rb` uses **`SERVICE bd:sample`** for random sampling — not `ORDER BY RAND()` or hashed orderings, both of which time out at scale when unioning multiple landform types. `bd:sample` accepts only a single triple pattern, so the seeder samples by `wdt:P31` (instance-of) inside the `SERVICE` block and joins `wdt:P18`/`wdt:P625` outside. Over-sampling (`limit 2000`) is intentional — only ~5–20% of any landform type has both an image and coordinates. Filenames are filtered for non-photo contamination (satellite imagery, maps); when adding new landform types, spot-check for new junk patterns.
 
+## Multiplayer
+
+- In the progress: most likely we will use the web-sockets
+  
 ## Contributing
 
 - Branch from `main`: `git checkout -b branch-name`
