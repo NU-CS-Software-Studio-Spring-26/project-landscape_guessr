@@ -46,3 +46,6 @@
 
 # Local-only rake tasks (personal scripts, never pushed)
 /lib/tasks/local_*.rake
+
+# For developement with AI
+AGENTS.md
