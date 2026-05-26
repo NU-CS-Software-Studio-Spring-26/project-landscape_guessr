@@ -89,6 +89,7 @@
         <div class="px-4 py-3 space-y-1">
           <% if authenticated? %>
             <%= link_to "Games",      games_path,      data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
+            <%= link_to "Leaderboard", leaderboard_games_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <%= link_to "Image Sets", image_sets_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <%= link_to "Challenges", challenges_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <%= link_to "Practice",   practice_path,   data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
