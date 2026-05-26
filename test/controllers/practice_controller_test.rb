@@ -66,6 +66,8 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "hint queries image_ai_hints" do
+    sign_in_as @alice
+
     hint_queries = []
     subscriber = ActiveSupport::Notifications.subscribe("sql.active_record") do |*_, payload|
       hint_queries << payload[:sql] if payload[:sql].include?("image_ai_hints")
@@ -106,15 +108,16 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "Submit first attempt"
   end
 
-  test "practice enables 4000km hint circle when requested" do
+  test "practice omits legacy circle radius hint controls" do
     with_ai_hints_config(enabled: false) do
       get practice_path(hint_circle: 1)
     end
 
     assert_response :success
-    assert_includes response.body, 'data-practice-hint-circle-value="true"'
-    assert_includes response.body, "Circle radius"
-    assert_includes response.body, "4000 km"
+    assert_not_includes response.body, "data-practice-hint-circle-value"
+    assert_not_includes response.body, "Circle radius"
+    assert_not_includes response.body, "4000 km"
+    assert_not_includes response.body, 'data-practice-type-param="radius"'
     assert_not_includes response.body, 'data-practice-type-param="visual"'
   end
 
@@ -298,6 +301,8 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "hint returns ai_hints_disabled when feature is off" do
+    sign_in_as @alice
+
     with_ai_hints_config(enabled: false) do
       get practice_hint_path(image_id: @public_image.id, tier: 1), as: :json
     end
@@ -306,7 +311,44 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
     assert_equal "ai_hints_disabled", JSON.parse(response.body)["error"]
   end
 
+  test "hint shows verified email message for signed out users without enqueueing" do
+    with_ai_hints_config(enabled: true) do
+      assert_no_enqueued_jobs only: GenerateAiHintJob do
+        assert_no_difference("ImageAiHint.count") do
+          get practice_hint_path(image_id: @public_image.id, tier: 3), as: :json
+        end
+      end
+    end
+
+    assert_response :success
+    body = JSON.parse(response.body)
+    assert_equal "failed", body["status"]
+    assert_equal PracticeController::AI_HINT_VERIFIED_EMAIL_MESSAGE, body["error"]
+    refute_hint_coordinate_leak(body)
+  end
+
+  test "hint shows verified email message for unverified users without enqueueing" do
+    @alice.update!(email_verified_at: nil)
+    sign_in_as @alice
+
+    with_ai_hints_config(enabled: true) do
+      assert_no_enqueued_jobs only: GenerateAiHintJob do
+        assert_no_difference("ImageAiHint.count") do
+          get practice_hint_path(image_id: @public_image.id, tier: 3), as: :json
+        end
+      end
+    end
+
+    assert_response :success
+    body = JSON.parse(response.body)
+    assert_equal "failed", body["status"]
+    assert_equal PracticeController::AI_HINT_VERIFIED_EMAIL_MESSAGE, body["error"]
+    refute_hint_coordinate_leak(body)
+  end
+
   test "hint returns ready hint when cached" do
+    sign_in_as @alice
+
     with_ai_hints_config(enabled: true) do
       get practice_hint_path(image_id: @public_image.id, tier: 1), as: :json
     end
@@ -322,6 +364,8 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "hint returns pending when row is pending" do
+    sign_in_as @alice
+
     with_ai_hints_config(enabled: true) do
       get practice_hint_path(image_id: @public_image.id, tier: 2), as: :json
     end
@@ -379,6 +423,8 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "hint creates pending row and enqueues job on first request" do
+    sign_in_as @alice
+
     with_ai_hints_config(enabled: true) do
       with_memory_cache do
         assert_enqueued_with(job: GenerateAiHintJob, args: [ @public_image.id, 3 ]) do
@@ -401,6 +447,8 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "hint returns failed without retrying on every poll" do
+    sign_in_as @alice
+
     failed_image = images(:two)
 
     with_ai_hints_config(enabled: true) do
@@ -418,6 +466,8 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "hint auto-retries stale failed row without retry param" do
+    sign_in_as @alice
+
     failed_image = images(:two)
     image_ai_hints(:two_tier_1).update_columns(status: "failed", updated_at: 10.minutes.ago)
 
@@ -462,6 +512,8 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "hint retries failed row when retry param is set" do
+    sign_in_as @alice
+
     failed_image = images(:two)
 
     with_ai_hints_config(enabled: true) do
@@ -477,7 +529,9 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
     refute_hint_coordinate_leak(body)
   end
 
-  test "hint refuses unauthenticated access to a private-set image" do
+  test "hint refuses access to another user's private-set image" do
+    sign_in_as @bob
+
     with_ai_hints_config(enabled: true) do
       get practice_hint_path(image_id: @private_image.id, tier: 1), as: :json
     end

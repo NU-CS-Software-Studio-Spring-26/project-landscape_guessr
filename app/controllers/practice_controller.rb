@@ -2,6 +2,7 @@ class PracticeController < ApplicationController
   PRACTICE_TIMER_SECONDS = [ 30, 60, 120 ].freeze
   PRACTICE_ATTEMPTS = [ 1, 2 ].freeze
   HINT_TIERS = (1..3).freeze
+  AI_HINT_VERIFIED_EMAIL_MESSAGE = "This feature is only available to users with a verified email".freeze
 
   allow_unauthenticated_access only: %i[ show check hint ]
   skip_before_action :require_email_verified
@@ -18,7 +19,6 @@ class PracticeController < ApplicationController
 
     @time_limit_seconds = practice_seconds_param
     @attempts = practice_attempts_param
-    @hint_circle_enabled = practice_hint_circle_param
     @ai_hints_enabled = GeminiConfig.enabled?
     @ai_hint_quota_used = hint_quota.used if @ai_hints_enabled
     load_random_located_image
@@ -101,6 +101,8 @@ class PracticeController < ApplicationController
 
   def hint
     resume_session
+
+    return render_ai_hint_verified_email_required unless ai_hints_allowed_for_current_user?
 
     unless GeminiConfig.enabled?
       return render json: { error: "ai_hints_disabled" }, status: :service_unavailable
@@ -268,10 +270,6 @@ class PracticeController < ApplicationController
     PRACTICE_ATTEMPTS.include?(attempts) ? attempts : 1
   end
 
-  def practice_hint_circle_param
-    params[:hint_circle].to_s == "1"
-  end
-
   def hint_tier_param
     tier = params[:tier].to_i
     HINT_TIERS.cover?(tier) ? tier : 1
@@ -279,6 +277,17 @@ class PracticeController < ApplicationController
 
   def hint_retry_requested?
     ActiveModel::Type::Boolean.new.cast(params[:retry])
+  end
+
+  def ai_hints_allowed_for_current_user?
+    authenticated? && Current.user.email_verified?
+  end
+
+  def render_ai_hint_verified_email_required
+    render json: {
+      status: "failed",
+      error: AI_HINT_VERIFIED_EMAIL_MESSAGE
+    }
   end
 
   def enqueue_hint_job!(image_id, tier)

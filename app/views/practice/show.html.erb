@@ -19,7 +19,6 @@
      <% end %>
      data-practice-time-limit-value="<%= @time_limit_seconds.to_i %>"
      data-practice-attempts-value="<%= @attempts.to_i %>"
-     data-practice-hint-circle-value="<%= @hint_circle_enabled ? true : false %>"
      data-practice-signed-in-value="<%= authenticated? %>"
      data-practice-initially-saved-value="<%= @saved_for_practice ? true : false %>"
      <% if @practice_set_progress %>
@@ -87,14 +86,6 @@
     <button type="button"
             data-practice-target="hintTypeOption"
             data-action="practice#setHintType"
-            data-practice-type-param="radius"
-            aria-pressed="false"
-            class="btn-secondary text-sm py-1.5 px-3 shrink-0">
-      Circle radius
-    </button>
-    <button type="button"
-            data-practice-target="hintTypeOption"
-            data-action="practice#setHintType"
             data-practice-type-param="location"
             aria-pressed="false"
             class="btn-secondary text-sm py-1.5 px-3 shrink-0">
@@ -115,28 +106,6 @@
       (<%= @ai_hint_quota_used %>/<%= AiHintDailyQuota::LIMIT %>)
     </span>
     <% end %>
-
-    <div data-practice-target="hintRadiusPanel" class="hidden ml-2 flex items-center gap-2 shrink-0">
-      <span class="shrink-0">Radius:</span>
-      <button type="button"
-              data-practice-target="hintRadiusNoHintButton"
-              data-action="practice#toggleHintRadiusNoHint"
-              aria-pressed="true"
-              class="btn-primary text-sm py-1.5 px-3 shrink-0">
-        No hint
-      </button>
-      <div class="inline-flex items-center rounded-lg border border-forest-200 bg-white shadow-sm px-3 py-2">
-        <input type="range"
-               min="500"
-               max="5000"
-               step="50"
-               value="5000"
-               data-practice-target="hintRadiusSlider"
-               data-action="input->practice#setHintRadius"
-               class="w-96 sm:w-[28rem] cursor-pointer accent-forest-600" />
-      </div>
-      <span data-practice-target="hintRadiusValue" class="min-w-20 text-right font-medium text-forest-800"><%= @hint_circle_enabled ? "4000 km" : "No hint" %></span>
-    </div>
 
     <div data-practice-target="hintLocationPanel" class="hidden ml-2 flex items-center gap-2 shrink-0">
       <span class="shrink-0">Location hint:</span>

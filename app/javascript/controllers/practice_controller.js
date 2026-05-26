@@ -1,11 +1,6 @@
 import { Controller } from "@hotwired/stimulus"
 import { MAPTILER_KEY } from "lib/maptiler"
 
-const HINT_RADIUS_MIN_KM = 0
-const HINT_RADIUS_MAX_KM = 5000
-const HINT_RADIUS_STEP_KM = 50
-const HINT_RADIUS_DEFAULT_ENABLED_KM = 5000
-const HINT_CIRCLE_LEGACY_RADIUS_KM = 4000
 const HINT_VISUAL_TIERS = [ 1, 2, 3 ]
 const HINT_VISUAL_POLL_MS = 2000
 const HINT_VISUAL_POLL_MAX_ATTEMPTS = 30
@@ -47,7 +42,7 @@ const CONTINENT_BY_COUNTRY_CODE = Object.freeze({
 })
 
 export default class extends Controller {
-  static targets = ["guessBtn", "nextBtn", "result", "imageLink", "timer", "timerBar", "timerPanel", "timerOption", "attemptsOption", "hintTypeOption", "hintRadiusPanel", "hintRadiusNoHintButton", "hintRadiusSlider", "hintRadiusValue", "hintLocationPanel", "hintLocationOption", "hintVisualPanel", "hintVisualOption", "hintQuota", "hintReadout", "saveForm", "removeForm", "saveStatus"]
+  static targets = ["guessBtn", "nextBtn", "result", "imageLink", "timer", "timerBar", "timerPanel", "timerOption", "attemptsOption", "hintTypeOption", "hintLocationPanel", "hintLocationOption", "hintVisualPanel", "hintVisualOption", "hintQuota", "hintReadout", "saveForm", "removeForm", "saveStatus"]
   static values = {
     imageId: Number,
     checkUrl: String,
@@ -56,7 +51,6 @@ export default class extends Controller {
     hintQuotaLimit: { type: Number, default: 100 },
     timeLimit: { type: Number, default: 0 },
     attempts: { type: Number, default: 1 },
-    hintCircle: { type: Boolean, default: false },
     signedIn: { type: Boolean, default: false },
     initiallySaved: { type: Boolean, default: false },
     practiceSetId: Number
@@ -145,11 +139,10 @@ export default class extends Controller {
 
   setHintType(event) {
     const type = String(event.params.type || "off")
-    const allowed = ["off", "radius", "location"]
+    const allowed = ["off", "location"]
     if (this.hasHintUrlValue) allowed.push("visual")
     if (!allowed.includes(type)) return
     this.hintType = type
-    if (type === "radius") this.hintRadiusKm = 0
     if (type === "location") this.hintLocationLevel = "none"
     if (type === "visual") this.#hintVisualRetry = this.#shouldRetryVisualHint()
     this.#applyHintSelection()
@@ -161,21 +154,6 @@ export default class extends Controller {
     this.hintType = "visual"
     this.hintVisualTier = tier
     this.#hintVisualRetry = this.#shouldRetryVisualHint()
-    this.#applyHintSelection()
-  }
-
-  setHintRadius(event) {
-    const radius = parseInt(event.target?.value || "0", 10)
-    if (!Number.isFinite(radius)) return
-    this.hintType = "radius"
-    this.hintRadiusKm = this.#normalizeHintRadiusKm(radius)
-    this.#applyHintSelection()
-  }
-
-  toggleHintRadiusNoHint() {
-    this.hintType = "radius"
-    if (this.hintRadiusKm <= 0) this.hintRadiusKm = HINT_RADIUS_DEFAULT_ENABLED_KM
-    else this.hintRadiusKm = 0
     this.#applyHintSelection()
   }
 
@@ -447,27 +425,20 @@ export default class extends Controller {
     else url.searchParams.delete("seconds")
     if (this.attemptsValue > 1) url.searchParams.set("attempts", String(this.attemptsValue))
     else url.searchParams.delete("attempts")
-    if (this.hintType === "radius") {
-      url.searchParams.set("hint_type", "radius")
-      url.searchParams.set("hint_radius", String(this.hintRadiusKm))
-      url.searchParams.delete("hint_location")
-      url.searchParams.delete("hint_tier")
-    } else if (this.hintType === "location") {
+    if (this.hintType === "location") {
       url.searchParams.set("hint_type", "location")
       url.searchParams.set("hint_location", this.hintLocationLevel)
-      url.searchParams.delete("hint_radius")
       url.searchParams.delete("hint_tier")
     } else if (this.hintType === "visual") {
       url.searchParams.set("hint_type", "visual")
       url.searchParams.set("hint_tier", String(this.hintVisualTier))
-      url.searchParams.delete("hint_radius")
       url.searchParams.delete("hint_location")
     } else {
       url.searchParams.delete("hint_type")
-      url.searchParams.delete("hint_radius")
       url.searchParams.delete("hint_location")
       url.searchParams.delete("hint_tier")
     }
+    url.searchParams.delete("hint_radius")
     url.searchParams.delete("hint_circle")
     url.searchParams.set("image_id", String(this.imageIdValue))
     window.history.replaceState({}, "", url.toString())
@@ -528,25 +499,6 @@ export default class extends Controller {
         option.setAttribute("aria-pressed", active ? "true" : "false")
         this.#syncOptionButtonStyle(option, active)
       })
-    }
-
-    if (this.hasHintRadiusPanelTarget) {
-      this.hintRadiusPanelTarget.classList.toggle("hidden", this.hintType !== "radius")
-    }
-    const radiusNoHint = this.hintType === "radius" && this.hintRadiusKm <= 0
-    if (this.hasHintRadiusNoHintButtonTarget) {
-      this.hintRadiusNoHintButtonTarget.setAttribute("aria-pressed", radiusNoHint ? "true" : "false")
-      this.#syncOptionButtonStyle(this.hintRadiusNoHintButtonTarget, radiusNoHint)
-    }
-    if (this.hasHintRadiusSliderTarget) {
-      const sliderRadius = radiusNoHint ? HINT_RADIUS_DEFAULT_ENABLED_KM : this.hintRadiusKm
-      this.hintRadiusSliderTarget.value = String(sliderRadius)
-      this.hintRadiusSliderTarget.disabled = radiusNoHint
-      this.hintRadiusSliderTarget.classList.toggle("opacity-50", radiusNoHint)
-      this.hintRadiusSliderTarget.classList.toggle("cursor-not-allowed", radiusNoHint)
-    }
-    if (this.hasHintRadiusValueTarget) {
-      this.hintRadiusValueTarget.textContent = this.#hintRadiusLabel(this.hintRadiusKm)
     }
 
     if (this.hasHintLocationPanelTarget) {
@@ -611,15 +563,6 @@ export default class extends Controller {
     this.#syncPracticeInUrl()
     this.#clearNextPrefetch()
 
-    if (this.hintType === "radius") {
-      this.hintLocationMessage = ""
-      this.hintVisualMessage = ""
-      this.#syncHintUi()
-      await this.#showHintCircle()
-      return
-    }
-
-    this.#hideHintCircle()
     if (this.hintType === "location") {
       this.hintVisualMessage = ""
       await this.#showLocationHint()
@@ -640,31 +583,16 @@ export default class extends Controller {
   #initializeHintStateFromUrl() {
     const params = new URLSearchParams(window.location.search)
     const type = params.get("hint_type")
-    const radius = parseInt(params.get("hint_radius") || "", 10)
     const level = params.get("hint_location")
 
     const tier = parseInt(params.get("hint_tier") || "", 10)
 
-    if (type === "radius") this.hintType = "radius"
-    else if (type === "location") this.hintType = "location"
+    if (type === "location") this.hintType = "location"
     else if (type === "visual" && this.hasHintUrlValue) this.hintType = "visual"
-    else this.hintType = this.hintCircleValue ? "radius" : "off"
+    else this.hintType = "off"
 
-    const defaultRadius = this.hintCircleValue ? HINT_CIRCLE_LEGACY_RADIUS_KM : HINT_RADIUS_MIN_KM
-    this.hintRadiusKm = this.#normalizeHintRadiusKm(Number.isFinite(radius) ? radius : defaultRadius)
     this.hintLocationLevel = ["none", "continent", "country"].includes(level) ? level : "none"
     this.hintVisualTier = HINT_VISUAL_TIERS.includes(tier) ? tier : 1
-  }
-
-  #normalizeHintRadiusKm(radius) {
-    if (radius <= 0) return 0
-    const clamped = Math.max(HINT_RADIUS_MIN_KM, Math.min(HINT_RADIUS_MAX_KM, radius))
-    const stepped = Math.round(clamped / HINT_RADIUS_STEP_KM) * HINT_RADIUS_STEP_KM
-    return Math.max(HINT_RADIUS_MIN_KM, Math.min(HINT_RADIUS_MAX_KM, stepped))
-  }
-
-  #hintRadiusLabel(radiusKm) {
-    return radiusKm <= 0 ? "No hint" : `${radiusKm} km`
   }
 
   async #showLocationHint() {
@@ -785,7 +713,6 @@ export default class extends Controller {
     this.hintLocationMessage = ""
     this.hintVisualMessage = ""
     this.#cancelVisualHintPolling()
-    this.#hideHintCircle()
     this.#syncHintUi()
     this.#syncPracticeInUrl()
   }
@@ -810,12 +737,6 @@ export default class extends Controller {
 
     this.#applyHintQuotaFromPayload(payload)
 
-    if (payload.error) {
-      this.hintVisualMessage = this.#visualHintErrorMessage(payload.error)
-      this.#syncHintUi()
-      return
-    }
-
     if (payload.status === "ready") {
       this.hintVisualMessage = String(payload.hint || "").trim()
       this.#syncHintUi()
@@ -826,6 +747,12 @@ export default class extends Controller {
       this.hintVisualMessage = this.#withAiCreditsNotice(
         String(payload.error || "Couldn't load AI hint. Try again.")
       )
+      this.#syncHintUi()
+      return
+    }
+
+    if (payload.error) {
+      this.hintVisualMessage = this.#visualHintErrorMessage(payload.error)
       this.#syncHintUi()
       return
     }
@@ -888,12 +815,6 @@ export default class extends Controller {
 
       this.#applyHintQuotaFromPayload(payload)
 
-      if (payload.error) {
-        this.hintVisualMessage = this.#visualHintErrorMessage(payload.error)
-        this.#syncHintUi()
-        return
-      }
-
       if (payload.status === "ready") {
         this.hintVisualMessage = String(payload.hint || "").trim()
         this.#syncHintUi()
@@ -904,6 +825,12 @@ export default class extends Controller {
         this.hintVisualMessage = this.#withAiCreditsNotice(
           String(payload.error || "Couldn't load AI hint. Try again.")
         )
+        this.#syncHintUi()
+        return
+      }
+
+      if (payload.error) {
+        this.hintVisualMessage = this.#visualHintErrorMessage(payload.error)
         this.#syncHintUi()
         return
       }
@@ -927,6 +854,8 @@ export default class extends Controller {
   }
 
   #visualHintErrorMessage(error) {
+    const text = String(error || "").trim()
+    if (/verified email/i.test(text)) return text
     if (error === "disabled" || error === "network") return AI_HINT_UNAVAILABLE_MESSAGE
     if (error === "not_found") {
       return this.#withAiCreditsNotice("Couldn't load AI hint for this image.")
@@ -936,39 +865,10 @@ export default class extends Controller {
 
   #withAiCreditsNotice(message) {
     const text = String(message || "").trim()
-    if (!text || /credits|quota|Gemini|Daily AI hint limit|unavailable at the moment/i.test(text)) {
+    if (!text || /credits|quota|Gemini|Daily AI hint limit|verified email|unavailable at the moment/i.test(text)) {
       return text
     }
     return `${text}${AI_HINT_CREDITS_NOTE}`
-  }
-
-  async #showHintCircle() {
-    if (this.hintRadiusKm <= 0) {
-      this.#hideHintCircle()
-      return
-    }
-
-    const mapCtrl = this.#guessMapController()
-    if (!mapCtrl) return
-
-    const answer = await this.#loadAnswerForHint()
-    if (!answer) {
-      this.resultTarget.className = "text-lg font-medium text-red-600"
-      this.resultTarget.textContent = `Couldn't load ${this.hintRadiusKm} km hint.`
-      this.hintType = "off"
-      this.hintLocationMessage = ""
-      this.#syncHintUi()
-      this.#syncPracticeInUrl()
-      return
-    }
-
-    mapCtrl.showAnswerHintCircle(answer.lat, answer.lng, this.hintRadiusKm)
-  }
-
-  #hideHintCircle() {
-    const mapCtrl = this.#guessMapController()
-    if (!mapCtrl) return
-    mapCtrl.hideAnswerHintCircle()
   }
 
   async #loadAnswerForHint() {
@@ -1045,27 +945,20 @@ export default class extends Controller {
     else url.searchParams.delete("seconds")
     if (this.attemptsValue > 1) url.searchParams.set("attempts", String(this.attemptsValue))
     else url.searchParams.delete("attempts")
-    if (this.hintType === "radius") {
-      url.searchParams.set("hint_type", "radius")
-      url.searchParams.set("hint_radius", String(this.hintRadiusKm))
-      url.searchParams.delete("hint_location")
-      url.searchParams.delete("hint_tier")
-    } else if (this.hintType === "location") {
+    if (this.hintType === "location") {
       url.searchParams.set("hint_type", "location")
       url.searchParams.set("hint_location", this.hintLocationLevel)
-      url.searchParams.delete("hint_radius")
       url.searchParams.delete("hint_tier")
     } else if (this.hintType === "visual") {
       url.searchParams.set("hint_type", "visual")
       url.searchParams.set("hint_tier", String(this.hintVisualTier))
-      url.searchParams.delete("hint_radius")
       url.searchParams.delete("hint_location")
     } else {
       url.searchParams.delete("hint_type")
-      url.searchParams.delete("hint_radius")
       url.searchParams.delete("hint_location")
       url.searchParams.delete("hint_tier")
     }
+    url.searchParams.delete("hint_radius")
     url.searchParams.delete("hint_circle")
     url.searchParams.delete("image_id")
     return url
