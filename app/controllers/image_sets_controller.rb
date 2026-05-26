@@ -9,14 +9,43 @@ class ImageSetsController < ApplicationController
   before_action :block_if_filtered, only: %i[locations update_locations add_image attach_blob remove_item]
 
   # GET /image_sets
+  IMAGE_SET_INDEX_SORTS = %w[name created_at updated_at items_count].freeze
+  IMAGE_SET_TAG_MATCHES = %w[all any].freeze
+  IMAGE_SET_TAG_CASES = %w[insensitive sensitive].freeze
+
   def index
+    @tag_case = IMAGE_SET_TAG_CASES.include?(params[:tag_case]) ? params[:tag_case] : "insensitive"
+    @selected_tags = selected_tags_from_params
+    @tag_match = IMAGE_SET_TAG_MATCHES.include?(params[:tag_match]) ? params[:tag_match] : "all"
+    @filter_tags = if tag_case_sensitive?
+      Tag.where(name: @selected_tags).order(:name).to_a
+    else
+      Tag.where(slug: @selected_tags).order(:name).to_a
+    end
+    @sort = IMAGE_SET_INDEX_SORTS.include?(params[:sort]) ? params[:sort] : "name"
+    @direction =
+      if %w[asc desc].include?(params[:direction])
+        params[:direction]
+      else
+        @sort == "name" ? "asc" : "desc"
+      end
+
     with_counts = ->(scope) {
       scope.left_joins(:image_set_items)
            .group("image_sets.id")
            .select("image_sets.*, COUNT(image_set_items.id) AS items_count")
     }
-    @my_sets     = with_counts.call(ImageSet.owned_by(Current.user)).order(:name)
-    @public_sets = with_counts.call(ImageSet.public_catalog).order(:name)
+
+    @my_sets     = with_counts.call(ImageSet.owned_by(Current.user))
+    @public_sets = with_counts.call(ImageSet.public_catalog)
+
+    if @selected_tags.any?
+      @my_sets = @my_sets.tagged_with(@selected_tags, match: @tag_match, case_sensitive: tag_case_sensitive?)
+      @public_sets = @public_sets.tagged_with(@selected_tags, match: @tag_match, case_sensitive: tag_case_sensitive?)
+    end
+
+    @my_sets = apply_index_sort(@my_sets).preload(:tags)
+    @public_sets = apply_index_sort(@public_sets).preload(:tags)
   end
 
   # GET /image_sets/1
@@ -561,7 +590,7 @@ class ImageSetsController < ApplicationController
   # Allowing them through the regular update would silently desync materialized
   # items from the recorded filter.
   def image_set_params
-    allowed = [ :name, :visibility, :map_style ]
+    allowed = [ :name, :visibility, :map_style, :tag_list ]
     if action_name == "create"
       allowed += [ :parent_image_set_id, :custom_areas_json, { region_ids: [] } ]
     end
@@ -580,6 +609,36 @@ class ImageSetsController < ApplicationController
       permitted.delete(:custom_areas_json)
     end
     permitted
+  end
+
+  def selected_tags_from_params
+    tags = Array(params[:tags]).map(&:to_s)
+    tags << params[:tag].to_s if params[:tag].present?
+    tag_case_sensitive? ? ImageSet.normalize_tag_names(tags) : ImageSet.normalize_tag_slugs(tags)
+  end
+
+  def tag_case_sensitive?
+    @tag_case == "sensitive"
+  end
+
+  def index_filter_params
+    {
+      tags: @selected_tags.presence,
+      tag_match: (@tag_match if @selected_tags.any?),
+      tag_case: @tag_case,
+      sort: @sort,
+      direction: @direction
+    }.compact
+  end
+  helper_method :index_filter_params
+
+  def apply_index_sort(scope)
+    case @sort
+    when "items_count"
+      scope.order(Arel.sql("items_count #{@direction}")).order(:name)
+    else
+      scope.order(@sort => @direction)
+    end
   end
 
   # Returns an array of validated custom-area hashes — strict shape, bounded

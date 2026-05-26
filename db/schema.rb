@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_18_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_26_000002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -170,6 +170,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_18_000001) do
     t.index ["image_set_id"], name: "index_image_set_items_on_image_set_id"
   end
 
+  create_table "image_set_tags", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "image_set_id", null: false
+    t.bigint "tag_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["image_set_id", "tag_id"], name: "index_image_set_tags_on_image_set_id_and_tag_id", unique: true
+    t.index ["image_set_id"], name: "index_image_set_tags_on_image_set_id"
+    t.index ["tag_id"], name: "index_image_set_tags_on_tag_id"
+  end
+
   create_table "image_sets", force: :cascade do |t|
     t.text "ai_explanation"
     t.string "ai_model"
@@ -248,6 +258,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_18_000001) do
     t.index ["user_id"], name: "index_sessions_on_user_id"
   end
 
+  create_table "tags", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "name", null: false
+    t.string "slug", null: false
+    t.datetime "updated_at", null: false
+    t.index ["name"], name: "index_tags_on_name"
+    t.index ["slug"], name: "index_tags_on_slug", unique: true
+  end
+
   create_table "users", force: :cascade do |t|
     t.boolean "admin", default: false, null: false
     t.datetime "created_at", null: false
@@ -279,6 +298,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_18_000001) do
   add_foreign_key "image_ai_hints", "images"
   add_foreign_key "image_set_items", "image_sets"
   add_foreign_key "image_set_items", "images"
+  add_foreign_key "image_set_tags", "image_sets"
+  add_foreign_key "image_set_tags", "tags"
   add_foreign_key "image_sets", "image_sets", column: "parent_image_set_id"
   add_foreign_key "image_sets", "users"
   add_foreign_key "regions", "regions", column: "parent_id"

@@ -23,6 +23,119 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
     assert_redirected_to locations_image_set_path(set)
   end
 
+  test "create accepts tag_list and persists tags" do
+    assert_difference("ImageSet.count", 1) do
+      post image_sets_path, params: { image_set: { name: "Tagged Set", visibility: "private", tag_list: "  forest  ,  alpine  " } }
+    end
+    set = ImageSet.last
+    assert_equal %w[Alpine Forest], set.tags.order(:name).pluck(:name)
+  end
+
+  test "index filters both sections by legacy single tag param" do
+    get image_sets_path(tag: "  FOREST  ")
+    assert_response :success
+    assert_match "Alice&#39;s Private Set", response.body
+    assert_no_match "Alice&#39;s Public Set", response.body
+  end
+
+  test "index defaults tag filtering to case insensitive" do
+    get image_sets_path(tags: [ "  forest  " ])
+    assert_response :success
+    assert_match "Alice&#39;s Private Set", response.body
+  end
+
+  test "index can filter tags with exact case sensitivity" do
+    get image_sets_path(tags: [ "  forest  " ], tag_case: "sensitive")
+    assert_response :success
+    assert_no_match "Alice&#39;s Private Set", response.body
+
+    get image_sets_path(tags: [ "  Forest  " ], tag_case: "sensitive")
+    assert_response :success
+    assert_match "Alice&#39;s Private Set", response.body
+    assert_select "input[type='hidden'][name='tags[]'][value='Forest']", count: 1
+  end
+
+  test "index filters with tags array match all" do
+    get image_sets_path(tags: %w[forest alpine], tag_match: "all")
+    assert_response :success
+    assert_match "Alice&#39;s Private Set", response.body
+    assert_no_match "Alice&#39;s Public Set", response.body
+  end
+
+  test "index filters with tags array match any" do
+    get image_sets_path(tags: %w[forest alpine], tag_match: "any")
+    assert_response :success
+    assert_match "Alice&#39;s Private Set", response.body
+    assert_match "Alice&#39;s Public Set", response.body
+  end
+
+  test "index case-sensitive tag matching supports multiple tags" do
+    get image_sets_path(tags: [ "Forest", "Alpine" ], tag_match: "all", tag_case: "sensitive")
+    assert_response :success
+    assert_match "Alice&#39;s Private Set", response.body
+    assert_no_match "Alice&#39;s Public Set", response.body
+
+    get image_sets_path(tags: [ "Forest", "alpine" ], tag_match: "all", tag_case: "sensitive")
+    assert_response :success
+    assert_no_match "Alice&#39;s Private Set", response.body
+  end
+
+  test "index normalizes blank duplicate tag params" do
+    get image_sets_path(tags: [ " Forest ", "", "forest", "Alpine!" ], tag_match: "all")
+    assert_response :success
+    assert_match "Alice&#39;s Private Set", response.body
+    assert_no_match "Alice&#39;s Public Set", response.body
+    assert_select "input[type='hidden'][name='tags[]'][value='forest']", count: 1
+    assert_select "input[type='hidden'][name='tags[]'][value='alpine']", count: 1
+  end
+
+  test "index active filter chips link to remove one tag" do
+    get image_sets_path(tags: %w[Forest Alpine], tag_match: "all", tag_case: "sensitive", sort: "name", direction: "asc")
+    assert_response :success
+    assert_select 'a[aria-label="Remove Forest filter"][href*="tags%5B%5D=Alpine"][href*="tag_match=all"][href*="tag_case=sensitive"][href*="sort=name"][href*="direction=asc"]'
+    assert_select 'a[aria-label="Remove Alpine filter"][href*="tags%5B%5D=Forest"][href*="tag_match=all"][href*="tag_case=sensitive"][href*="sort=name"][href*="direction=asc"]'
+    assert_select 'a[title="Remove Alpine"][href*="tags%5B%5D=alpine"]', count: 0
+  end
+
+  test "index sort links preserve tags and tag_match" do
+    get image_sets_path(tags: %w[Forest Alpine], tag_match: "any", tag_case: "sensitive", sort: "name", direction: "asc")
+    assert_response :success
+    assert_select "button[data-url*='tags%5B%5D=Forest'][data-url*='tags%5B%5D=Alpine'][data-url*='tag_match=any'][data-url*='tag_case=sensitive'][data-url*='sort=created_at']"
+  end
+
+  test "index match links preserve case matching setting" do
+    get image_sets_path(tags: %w[Forest Alpine], tag_match: "any", tag_case: "sensitive", sort: "name", direction: "asc")
+    assert_response :success
+    assert_select "a[href*='tags%5B%5D=Forest'][href*='tags%5B%5D=Alpine'][href*='tag_match=all'][href*='tag_case=sensitive']",
+                  text: "All tags"
+  end
+
+  test "index case matching button toggles mode and preserves filters" do
+    get image_sets_path(tags: %w[Forest Alpine], tag_match: "any", tag_case: "sensitive", sort: "created_at", direction: "desc")
+    assert_response :success
+    assert_select "input[type='hidden'][name='tag_case'][value='sensitive']"
+    assert_select "a[aria-label='Ignore case'][title='Ignore case'][aria-pressed='true'].bg-forest-600[href*='tags%5B%5D=Forest'][href*='tags%5B%5D=Alpine'][href*='tag_match=any'][href*='tag_case=insensitive'][href*='sort=created_at'][href*='direction=desc']",
+                  text: "Aa"
+
+    get image_sets_path(tags: %w[forest alpine], tag_match: "all", tag_case: "insensitive", sort: "updated_at", direction: "asc")
+    assert_response :success
+    assert_select "input[type='hidden'][name='tag_case'][value='insensitive']"
+    assert_select "a[aria-label='Match case'][title='Match case'][aria-pressed='false'][href*='tags%5B%5D=forest'][href*='tags%5B%5D=alpine'][href*='tag_match=all'][href*='tag_case=sensitive'][href*='sort=updated_at'][href*='direction=asc']",
+                  text: "Aa"
+  end
+
+  test "index tag pills append to current filters" do
+    get image_sets_path(tags: %w[Forest], tag_match: "any", tag_case: "sensitive", sort: "created_at", direction: "desc")
+    assert_response :success
+    assert_select "a[href*='tags%5B%5D=Forest'][href*='tags%5B%5D=Alpine'][href*='tag_match=any'][href*='tag_case=sensitive'][href*='sort=created_at'][href*='direction=desc']", text: "Alpine"
+  end
+
+  test "index falls back to default sort when invalid sort is given" do
+    get image_sets_path(sort: "hax")
+    assert_response :success
+    assert_select "span[data-dropdown-target='label']", text: "Name (A–Z)"
+  end
+
   test "show is accessible for public set by any logged-in user" do
     get image_set_path(image_sets(:alice_public))
     assert_response :success

@@ -36,5 +36,13 @@
     <p class="text-xs text-gray-500">Used by the guess map while playing this set and the set's map view.</p>
   </div>
 
+  <div class="space-y-1">
+    <%= f.label :tag_list, "Tags", class: "block text-sm font-medium text-gray-700" %>
+    <%= f.text_field :tag_list,
+          class: field_class(image_set, :tag_list),
+          placeholder: "forest, alpine, desert" %>
+    <p class="text-xs text-gray-500">Comma-separated. Used to filter sets on the Image Sets page.</p>
+  </div>
+
   <%= f.submit image_set.persisted? ? "Save changes" : "Create set", class: "btn-primary" %>
 <% end %>
