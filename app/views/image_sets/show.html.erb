@@ -40,6 +40,9 @@
           <%= button_to "Play", games_path, method: :post,
                 params: { image_set_id: @image_set.id },
                 class: "btn-primary" %>
+          <% if email_verified? %>
+            <%= link_to "Practice this set", practice_path(practice_set_id: @image_set.id), class: "btn-secondary" %>
+          <% end %>
         <% end %>
         <%= link_to "Map", map_image_set_path(@image_set), class: "btn-secondary" %>
         <% unless practice_image_set?(@image_set) %>

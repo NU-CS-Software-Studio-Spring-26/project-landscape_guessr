@@ -1,17 +1,24 @@
 # frozen_string_literal: true
 
-# Tracks which images remain in a "Saved for Practice" set run (session-backed).
+# Tracks a practice-set run in the session.
+#
+# The session stores only the set_id, total image count, and the list of
+# *completed* image IDs (starts empty, grows by one per round).  The list of
+# *remaining* IDs is computed on demand from the database so that large image
+# sets never overflow the 4 KB cookie limit.
 class PracticeSetProgress
   SESSION_KEY = :practice_set_progress
 
   attr_reader :set_id, :total
 
-  def self.start(session, set)
-    image_ids = located_image_ids_for(set)
+  # Begin a new run.  Pass the precomputed +all_ids+ array (already fetched by
+  # the caller) to avoid a redundant DB query.
+  def self.start(session, set, all_ids: nil)
+    ids = all_ids || located_image_ids_for(set)
     session[SESSION_KEY] = {
-      "set_id" => set.id,
-      "remaining" => image_ids.shuffle,
-      "total" => image_ids.size
+      "set_id"        => set.id,
+      "completed_ids" => [],
+      "total"         => ids.size
     }
     new(session, session[SESSION_KEY])
   end
@@ -39,23 +46,29 @@ class PracticeSetProgress
     @data = data
     @set_id = data["set_id"].to_i
     @total = data["total"].to_i
-    @remaining = Array(data["remaining"]).map(&:to_i)
+    # Prefer new completed_ids format; fall back to [] for legacy sessions that
+    # stored remaining IDs (those sessions simply restart from the beginning).
+    @completed_ids = Array(data["completed_ids"]).map(&:to_i)
   end
 
-  def remaining
-    @remaining.dup
+  # Returns image IDs not yet completed in this run.
+  # +all_ids+ must be supplied by the caller (fetched from the DB once per
+  # request) so this method never issues its own query.
+  def remaining(all_ids:)
+    (all_ids - @completed_ids).uniq
   end
 
   def finished?
-    @remaining.empty?
+    @completed_ids.size >= @total
   end
 
-  def current_image_id
-    @remaining.first
+  # Returns a random image ID from the remaining images.
+  def current_image_id(all_ids:)
+    remaining(all_ids: all_ids).sample
   end
 
   def completed_count
-    @total - @remaining.size
+    @completed_ids.size
   end
 
   def position_label
@@ -65,14 +78,15 @@ class PracticeSetProgress
   end
 
   def complete!(image_id)
-    @remaining.delete(image_id.to_i)
+    @completed_ids << image_id.to_i unless @completed_ids.include?(image_id.to_i)
     persist!
   end
 
   private
 
   def persist!
-    @data["remaining"] = @remaining
+    @data["completed_ids"] = @completed_ids
+    @data.delete("remaining") # Remove legacy key if present
     @session[SESSION_KEY] = @data
   end
 end

@@ -16,6 +16,10 @@
       <%= button_to "Play", games_path, method: :post,
             params: { image_set_id: set.id },
             class: "btn-primary text-sm py-1.5" %>
+      <% set_items_count = set.respond_to?(:items_count) ? set.items_count : set.image_set_items.count %>
+      <% if email_verified? && set_items_count.positive? %>
+        <%= link_to "Practice", practice_path(practice_set_id: set.id), class: "btn-secondary text-sm py-1.5" %>
+      <% end %>
     <% end %>
     <div data-controller="dropdown" class="relative">
       <button type="button" data-action="click->dropdown#toggle"

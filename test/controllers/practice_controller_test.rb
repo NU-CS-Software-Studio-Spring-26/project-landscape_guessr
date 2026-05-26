@@ -155,7 +155,7 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
 
     get practice_path(practice_set_id: saved_set.id)
     assert_response :success
-    assert_includes response.body, "Saved practice set"
+    assert_includes response.body, "Saved for Practice"
     assert_includes response.body, "data-practice-image-id-value=\"#{@public_image.id}\""
     assert_includes response.body, "data-practice-practice-set-id-value=\"#{saved_set.id}\""
   end
@@ -538,6 +538,98 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
 
     assert_response :not_found
     assert_equal "image_not_found", JSON.parse(response.body)["error"]
+  end
+
+  test "verified user can practice with a public image set" do
+    sign_in_as @alice
+    # alice_public already has images one..five with coordinates from fixtures
+    public_set = image_sets(:alice_public)
+
+    get practice_path(practice_set_id: public_set.id)
+    assert_response :success
+    assert_includes response.body, "data-practice-practice-set-id-value=\"#{public_set.id}\""
+  end
+
+  test "verified user can practice with their own private image set" do
+    sign_in_as @alice
+    # alice_private already has alice_only (and image one) with coordinates from fixtures
+    private_set = image_sets(:alice_private)
+
+    get practice_path(practice_set_id: private_set.id)
+    assert_response :success
+    assert_includes response.body, "data-practice-practice-set-id-value=\"#{private_set.id}\""
+  end
+
+  test "unverified user cannot use practice_set_id for a non-saved-practice set" do
+    @alice.update!(email_verified_at: nil)
+    sign_in_as @alice
+    # alice_public already has images with coordinates from fixtures
+    public_set = image_sets(:alice_public)
+
+    get practice_path(practice_set_id: public_set.id)
+    assert_redirected_to practice_path
+  end
+
+  test "unverified user can still practice with their saved-for-practice set" do
+    @alice.update!(email_verified_at: nil)
+    sign_in_as @alice
+    saved_set = @alice.image_sets.create!(name: "Saved for Practice", visibility: "private", map_style: "outdoor-v2", system_managed: true)
+    saved_set.image_set_items.create!(
+      image: @public_image,
+      latitude: @public_image.latitude,
+      longitude: @public_image.longitude
+    )
+    SavedPracticeImage.create!(user: @alice, image: @public_image)
+
+    get practice_path(practice_set_id: saved_set.id)
+    assert_response :success
+  end
+
+  test "verified user cannot practice with another user's private set" do
+    sign_in_as @bob
+    private_set = image_sets(:alice_private)
+
+    get practice_path(practice_set_id: private_set.id)
+    assert_redirected_to practice_path
+  end
+
+  test "practice show includes set selector for verified user" do
+    sign_in_as @alice
+
+    get practice_path
+    assert_response :success
+    assert_includes response.body, "practice_set_id"
+    assert_includes response.body, "practice_set_selector"
+  end
+
+  test "practice show does not include set selector for unverified user" do
+    @alice.update!(email_verified_at: nil)
+    sign_in_as @alice
+
+    get practice_path
+    assert_response :success
+    assert_not_includes response.body, "practice_set_selector"
+  end
+
+  test "completing a non-saved practice set shows view this set link" do
+    sign_in_as @alice
+    # Create a fresh single-image set so one completion finishes the set
+    solo_set = @alice.image_sets.create!(name: "Solo Test Set", visibility: "private", map_style: "outdoor-v2")
+    solo_set.image_set_items.create!(
+      image: @public_image,
+      latitude: @public_image.latitude,
+      longitude: @public_image.longitude
+    )
+
+    get practice_path(practice_set_id: solo_set.id, completed_image_id: @public_image.id)
+    assert_redirected_to practice_complete_path(practice_set_id: solo_set.id)
+
+    follow_redirect!
+    assert_response :success
+    assert_includes response.body, "Congratulations"
+    assert_includes response.body, solo_set.name
+    assert_includes response.body, "View this set"
+    assert_not_includes response.body, "Saved practice images"
   end
 
   private

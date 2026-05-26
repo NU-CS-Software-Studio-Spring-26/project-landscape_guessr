@@ -31,10 +31,31 @@
       <h1 class="heading-page">Where is this?</h1>
       <% if @practice_set_progress %>
         <p class="text-sm text-gray-500 mt-1">
-          Saved practice set · <%= @practice_set_progress.position_label %>
+          <%= @practice_set.name %> · <%= @practice_set_progress.position_label %>
         </p>
       <% end %>
     </div>
+    <% if email_verified? && @available_sets&.any? %>
+      <form method="get" action="<%= practice_path %>" class="flex items-center gap-1.5 shrink-0">
+        <% if @time_limit_seconds %>
+          <input type="hidden" name="seconds" value="<%= @time_limit_seconds %>">
+        <% end %>
+        <% if @attempts.to_i > 1 %>
+          <input type="hidden" name="attempts" value="<%= @attempts %>">
+        <% end %>
+        <label for="practice_set_selector" class="sr-only">Select practice set</label>
+        <select id="practice_set_selector" name="practice_set_id"
+                class="form-input text-sm py-1.5 max-w-[200px]">
+          <option value="">Random images</option>
+          <% @available_sets.each do |set| %>
+            <option value="<%= set.id %>" <%= @practice_set&.id == set.id ? "selected" : "" %>>
+              <%= set.name %>
+            </option>
+          <% end %>
+        </select>
+        <button type="submit" class="btn-secondary text-sm py-1.5 px-3 shrink-0">Switch</button>
+      </form>
+    <% end %>
   </div>
 
   <div class="flex flex-wrap items-center gap-2 text-xs text-gray-500">
