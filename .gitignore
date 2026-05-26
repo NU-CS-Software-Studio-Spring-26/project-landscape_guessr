@@ -49,3 +49,6 @@
 
 # For developement with AI
 AGENTS.md
+
+# Local Stripe support-button deployment notes
+/stripe_support_deployment_plan/
