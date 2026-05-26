@@ -2,7 +2,7 @@
 
 A GeoGuessr-style web game: players see a landscape photograph (mountain, lake, waterfall, etc.) and guess where it is on a world map. Rails 8 + PostgreSQL + TailwindCSS.
 
-## Heroku deployment: https://landscape-guessr-cc7bc949a622.herokuapp.com/
+## Heroku deployment: [https://landscape-guessr-cc7bc949a622.herokuapp.com/](https://landscape-guessr-cc7bc949a622.herokuapp.com/)
 
 ## Team
 
@@ -39,6 +39,7 @@ A GeoGuessr-style web game: players see a landscape photograph (mountain, lake, 
 - **TailwindCSS** via `tailwindcss-rails`
 - **MapTiler SDK JS** (wraps MapLibre GL) for all maps, with session-based tile billing and per-`ImageSet` basemap (`outdoor-v2` default; streets / bright / topo / satellite / hybrid). See *Conventions → Maps* for the loader, trail-hiding, and Turbo gotchas.
 - **Active Storage** + **AWS S3** for user uploads
+- **Stripe Checkout** for the footer "Support us" donation flow (test mode friendly)
 - **libvips** (via `image_processing`) for HEIC -> JPEG conversion, resize, color-space normalization
 - **rgeo** for point-in-polygon checks when materializing filtered image sets
 - **PostgreSQL extensions** (`pg_trgm`, `unaccent`) for typo-tolerant region search; **GeoNames** + **Nominatim** as data sources for the regions tree (continent → country → admin1 → admin2 → city)
@@ -80,11 +81,13 @@ AI-generated visual hints for practice mode use the [Gemini API](https://ai.goog
 1. Create an API key at [Google AI Studio](https://aistudio.google.com/apikey) (sign in with a Google account; no Cloud project required for the free tier).
 2. Copy `.env.example` to `.env` (or add to your existing `.env`) and set:
 
-| Variable | Required | Default | Purpose |
-|---|---|---|---|
-| `GEMINI_API_KEY` | When hints are on | — | API key from AI Studio |
-| `GEMINI_MODEL` | No | `gemini-2.5-flash-lite` | Model id sent to the Gemini API (hints only — image-set generation pins its own Flash/Pro models) |
-| `AI_HINTS_ENABLED` | No | off | Set to `1` (or `true`) to enable when a key is present |
+
+| Variable           | Required          | Default                 | Purpose                                                                                           |
+| ------------------ | ----------------- | ----------------------- | ------------------------------------------------------------------------------------------------- |
+| `GEMINI_API_KEY`   | When hints are on | —                       | API key from AI Studio                                                                            |
+| `GEMINI_MODEL`     | No                | `gemini-2.5-flash-lite` | Model id sent to the Gemini API (hints only — image-set generation pins its own Flash/Pro models) |
+| `AI_HINTS_ENABLED` | No                | off                     | Set to `1` (or `true`) to enable when a key is present                                            |
+
 
 The app boots fine without these variables. `GeminiConfig.enabled?` is `true` only when `AI_HINTS_ENABLED` is truthy **and** `GEMINI_API_KEY` is set. Later phases call the API only when enabled.
 
@@ -121,6 +124,12 @@ Signed-in users can build an image set from a natural-language prompt ("volcanoe
 - Capped at **20 generations per user per day** (`AI_DAILY_LIMIT` in `ImageSetsController`); counter persists in the `ai_usages` table so it survives dyno restarts.
 - Agent loop and import run inside `AiGenerationJob` / `AiImportImagesJob` on the `:async` queue, so the browser polls `/ai_generations/:id/status` while it works — see the dyno-restart caveat under *Background-processing caveats* below.
 
+### Stripe support button (optional)
+
+The footer has a **Support us** button that starts a Stripe Checkout session for a one-time **$3 USD** demo donation toward hosting costs. It is wired for Stripe test mode: set `STRIPE_SECRET_KEY` to a Stripe test secret key locally or in Heroku config. If the key is missing, the button redirects home with "Donations are not available right now." instead of calling Stripe.
+
+Checkout returns to `/donation/success` after payment and `/donation/cancel` if the user backs out. The button is available to signed-in and signed-out visitors.
+
 ### S3 / Active Storage setup (for user uploads)
 
 User-uploaded images go through Active Storage's direct-upload flow. Development defaults to local disk (`storage/`) — no AWS setup required. Production uses S3.
@@ -136,24 +145,29 @@ export AWS_REGION=us-east-2
 
 ## Data model
 
-| Model | Belongs to | Has many | Key columns |
-|---|---|---|---|
-| `User` | — | `sessions`, `games`, `image_sets`, `connected_services` | `email_address`, `username` (nullable while OAuth users pick one), `password_digest`, `admin` |
-| `Session` | `User` | — | `ip_address`, `user_agent` |
-| `ConnectedService` | `User` | — | `provider`, `uid`, `email` (unique on `[provider, uid]`; maps OAuth identities to users) |
-| `Game` | `User`, `ImageSet?` | `game_images`, `guesses`, `images` (through `game_images`) | `status`, `score`, `completed_at` |
-| `GameImage` | `Game`, `Image` | — | `position` (1–5), `answer_latitude`, `answer_longitude` (snapshot at game-creation time) |
-| `Image` | — | `guesses`, `game_images`, `image_set_items`, `image_sets` (through items) | `url`, `latitude`, `longitude`, `title`; optional `photo` Active Storage attachment |
-| `ImageSet` | `User?`, `ImageSet?` (parent) | `image_set_items`, `images` (through items), `games`, `filtered_sets` | `name`, `visibility` (`private`\|`public`), `is_system_default`, `map_style`, `parent_image_set_id`, `region_ids` (bigint[]), `custom_areas` (jsonb), AI-import bookkeeping (`ai_prompt`, `ai_query`, `ai_model`, `ai_region_filter`, `import_state`, `import_progress`, `import_total`, `import_warnings`) |
-| `ImageSetItem` | `ImageSet`, `Image` | — | `latitude`, `longitude` (per-set override of the image's coords) |
-| `Region` | `Region?` (parent) | `children` (self-join) | `name`, `admin_level` (`continent`\|`country`\|`admin1`\|`admin2`\|`city`), `iso_code`, `boundary` (jsonb GeoJSON), `population`, `min_lat`/`max_lat`/`min_lng`/`max_lng`, `normalized_name` |
-| `Guess` | `Game`, `Image` | — | `latitude`, `longitude` (player's pick) |
-| `AiGeneration` | `User` | — | `user_message`, `conversation_json`, `status` (`pending`/`running`/`completed`/`failed`/`canceled`), `phase`, `progress_message`, `result_json` + `result_count` + `preview_json` (filled as the job runs), `error`, `model_used` |
-| `AiUsage` | `User` | — | `day`, `count` (unique on `[user_id, day]`) — daily counter for the AI image-set rate limit |
+
+| Model              | Belongs to                    | Has many                                                                                        | Key columns                                                                                                                                                                                                                                                                                                |
+| ------------------ | ----------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `User`             | —                             | `sessions`, `games`, `image_sets`, `connected_services`                                         | `email_address`, `username` (nullable while OAuth users pick one), `password_digest`, `admin`                                                                                                                                                                                                              |
+| `Session`          | `User`                        | —                                                                                               | `ip_address`, `user_agent`                                                                                                                                                                                                                                                                                 |
+| `ConnectedService` | `User`                        | —                                                                                               | `provider`, `uid`, `email` (unique on `[provider, uid]`; maps OAuth identities to users)                                                                                                                                                                                                                   |
+| `Game`             | `User`, `ImageSet?`           | `game_images`, `guesses`, `images` (through `game_images`)                                      | `status`, `score`, `completed_at`                                                                                                                                                                                                                                                                          |
+| `GameImage`        | `Game`, `Image`               | —                                                                                               | `position` (1–5), `answer_latitude`, `answer_longitude` (snapshot at game-creation time)                                                                                                                                                                                                                   |
+| `Image`            | —                             | `guesses`, `game_images`, `image_set_items`, `image_sets` (through items)                       | `url`, `latitude`, `longitude`, `title`; optional `photo` Active Storage attachment                                                                                                                                                                                                                        |
+| `ImageSet`         | `User?`, `ImageSet?` (parent) | `image_set_items`, `images` (through items), `games`, `filtered_sets`, `image_set_tags`, `tags` | `name`, `visibility` (`private`|`public`), `is_system_default`, `map_style`, `parent_image_set_id`, `region_ids` (bigint[]), `custom_areas` (jsonb), AI-import bookkeeping (`ai_prompt`, `ai_query`, `ai_model`, `ai_region_filter`, `import_state`, `import_progress`, `import_total`, `import_warnings`) |
+| `ImageSetItem`     | `ImageSet`, `Image`           | —                                                                                               | `latitude`, `longitude` (per-set override of the image's coords)                                                                                                                                                                                                                                           |
+| `Region`           | `Region?` (parent)            | `children` (self-join)                                                                          | `name`, `admin_level` (`continent`|`country`|`admin1`|`admin2`|`city`), `iso_code`, `boundary` (jsonb GeoJSON), `population`, `min_lat`/`max_lat`/`min_lng`/`max_lng`, `normalized_name`                                                                                                                   |
+| `Tag`              | —                             | `image_set_tags`, `image_sets`                                                                  | `name`, `slug` (parameterized lowercase value used for default case-insensitive filters)                                                                                                                                                                                                                   |
+| `ImageSetTag`      | `ImageSet`, `Tag`             | —                                                                                               | join table with uniqueness on `[image_set_id, tag_id]`                                                                                                                                                                                                                                                     |
+| `Guess`            | `Game`, `Image`               | —                                                                                               | `latitude`, `longitude` (player's pick)                                                                                                                                                                                                                                                                    |
+| `AiGeneration`     | `User`                        | —                                                                                               | `user_message`, `conversation_json`, `status` (`pending`/`running`/`completed`/`failed`/`canceled`), `phase`, `progress_message`, `result_json` + `result_count` + `preview_json` (filled as the job runs), `error`, `model_used`                                                                          |
+| `AiUsage`          | `User`                        | —                                                                                               | `day`, `count` (unique on `[user_id, day]`) — daily counter for the AI image-set rate limit                                                                                                                                                                                                                |
+
 
 `GameImage.answer_latitude/longitude` snapshots the answer at game-creation time, so retroactively editing an image's coordinates doesn't change scores for already-played games.
 
 `ImageSet` partitions the world's images into curated buckets:
+
 - exactly one set has `is_system_default: true` (`Default Landscapes`, seeded from Wikidata) — public, ungated, the default for new games.
 - user-created sets are either `private` (only the owner can see/play) or `public` (anyone can play, leaderboard is shared).
 
@@ -161,31 +175,38 @@ The `Image.visible_to(user)` scope (in `app/models/image.rb`) is the canonical w
 
 **Filtered sets.** A regular `ImageSet` *owns* its image_set_items directly. A *filtered set* is a child `ImageSet` (set via `parent_image_set_id`) whose items are computed from the parent's images intersected with `region_ids` (rows from the `Region` tree) and/or `custom_areas` (user-drawn circles stored as JSONB). `ImageSet#filtered?` is the predicate; `#effective_items` returns either the directly-owned items (regular sets) or the materialized items (filtered sets). `#materialize_filtered_items!` runs the point-in-polygon match and persists the result; `RematerializeFilteredSetsJob` is enqueued asynchronously whenever the parent changes (add_image, remove_item, locations update) so children stay in sync.
 
+**Tags and catalog filters.** Image sets can be tagged from the create/edit form with a comma-separated `tag_list`. Tags are normalized into reusable `Tag` rows and displayed as pills on set cards. `/image_sets` filters both **My Sets** and **Public Sets** by one or more tags, supports **All tags** vs **Any tag** matching, and defaults to case-insensitive slug matching with an `Aa` toggle for exact-case matching. Active filter chips can remove individual tags, "Clear all" resets the tag filter, and clicking a tag pill appends that tag to the current filters.
+
+The same catalog page can sort by name (A-Z / Z-A), creation date (newest / oldest), last update (recently updated / least recently updated), or image count (most / fewest images). Sort choices preserve the active tag filters and match/case mode in the URL.
+
 ## Routes (high-level)
 
-| Route | Purpose |
-|---|---|
-| `/` | Landing page; primary CTA = "Start new game" on the system-default set |
-| `/registration/new`, `/session/new`, `/passwords/new` | Sign up, sign in, password reset |
-| `/auth/google_oauth2`, `/auth/google_oauth2/callback` | OAuth sign-in entry + callback |
-| `/profile/setup_username` | Where OAuth-created users pick a username before they can do anything else |
-| `/profile` | Current user's profile (also exposes account deletion — `DELETE /profile`) |
-| `/games` | Paginated list of your games (filter by status, sort by date or score) |
-| `/games/:id` | Play the next round of an in-progress game |
-| `/games/:id/results` | Per-round breakdown + summary map after game finishes |
-| `/games/leaderboard?image_set_id=N` | Top-20 leaderboard scoped to an image set |
-| `/image_sets` | Your sets + the public catalog |
-| `/image_sets/:id` | Read-only gallery view of a set |
-| `/image_sets/:id/locations` | Owner-only: upload, edit titles/coords, remove items (rejected for filtered sets — edit the filter instead) |
-| `/image_sets/:id/map` | Map of all located images in a set |
-| `/image_sets/:id/new_filtered`, `/edit_filter`, `/update_filter`, `/preview_filter_count` | Build/edit a filtered set: pick regions, draw circle areas, live-preview match count |
-| `/image_sets/ai_new`, `/ai_generate`, `/ai_create` | Build a set from a natural-language prompt via Gemini + Wikidata; browser polls `/ai_generations/:id/status` while the background job runs |
-| `/regions/search.json?q=...` | Typeahead region search (trigram + diacritic-folded; ranks by population, similarity, optional map-center distance) |
-| `/regions/boundaries.json?ids[]=...` | Batch GeoJSON for selected regions; lazy-fetches missing polygons from Nominatim |
-| `/regions/resolve.json` | POST a Nominatim candidate (from the JS-side reverse geocode) → find-or-create the region row + ancestors |
-| `/images`, `/images/map` | Paginated images list / world map (admins see all; everyone else sees `Image.visible_to`) |
-| `/images/:id` | Image detail: photo (scroll-zoom), edit form (anyone owning a set with the image), set memberships, "Open in Google Maps" |
-| `/practice` | Single-image guessing without saving a game (no auth required) |
+
+| Route                                                                                     | Purpose                                                                                                                                    |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/`                                                                                       | Landing page; primary CTA = "Start new game" on the system-default set                                                                     |
+| `/donation`, `/donation/success`, `/donation/cancel`                                      | Stripe Checkout support flow launched by the footer "Support us" button                                                                    |
+| `/registration/new`, `/session/new`, `/passwords/new`                                     | Sign up, sign in, password reset                                                                                                           |
+| `/auth/google_oauth2`, `/auth/google_oauth2/callback`                                     | OAuth sign-in entry + callback                                                                                                             |
+| `/profile/setup_username`                                                                 | Where OAuth-created users pick a username before they can do anything else                                                                 |
+| `/profile`                                                                                | Current user's profile (also exposes account deletion — `DELETE /profile`)                                                                 |
+| `/games`                                                                                  | Paginated list of your games (filter by status, sort by date or score)                                                                     |
+| `/games/:id`                                                                              | Play the next round of an in-progress game                                                                                                 |
+| `/games/:id/results`                                                                      | Per-round breakdown + summary map after game finishes                                                                                      |
+| `/games/leaderboard?image_set_id=N`                                                       | Top-20 leaderboard scoped to an image set                                                                                                  |
+| `/image_sets`                                                                             | Your sets + the public catalog, with tag filtering and sort controls                                                                       |
+| `/image_sets/:id`                                                                         | Read-only gallery view of a set                                                                                                            |
+| `/image_sets/:id/locations`                                                               | Owner-only: upload, edit titles/coords, remove items (rejected for filtered sets — edit the filter instead)                                |
+| `/image_sets/:id/map`                                                                     | Map of all located images in a set                                                                                                         |
+| `/image_sets/:id/new_filtered`, `/edit_filter`, `/update_filter`, `/preview_filter_count` | Build/edit a filtered set: pick regions, draw circle areas, live-preview match count                                                       |
+| `/image_sets/ai_new`, `/ai_generate`, `/ai_create`                                        | Build a set from a natural-language prompt via Gemini + Wikidata; browser polls `/ai_generations/:id/status` while the background job runs |
+| `/regions/search.json?q=...`                                                              | Typeahead region search (trigram + diacritic-folded; ranks by population, similarity, optional map-center distance)                        |
+| `/regions/boundaries.json?ids[]=...`                                                      | Batch GeoJSON for selected regions; lazy-fetches missing polygons from Nominatim                                                           |
+| `/regions/resolve.json`                                                                   | POST a Nominatim candidate (from the JS-side reverse geocode) → find-or-create the region row + ancestors                                  |
+| `/images`, `/images/map`                                                                  | Paginated images list / world map (admins see all; everyone else sees `Image.visible_to`)                                                  |
+| `/images/:id`                                                                             | Image detail: photo (scroll-zoom), edit form (anyone owning a set with the image), set memberships, "Open in Google Maps"                  |
+| `/practice`                                                                               | Single-image guessing without saving a game (no auth required)                                                                             |
+
 
 ## Scoring
 
@@ -201,11 +222,13 @@ A game has 5 rounds, so the maximum total score is 25,000. Distances in the UI u
 
 In development only, three demo users (alice / bob / charlie) are also seeded with 1-2 completed games each so the leaderboard demos out of the box.
 
-| Command                    | Effect                                                              |
-| -------------------------- | ------------------------------------------------------------------- |
-| `bin/rails db:seed`        | Adds new records, skips existing                                    |
-| `bin/rails db:reset`       | Destroys DB -> recreates -> migrates -> seeds (wipes Games/Guesses too) |
-| `bin/rails db:seed:replant`| Truncates tables, then seeds (keeps schema)                         |
+
+| Command                     | Effect                                                                  |
+| --------------------------- | ----------------------------------------------------------------------- |
+| `bin/rails db:seed`         | Adds new records, skips existing                                        |
+| `bin/rails db:reset`        | Destroys DB -> recreates -> migrates -> seeds (wipes Games/Guesses too) |
+| `bin/rails db:seed:replant` | Truncates tables, then seeds (keeps schema)                             |
+
 
 ## Deploying to Heroku
 
@@ -219,6 +242,7 @@ heroku buildpacks:add heroku/ruby
 heroku config:set AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... S3_BUCKET=... AWS_REGION=...
 heroku config:set GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=...   # required for Sign in with Google in prod
 heroku config:set GEMINI_API_KEY=... AI_HINTS_ENABLED=1             # optional: AI image-set generation (key alone) + AI practice hints (key + flag)
+heroku config:set STRIPE_SECRET_KEY=sk_test_...                    # optional: enables the Support us checkout flow in Stripe test mode
 heroku config:set MALLOC_ARENA_MAX=2 ACTIVE_JOB_ASYNC_MAX_THREADS=1   # caps glibc heap fragmentation + concurrent libvips decodes; needed on 512MB dynos
 git push heroku main:main
 # `Procfile` runs `release: bundle exec rails db:migrate` automatically on every deploy — no manual migrate step.
@@ -270,6 +294,7 @@ Mutating the image library, editing past guesses, and editing game metadata are 
 ### Direct upload + background processing
 
 User-uploaded images go through Active Storage's direct-upload flow:
+
 1. Browser PUTs the original (HEIC/JPEG/...) straight to S3 via `DirectUpload`. The web dyno never sees the original bytes.
 2. JS calls `POST /image_sets/:id/attach_blob` per file, attaching the blob to a freshly-created `Image` and adding it to the set.
 3. `ProcessImageJob` runs in the `:async` queue: downloads the blob, extracts EXIF GPS, resizes + re-encodes to JPEG, replaces the attachment.
@@ -300,7 +325,7 @@ Reusable styles live in `app/assets/tailwind/application.css` as `@apply` compon
 
 ### Wikidata seeder
 
-`db/seeds.rb` uses **`SERVICE bd:sample`** for random sampling — not `ORDER BY RAND()` or hashed orderings, both of which time out at scale when unioning multiple landform types. `bd:sample` accepts only a single triple pattern, so the seeder samples by `wdt:P31` (instance-of) inside the `SERVICE` block and joins `wdt:P18`/`wdt:P625` outside. Over-sampling (`limit 2000`) is intentional — only ~5–20% of any landform type has both an image and coordinates. Filenames are filtered for non-photo contamination (satellite imagery, maps); when adding new landform types, spot-check for new junk patterns.
+`db/seeds.rb` uses `**SERVICE bd:sample`** for random sampling — not `ORDER BY RAND()` or hashed orderings, both of which time out at scale when unioning multiple landform types. `bd:sample` accepts only a single triple pattern, so the seeder samples by `wdt:P31` (instance-of) inside the `SERVICE` block and joins `wdt:P18`/`wdt:P625` outside. Over-sampling (`limit 2000`) is intentional — only ~5–20% of any landform type has both an image and coordinates. Filenames are filtered for non-photo contamination (satellite imagery, maps); when adding new landform types, spot-check for new junk patterns.
 
 ## Contributing
 
@@ -309,7 +334,7 @@ Reusable styles live in `app/assets/tailwind/application.css` as `@apply` compon
 - After seed changes, run `bin/rails db:reset` locally to verify a clean setup works
 - Open a PR against `main`
 
-See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
+See `[CHANGELOG.md](./CHANGELOG.md)` for release notes.
 
 ## Entity Relationship Diagram
 
@@ -322,3 +347,4 @@ See [`CHANGELOG.md`](./CHANGELOG.md) for release notes.
 - [GeoHub](https://www.geohub.gg/)
 - [Guess Where You Are](https://guesswhereyouare.com/)
 - [Geotastic](https://geotastic.net)
+
