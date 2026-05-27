@@ -8,7 +8,10 @@ class Challenge < ApplicationRecord
 
   def to_param = token
 
-  def game_for(user)  = games.find { |g| g.user_id == user.id }
+  def game_for(user)
+    user_games = games.select { |g| g.user_id == user.id }
+    user_games.find { |g| g.completed_at.nil? } || user_games.max_by(&:created_at)
+  end
   def completed_games = games.select { |g| g.completed_at.present? }
   def in_progress_games = games.select { |g| g.completed_at.nil? }
 

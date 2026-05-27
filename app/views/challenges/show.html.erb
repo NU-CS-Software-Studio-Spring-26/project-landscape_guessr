@@ -31,7 +31,7 @@
     <div class="flex gap-3">
       <%= link_to "View your results", results_game_path(@my_game),
             class: "btn-secondary flex-1 py-3 text-base text-center" %>
-      <%= button_to "Play again", games_path, params: { image_set_id: @challenge.image_set_id },
+      <%= button_to "Play again", play_challenge_path(@challenge),
             method: :post, class: "btn-primary flex-1 py-3 text-base" %>
     </div>
   <% end %>
