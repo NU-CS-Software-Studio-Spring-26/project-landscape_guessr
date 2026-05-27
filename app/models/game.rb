@@ -20,10 +20,10 @@ class Game < ApplicationRecord
     period = "all" unless LEADERBOARD_PERIODS.include?(period)
 
     cutoff = case period
-             when "week"  then 1.week.ago
-             when "month" then 1.month.ago
-             when "year"  then 1.year.ago
-             end
+    when "week"  then 1.week.ago
+    when "month" then 1.month.ago
+    when "year"  then 1.year.ago
+    end
 
     rel = where(image_set: image_set)
             .where.not(completed_at: nil)
