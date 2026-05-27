@@ -38,7 +38,8 @@ class GamesController < ApplicationController
       else
         ImageSet.default
       end
-    @games = Game.leaderboard(image_set: @image_set, sort: params[:sort], direction: params[:direction])
+    @period = Game::LEADERBOARD_PERIODS.include?(params[:period]) ? params[:period] : "all"
+    @games = Game.leaderboard(image_set: @image_set, sort: params[:sort], direction: params[:direction], period: @period)
     @total_rounds = TOTAL_ROUNDS
   end
 
