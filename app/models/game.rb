@@ -11,16 +11,25 @@ class Game < ApplicationRecord
   has_many :game_images, -> { order(:position) }, dependent: :destroy
   has_many :images, through: :game_images
 
-  LEADERBOARD_SORTS = %w[score completed_at].freeze
+  LEADERBOARD_SORTS = %w[score completed_at duration_seconds].freeze
+  LEADERBOARD_PERIODS = %w[week month year all].freeze
 
-  scope :leaderboard, ->(image_set:, sort: "score", direction: "desc") {
+  scope :leaderboard, ->(image_set:, sort: "score", direction: "desc", period: "all") {
     sort = "score" unless LEADERBOARD_SORTS.include?(sort)
     direction = direction == "asc" ? :asc : :desc
-    where(image_set: image_set)
-      .where.not(completed_at: nil)
-      .includes(:user)
-      .order(sort => direction)
-      .limit(20)
+    period = "all" unless LEADERBOARD_PERIODS.include?(period)
+
+    cutoff = case period
+             when "week"  then 1.week.ago
+             when "month" then 1.month.ago
+             when "year"  then 1.year.ago
+             end
+
+    rel = where(image_set: image_set)
+            .where.not(completed_at: nil)
+            .includes(:user)
+    rel = rel.where(completed_at: cutoff..) if cutoff
+    rel.order(sort => direction).limit(20)
   }
 
   def self.geoguessr_round_score(distance_km)
