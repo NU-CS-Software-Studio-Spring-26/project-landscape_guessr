@@ -60,7 +60,7 @@ class ChallengesController < ApplicationController
 
   def play
     existing = @challenge.game_for(Current.user)
-    if existing
+    if existing && existing.completed_at.nil?
       redirect_to existing, status: :see_other and return
     end
 
