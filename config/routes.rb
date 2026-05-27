@@ -36,6 +36,8 @@ Rails.application.routes.draw do
       post :join
       post :leave
       post :start
+      get  :state    # JSON snapshot for the polling client
+      post :guess    # JSON guess submission
     end
   end
   resources :images do

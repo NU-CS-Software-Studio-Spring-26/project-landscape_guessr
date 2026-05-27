@@ -1,5 +1,5 @@
 class MatchesController < ApplicationController
-  before_action :set_match, only: %i[ show join leave start destroy ]
+  before_action :set_match, only: %i[ show join leave start destroy state guess ]
 
   # GET /matches/new
   def new
@@ -93,11 +93,87 @@ class MatchesController < ApplicationController
                   alert: "Only the host can start, and only with 1-#{Match::LOBBY_CAPACITY} players in the lobby." and return
     end
 
-    # Round creation + EndRoundJob land in the next commit (round lifecycle).
-    # For now just flip the status so the lobby reflects that the host
-    # locked it in.
-    @match.update!(status: "active", started_at: Time.current)
+    Match.transaction do
+      @match.update!(status: "active", started_at: Time.current)
+      round = MatchStartRound.call(match: @match)
+      unless round
+        # No reachable images in the set — bail out, keep the lobby usable.
+        raise ActiveRecord::Rollback
+      end
+    end
+
+    if @match.match_rounds.empty?
+      redirect_to match_path(@match.code),
+                  alert: "This image set doesn't have enough usable images to start a match." and return
+    end
+
     redirect_to match_path(@match.code), status: :see_other
+  end
+
+  # GET /matches/:code/state.json
+  def state
+    player = @match.match_players.find_by(user_id: Current.user.id)
+    current_round = @match.current_round
+
+    payload = {
+      server_now: Time.current.iso8601(3),
+      match: {
+        code:          @match.code,
+        status:        @match.status,
+        rounds_total:  @match.rounds_total,
+        round_index:   current_round&.index
+      },
+      you: {
+        user_id: Current.user.id,
+        joined:  player.present?,
+        is_host: @match.host?(Current.user)
+      },
+      current_round:     build_current_round_payload(current_round, player),
+      last_round_result: build_last_round_result(current_round),
+      players:           build_players_payload(current_round)
+    }
+
+    render json: payload
+  end
+
+  # POST /matches/:code/guess
+  def guess
+    player = @match.match_players.active.find_by(user_id: Current.user.id)
+    return render json: { error: "not_in_match" }, status: :forbidden unless player
+
+    round = @match.current_round
+    if round.nil? || round.ended?
+      return render json: { error: "no_active_round" }, status: :conflict
+    end
+    if Time.current >= round.deadline_at
+      return render json: { error: "round_expired" }, status: :conflict
+    end
+
+    lat = params[:lat].to_f
+    lng = params[:lng].to_f
+    unless lat.between?(-90, 90) && lng.between?(-180, 180)
+      return render json: { error: "bad_coords" }, status: :unprocessable_entity
+    end
+
+    begin
+      MatchGuess.create!(
+        match_round:  round,
+        match_player: player,
+        latitude:     lat,
+        longitude:    lng
+      )
+    rescue ActiveRecord::RecordNotUnique
+      # Two clicks in the same millisecond — the first one stuck, we're fine.
+    end
+
+    # Early-end: if every active player has now submitted, close the round
+    # immediately instead of waiting for the timer. The job is idempotent
+    # so the lingering perform_later becomes a no-op when it fires.
+    active_count  = @match.match_players.active.count
+    guessed_count = round.match_guesses.count
+    MatchEndRound.call(round: round) if guessed_count >= active_count && active_count.positive?
+
+    render json: { ok: true }
   end
 
   # DELETE /matches/:code
@@ -130,5 +206,60 @@ class MatchesController < ApplicationController
     n = raw.to_i
     n = default if n <= 0
     n.clamp(min, max)
+  end
+
+  # Per-round payload while the round is still live. Critical: NEVER include
+  # the answer coords here, and don't echo other players' guess coords —
+  # those reveal atomically in build_last_round_result once the round ends.
+  def build_current_round_payload(round, player)
+    return nil if round.nil? || round.ended?
+    {
+      index:        round.index,
+      image_url:    helpers.image_src(round.image, width: 1600),
+      image_title:  round.image.title,
+      started_at:   round.started_at.iso8601(3),
+      deadline_at:  round.deadline_at.iso8601(3),
+      my_guess_submitted: player.present? &&
+                          round.match_guesses.exists?(match_player_id: player.id)
+    }
+  end
+
+  # Reveals the most recently *ended* round in full: answer, every player's
+  # pin, per-player score. Polling clients diff this against what they've
+  # already shown to decide when to flip to "round over" UI.
+  def build_last_round_result(round)
+    return nil if round.nil? || !round.ended?
+
+    guesses = round.match_guesses.includes(match_player: :user).map do |g|
+      {
+        user_id:     g.match_player.user_id,
+        username:    g.match_player.user.username,
+        lat:         g.latitude.to_f,
+        lng:         g.longitude.to_f,
+        distance_km: g.distance_km&.to_f,
+        score:       g.score.to_i
+      }
+    end
+
+    {
+      round_index: round.index,
+      answer: { lat: round.answer_latitude.to_f, lng: round.answer_longitude.to_f },
+      guesses: guesses
+    }
+  end
+
+  def build_players_payload(current_round)
+    @match.match_players.includes(:user).order(:joined_at).map do |p|
+      locked_in = current_round && !current_round.ended? &&
+                  current_round.match_guesses.exists?(match_player_id: p.id)
+      {
+        user_id:     p.user_id,
+        username:    p.user.username,
+        avatar_url:  p.user.gravatar_url(size: 80),
+        locked_in:   locked_in,
+        total_score: p.total_score,
+        left:        p.left_at.present?
+      }
+    end
   end
 end
