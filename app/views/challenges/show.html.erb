@@ -27,6 +27,13 @@
           class: "btn-primary w-full py-3 text-base" %>
   <% elsif @my_game.completed_at.nil? %>
     <%= link_to "Continue your game", @my_game, class: "btn-primary w-full py-3 text-base text-center block" %>
+  <% else %>
+    <div class="flex gap-3">
+      <%= link_to "View your results", results_game_path(@my_game),
+            class: "btn-secondary flex-1 py-3 text-base text-center" %>
+      <%= button_to "Play again", play_challenge_path(@challenge),
+            method: :post, class: "btn-primary flex-1 py-3 text-base" %>
+    </div>
   <% end %>
 
   <%# Results leaderboard %>
