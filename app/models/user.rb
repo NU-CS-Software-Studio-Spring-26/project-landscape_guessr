@@ -44,6 +44,11 @@ class User < ApplicationRecord
     username.blank? && connected_services.any?
   end
 
+  def gravatar_url(size: 80)
+    hash = Digest::MD5.hexdigest(email_address.to_s.downcase.strip)
+    "https://www.gravatar.com/avatar/#{hash}?s=#{size}&d=identicon"
+  end
+
   def self.find_by_login(login)
     s = login.to_s.strip
     return nil if s.empty?
