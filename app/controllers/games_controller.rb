@@ -9,13 +9,18 @@ class GamesController < ApplicationController
   GAMES_INDEX_STATUSES = %w[all in_progress completed].freeze
 
   def index
-    @sort      = GAMES_INDEX_SORTS.include?(params[:sort]) ? params[:sort] : "created_at"
-    @direction = params[:direction] == "asc" ? "asc" : "desc"
-    @status    = GAMES_INDEX_STATUSES.include?(params[:status]) ? params[:status] : "all"
+    @sort         = GAMES_INDEX_SORTS.include?(params[:sort]) ? params[:sort] : "created_at"
+    @direction    = params[:direction] == "asc" ? "asc" : "desc"
+    @status       = GAMES_INDEX_STATUSES.include?(params[:status]) ? params[:status] : "all"
+    @image_set_id = params[:image_set_id].presence
 
     games = Current.user.games.includes(:guesses, :image_set)
     games = games.where(status: "in_progress") if @status == "in_progress"
     games = games.where.not(completed_at: nil) if @status == "completed"
+    games = games.where(image_set_id: @image_set_id) if @image_set_id
+
+    played_set_ids = Current.user.games.where.not(image_set_id: nil).distinct.pluck(:image_set_id)
+    @played_sets = ImageSet.where(id: played_set_ids).order(:name)
 
     @games = paginate(games.order(@sort => @direction), per_page: 100)
     @total_rounds = TOTAL_ROUNDS
