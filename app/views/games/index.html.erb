@@ -11,13 +11,34 @@
 
   <div class="flex flex-wrap items-center gap-2">
     <% [ [ "All", "all" ], [ "In progress", "in_progress" ], [ "Completed", "completed" ] ].each do |label, value| %>
-      <%= link_to label, games_path(status: value, sort: @sort, direction: @direction, per_page: @per_page),
+      <%= link_to label, games_path(status: value, sort: @sort, direction: @direction, image_set_id: @image_set_id, per_page: @per_page),
             class: "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors #{@status == value ? "bg-forest-600 text-white shadow-sm" : "bg-forest-50 text-forest-700 hover:bg-forest-100 border border-forest-200"}" %>
+    <% end %>
+
+    <% if @played_sets.any? %>
+      <% set_label = @image_set_id ? (@played_sets.find { |s| s.id.to_s == @image_set_id.to_s }&.name || "Set") : "All sets" %>
+      <% set_opts = [["All sets", games_path(status: @status, sort: @sort, direction: @direction, per_page: @per_page)]] +
+                    @played_sets.map { |s| [s.name, games_path(status: @status, sort: @sort, direction: @direction, image_set_id: s.id, per_page: @per_page)] } %>
+      <div data-controller="dropdown" class="relative">
+        <button type="button" data-action="dropdown#toggle"
+                class="flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors <%= @image_set_id ? "border-forest-400 bg-forest-600 text-white" : "border-forest-200 bg-white text-forest-800 hover:bg-forest-50" %>">
+          <span data-dropdown-target="label"><%= set_label %></span>
+          <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+        </button>
+        <div data-dropdown-target="menu" class="hidden absolute left-0 top-full mt-1 z-30 bg-white rounded-xl border border-forest-200 shadow-lg overflow-hidden min-w-[12rem]">
+          <% set_opts.each do |lbl, url| %>
+            <button type="button" data-action="dropdown#pick" data-url="<%= url %>" data-label="<%= lbl %>"
+                    class="w-full text-left px-4 py-2.5 text-sm hover:bg-forest-50 transition-colors truncate <%= set_label == lbl ? "font-semibold text-forest-600" : "text-forest-800" %>">
+              <%= lbl %>
+            </button>
+          <% end %>
+        </div>
+      </div>
     <% end %>
 
     <div class="ml-auto">
       <% sort_label = { ["created_at","desc"] => "Newest first", ["created_at","asc"] => "Oldest first", ["score","desc"] => "Highest score", ["score","asc"] => "Lowest score" }[[@sort, @direction]] || "Sort" %>
-      <% sort_opts = [ ["Newest first", games_path(status: @status, sort: "created_at", direction: "desc", per_page: @per_page)], ["Oldest first", games_path(status: @status, sort: "created_at", direction: "asc", per_page: @per_page)], ["Highest score", games_path(status: @status, sort: "score", direction: "desc", per_page: @per_page)], ["Lowest score", games_path(status: @status, sort: "score", direction: "asc", per_page: @per_page)] ] %>
+      <% sort_opts = [ ["Newest first", games_path(status: @status, sort: "created_at", direction: "desc", image_set_id: @image_set_id, per_page: @per_page)], ["Oldest first", games_path(status: @status, sort: "created_at", direction: "asc", image_set_id: @image_set_id, per_page: @per_page)], ["Highest score", games_path(status: @status, sort: "score", direction: "desc", image_set_id: @image_set_id, per_page: @per_page)], ["Lowest score", games_path(status: @status, sort: "score", direction: "asc", image_set_id: @image_set_id, per_page: @per_page)] ] %>
       <div data-controller="dropdown" class="relative">
         <button type="button" data-action="dropdown#toggle"
                 class="flex items-center gap-2 rounded-lg border border-forest-200 pl-3 pr-3 py-1.5 text-sm bg-white text-forest-800 hover:bg-forest-50 transition-colors">
@@ -37,7 +58,7 @@
   </div>
 
   <%= render "shared/pagination",
-            page_url: ->(opts) { games_path({ status: @status, sort: @sort, direction: @direction }.merge(opts)) },
+            page_url: ->(opts) { games_path({ status: @status, sort: @sort, direction: @direction, image_set_id: @image_set_id }.merge(opts)) },
             page: @page, total_pages: @total_pages,
             total_items: @total_items, per_page: @per_page %>
 
@@ -63,7 +84,7 @@
       <% end %>
 
       <%= render "shared/pagination",
-                page_url: ->(opts) { games_path({ status: @status, sort: @sort, direction: @direction }.merge(opts)) },
+                page_url: ->(opts) { games_path({ status: @status, sort: @sort, direction: @direction, image_set_id: @image_set_id }.merge(opts)) },
                 page: @page, total_pages: @total_pages,
                 total_items: @total_items, per_page: @per_page %>
     <% else %>
