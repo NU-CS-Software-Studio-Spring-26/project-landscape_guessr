@@ -11,6 +11,14 @@
         &middot; <span class="inline-flex items-center text-xs text-forest-600 bg-forest-50 rounded-full px-2 py-0.5">Filtered</span>
       <% end %>
     </p>
+    <% if @image_set.tags.any? %>
+      <div class="flex flex-wrap gap-1 mt-2">
+        <% @image_set.tags.order(:name).each do |tag| %>
+          <%= link_to tag.name, image_sets_path(tag: tag.slug),
+                class: "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-forest-50 text-forest-700 hover:bg-forest-100 border border-forest-200" %>
+        <% end %>
+      </div>
+    <% end %>
     <% if @image_set.filtered? %>
       <p class="text-xs text-gray-500 mt-1">
         Based on: <%= link_to @image_set.parent_image_set.name, @image_set.parent_image_set, class: "text-forest-600 hover:underline" %>
@@ -40,6 +48,9 @@
           <%= button_to "Play", games_path, method: :post,
                 params: { image_set_id: @image_set.id },
                 class: "btn-primary" %>
+          <% if email_verified? %>
+            <%= link_to "Practice this set", practice_path(practice_set_id: @image_set.id), class: "btn-secondary" %>
+          <% end %>
         <% end %>
         <%= link_to "Map", map_image_set_path(@image_set), class: "btn-secondary" %>
         <% unless practice_image_set?(@image_set) %>

@@ -19,7 +19,6 @@
      <% end %>
      data-practice-time-limit-value="<%= @time_limit_seconds.to_i %>"
      data-practice-attempts-value="<%= @attempts.to_i %>"
-     data-practice-hint-circle-value="<%= @hint_circle_enabled ? true : false %>"
      data-practice-signed-in-value="<%= authenticated? %>"
      data-practice-initially-saved-value="<%= @saved_for_practice ? true : false %>"
      <% if @practice_set_progress %>
@@ -32,10 +31,31 @@
       <h1 class="heading-page">Where is this?</h1>
       <% if @practice_set_progress %>
         <p class="text-sm text-gray-500 mt-1">
-          Saved practice set · <%= @practice_set_progress.position_label %>
+          <%= @practice_set.name %> · <%= @practice_set_progress.position_label %>
         </p>
       <% end %>
     </div>
+    <% if email_verified? && @available_sets&.any? %>
+      <form method="get" action="<%= practice_path %>" class="flex items-center gap-1.5 shrink-0">
+        <% if @time_limit_seconds %>
+          <input type="hidden" name="seconds" value="<%= @time_limit_seconds %>">
+        <% end %>
+        <% if @attempts.to_i > 1 %>
+          <input type="hidden" name="attempts" value="<%= @attempts %>">
+        <% end %>
+        <label for="practice_set_selector" class="sr-only">Select practice set</label>
+        <select id="practice_set_selector" name="practice_set_id"
+                class="form-input text-sm py-1.5 max-w-[200px]">
+          <option value="">Random images</option>
+          <% @available_sets.each do |set| %>
+            <option value="<%= set.id %>" <%= @practice_set&.id == set.id ? "selected" : "" %>>
+              <%= set.name %>
+            </option>
+          <% end %>
+        </select>
+        <button type="submit" class="btn-secondary text-sm py-1.5 px-3 shrink-0">Switch</button>
+      </form>
+    <% end %>
   </div>
 
   <div class="flex flex-wrap items-center gap-2 text-xs text-gray-500">
@@ -87,14 +107,6 @@
     <button type="button"
             data-practice-target="hintTypeOption"
             data-action="practice#setHintType"
-            data-practice-type-param="radius"
-            aria-pressed="false"
-            class="btn-secondary text-sm py-1.5 px-3 shrink-0">
-      Circle radius
-    </button>
-    <button type="button"
-            data-practice-target="hintTypeOption"
-            data-action="practice#setHintType"
             data-practice-type-param="location"
             aria-pressed="false"
             class="btn-secondary text-sm py-1.5 px-3 shrink-0">
@@ -115,28 +127,6 @@
       (<%= @ai_hint_quota_used %>/<%= AiHintDailyQuota::LIMIT %>)
     </span>
     <% end %>
-
-    <div data-practice-target="hintRadiusPanel" class="hidden ml-2 flex items-center gap-2 shrink-0">
-      <span class="shrink-0">Radius:</span>
-      <button type="button"
-              data-practice-target="hintRadiusNoHintButton"
-              data-action="practice#toggleHintRadiusNoHint"
-              aria-pressed="true"
-              class="btn-primary text-sm py-1.5 px-3 shrink-0">
-        No hint
-      </button>
-      <div class="inline-flex items-center rounded-lg border border-forest-200 bg-white shadow-sm px-3 py-2">
-        <input type="range"
-               min="500"
-               max="5000"
-               step="50"
-               value="5000"
-               data-practice-target="hintRadiusSlider"
-               data-action="input->practice#setHintRadius"
-               class="w-96 sm:w-[28rem] cursor-pointer accent-forest-600" />
-      </div>
-      <span data-practice-target="hintRadiusValue" class="min-w-20 text-right font-medium text-forest-800"><%= @hint_circle_enabled ? "4000 km" : "No hint" %></span>
-    </div>
 
     <div data-practice-target="hintLocationPanel" class="hidden ml-2 flex items-center gap-2 shrink-0">
       <span class="shrink-0">Location hint:</span>

@@ -20,23 +20,47 @@ class PracticeSetProgressTest < ActiveSupport::TestCase
     @session = {}
   end
 
-  test "start shuffles located image ids" do
-    progress = PracticeSetProgress.start(@session, @set)
+  test "start records total and starts with no completed images" do
+    all_ids = PracticeSetProgress.located_image_ids_for(@set)
+    progress = PracticeSetProgress.start(@session, @set, all_ids: all_ids)
 
     assert_equal 2, progress.total
     assert_equal @set.id, progress.set_id
-    assert_equal 2, progress.remaining.size
+    assert_equal 2, progress.remaining(all_ids: all_ids).size
   end
 
-  test "complete removes image and finishes set" do
-    progress = PracticeSetProgress.start(@session, @set)
-    first_id = progress.current_image_id
+  test "complete removes image from remaining and finishes set" do
+    all_ids = PracticeSetProgress.located_image_ids_for(@set)
+    progress = PracticeSetProgress.start(@session, @set, all_ids: all_ids)
+    first_id = progress.current_image_id(all_ids: all_ids)
 
     progress.complete!(first_id)
-    assert_equal 1, progress.remaining.size
+    assert_equal 1, progress.remaining(all_ids: all_ids).size
     assert_not progress.finished?
 
-    progress.complete!(progress.current_image_id)
+    progress.complete!(progress.current_image_id(all_ids: all_ids))
     assert progress.finished?
+  end
+
+  test "session stores completed ids not remaining ids" do
+    all_ids = PracticeSetProgress.located_image_ids_for(@set)
+    progress = PracticeSetProgress.start(@session, @set, all_ids: all_ids)
+
+    assert @session[:practice_set_progress].key?("completed_ids"),
+           "session must store completed_ids to avoid cookie overflow"
+    assert_not @session[:practice_set_progress].key?("remaining"),
+               "session must not store remaining ids (cookie overflow risk)"
+    assert_equal [], @session[:practice_set_progress]["completed_ids"]
+  end
+
+  test "completing an image persists it in completed ids" do
+    all_ids = PracticeSetProgress.located_image_ids_for(@set)
+    progress = PracticeSetProgress.start(@session, @set, all_ids: all_ids)
+    first_id = progress.current_image_id(all_ids: all_ids)
+
+    progress.complete!(first_id)
+
+    assert_includes @session[:practice_set_progress]["completed_ids"], first_id
+    assert_equal 1, @session[:practice_set_progress]["completed_ids"].size
   end
 end

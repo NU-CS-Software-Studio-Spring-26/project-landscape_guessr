@@ -1,0 +1,12 @@
+alice_private_forest:
+  image_set: alice_private
+  tag: forest
+
+alice_public_alpine:
+  image_set: alice_public
+  tag: alpine
+
+alice_private_alpine:
+  image_set: alice_private
+  tag: alpine
+

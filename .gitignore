@@ -40,9 +40,19 @@
 
 # Editor / OS
 .idea/
+.vscode/
 .DS_Store
 .claude
 .playwright-mcp
 
+# Local bundler install (kept out of git)
+/vendor/bundle/
+
 # Local-only rake tasks (personal scripts, never pushed)
 /lib/tasks/local_*.rake
+
+# For developement with AI
+AGENTS.md
+
+# Local Stripe support-button deployment notes
+/stripe_support_deployment_plan/

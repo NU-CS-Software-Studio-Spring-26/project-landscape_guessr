@@ -31,6 +31,8 @@ class ImageSet < ApplicationRecord
   # below in #sweep_orphan_images, batched and split by attachment kind.
   has_many :image_set_items, dependent: :delete_all
   has_many :images, through: :image_set_items
+  has_many :image_set_tags, dependent: :destroy
+  has_many :tags, through: :image_set_tags
   has_many :games, dependent: :nullify
   # Challenges have their own materialized challenge_images, so they
   # can survive after the source set is deleted — just nil out the FK.
@@ -82,6 +84,85 @@ class ImageSet < ApplicationRecord
       .or(public_catalog)
       .or(where(user_id: user&.id))
   }
+
+  scope :tagged_with, ->(tag_slug_or_names, match: "all", case_sensitive: false) {
+    if ActiveModel::Type::Boolean.new.cast(case_sensitive)
+      names = normalize_tag_names(tag_slug_or_names)
+      next all if names.empty?
+
+      match.to_s == "any" ? tagged_with_any_names(names) : tagged_with_all_names(names)
+    else
+      slugs = normalize_tag_slugs(tag_slug_or_names)
+      next all if slugs.empty?
+
+      match.to_s == "any" ? tagged_with_any(slugs) : tagged_with_all(slugs)
+    end
+  }
+
+  scope :tagged_with_any, ->(tag_slug_or_names) {
+    slugs = normalize_tag_slugs(tag_slug_or_names)
+    next all if slugs.empty?
+
+    matching_ids = ImageSet.joins(:tags).where(tags: { slug: slugs }).select(:id).distinct
+    where(id: matching_ids)
+  }
+
+  scope :tagged_with_all, ->(tag_slug_or_names) {
+    slugs = normalize_tag_slugs(tag_slug_or_names)
+    next all if slugs.empty?
+
+    matching_ids = ImageSet.joins(:tags).where(tags: { slug: slugs })
+                           .group("image_sets.id")
+                           .having("COUNT(DISTINCT tags.slug) = ?", slugs.size)
+                           .select(:id)
+    where(id: matching_ids)
+  }
+
+  scope :tagged_with_any_names, ->(tag_names) {
+    names = normalize_tag_names(tag_names)
+    next all if names.empty?
+
+    matching_ids = ImageSet.joins(:tags).where(tags: { name: names }).select(:id).distinct
+    where(id: matching_ids)
+  }
+
+  scope :tagged_with_all_names, ->(tag_names) {
+    names = normalize_tag_names(tag_names)
+    next all if names.empty?
+
+    matching_ids = ImageSet.joins(:tags).where(tags: { name: names })
+                           .group("image_sets.id")
+                           .having("COUNT(DISTINCT tags.name) = ?", names.size)
+                           .select(:id)
+    where(id: matching_ids)
+  }
+
+  def self.normalize_tag_slugs(tag_slug_or_names)
+    Array(tag_slug_or_names).flatten.flat_map { |tag| tag.to_s.split(",") }.filter_map do |tag|
+      tag.to_s.strip.presence&.parameterize
+    end.uniq
+  end
+
+  def self.normalize_tag_names(tag_names)
+    Array(tag_names).flatten.flat_map { |tag| tag.to_s.split(",") }.filter_map do |tag|
+      tag.to_s.strip.presence
+    end.uniq
+  end
+
+  def self.tag_matching_ids(slugs)
+    ImageSet.joins(:tags).where(tags: { slug: slugs })
+  end
+  private_class_method :tag_matching_ids
+
+  def tag_list
+    tags.order(:name).pluck(:name).join(", ")
+  end
+
+  def tag_list=(list)
+    names = Tag.parse_list(list)
+    tags = names.map { |n| Tag.find_or_create_by_name!(n) }
+    self.tags = tags.uniq(&:slug)
+  end
 
   def self.default
     find_by(is_system_default: true)

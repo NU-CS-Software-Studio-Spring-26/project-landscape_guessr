@@ -8,6 +8,31 @@
         &middot; <span class="text-forest-600">Filtered</span>
       <% end %>
     </p>
+    <% if set.tags.any? %>
+      <% tag_match = local_assigns.fetch(:tag_match, "all") %>
+      <% tag_case = local_assigns.fetch(:tag_case, "insensitive") %>
+      <% selected_tags =
+        if tag_case == "sensitive"
+          ImageSet.normalize_tag_names(local_assigns[:selected_tags])
+        else
+          ImageSet.normalize_tag_slugs(local_assigns[:selected_tags])
+        end %>
+      <% filter_sort = local_assigns[:sort] %>
+      <% filter_direction = local_assigns[:direction] %>
+      <div class="flex flex-wrap gap-1 mt-2">
+        <% set.tags.order(:name).each do |tag| %>
+          <% tag_filter_value = tag_case == "sensitive" ? tag.name : tag.slug %>
+          <% filter_tags = (selected_tags + [ tag_filter_value ]).uniq %>
+          <% tag_filter_path = { tags: filter_tags } %>
+          <% tag_filter_path[:tag_match] = tag_match if filter_tags.any? && local_assigns.key?(:tag_match) %>
+          <% tag_filter_path[:tag_case] = tag_case if local_assigns.key?(:tag_case) %>
+          <% tag_filter_path[:sort] = filter_sort if filter_sort.present? %>
+          <% tag_filter_path[:direction] = filter_direction if filter_direction.present? %>
+          <%= link_to tag.name, image_sets_path(tag_filter_path),
+                class: "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-forest-50 text-forest-700 hover:bg-forest-100 border border-forest-200" %>
+        <% end %>
+      </div>
+    <% end %>
   </div>
   <div class="flex items-center gap-2 shrink-0">
     <% if practice_image_set?(set) %>
@@ -16,6 +41,10 @@
       <%= button_to "Play", games_path, method: :post,
             params: { image_set_id: set.id },
             class: "btn-primary text-sm py-1.5" %>
+      <% set_items_count = set.respond_to?(:items_count) ? set.items_count : set.image_set_items.count %>
+      <% if email_verified? && set_items_count.positive? %>
+        <%= link_to "Practice", practice_path(practice_set_id: set.id), class: "btn-secondary text-sm py-1.5" %>
+      <% end %>
     <% end %>
     <div data-controller="dropdown" class="relative">
       <button type="button" data-action="click->dropdown#toggle"

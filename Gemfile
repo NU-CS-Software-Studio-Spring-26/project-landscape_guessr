@@ -47,6 +47,9 @@ gem "image_processing", "~> 1.2"
 # Read EXIF metadata (used to auto-fill GPS coords from uploaded photos)
 gem "exifr", "~> 1.4"
 
+# Stripe API client (test-mode Support us button)
+gem "stripe"
+
 # OAuth sign-in (Google)
 gem "omniauth"
 gem "omniauth-google-oauth2"

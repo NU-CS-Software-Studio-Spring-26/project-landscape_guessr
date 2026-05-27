@@ -20,6 +20,14 @@ class GamesControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
+  test "authenticated menu includes leaderboard link" do
+    sign_in_as @alice
+    get games_url
+
+    assert_response :success
+    assert_select "#mobile-primary-menu a[href='#{leaderboard_games_path}']", text: "Leaderboard"
+  end
+
   test "index honors valid ?per_page=" do
     sign_in_as @alice
     get games_url(per_page: 25)
