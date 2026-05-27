@@ -22,6 +22,7 @@
     <div data-controller="match-poll"
          data-match-poll-state-url-value="<%= state_match_path(@match.code, format: :json) %>"
          data-match-poll-guess-url-value="<%= guess_match_path(@match.code) %>"
+         data-match-poll-results-url-value="<%= results_match_path(@match.code) %>"
          data-match-poll-interval-ms-value="2000"
          class="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
@@ -57,9 +58,10 @@
 
         <div data-match-poll-target="reveal" class="hidden card px-4 py-3 space-y-1"></div>
 
-        <div data-match-poll-target="finished" class="hidden card px-4 py-4 text-center bg-amber-50 border-amber-200">
+        <div data-match-poll-target="finished" class="hidden card px-4 py-4 text-center bg-amber-50 border-amber-200 space-y-2">
           <p class="font-semibold text-amber-700">Match finished!</p>
-          <p class="text-xs text-amber-700 mt-1">Final scores on the right.</p>
+          <%= link_to "View final results →", results_match_path(@match.code),
+                class: "inline-block btn-primary text-sm" %>
         </div>
       </div>
 

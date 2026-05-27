@@ -1,5 +1,5 @@
 class MatchesController < ApplicationController
-  before_action :set_match, only: %i[ show join leave start destroy state guess ]
+  before_action :set_match, only: %i[ show join leave start destroy state guess results ]
 
   # GET /matches/new
   def new
@@ -174,6 +174,24 @@ class MatchesController < ApplicationController
     MatchEndRound.call(round: round) if guessed_count >= active_count && active_count.positive?
 
     render json: { ok: true }
+  end
+
+  # GET /matches/:code/results
+  def results
+    @rounds = @match.match_rounds
+                    .includes(:image, match_guesses: { match_player: :user })
+                    .order(:index)
+    @players = @match.match_players.includes(:user).to_a
+
+    # Final standings: rank by total_score desc, then by earliest joined_at
+    # to make ties stable (whoever sat down first ranks higher).
+    @standings = @players.sort_by { |p| [ -p.total_score.to_i, p.joined_at.to_i ] }
+
+    # Per-round breakdown keyed by [round_id, player_id] so the view can
+    # render an N×R table without per-cell DB hits.
+    @guess_index = @match.match_guesses.each_with_object({}) do |g, h|
+      h[[ g.match_round_id, g.match_player_id ]] = g
+    end
   end
 
   # DELETE /matches/:code

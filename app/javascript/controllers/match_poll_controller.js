@@ -11,6 +11,7 @@ export default class extends Controller {
   static values = {
     stateUrl:   String,
     guessUrl:   String,
+    resultsUrl: String,
     intervalMs: { type: Number, default: 2000 }
   }
   static targets = [

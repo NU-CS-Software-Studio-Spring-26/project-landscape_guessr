@@ -1,0 +1,121 @@
+<% content_for :title, "Results · #{@match.code}" %>
+
+<div class="w-full max-w-4xl mx-auto space-y-6 py-6">
+
+  <div class="space-y-1">
+    <p class="eyebrow">Multiplayer · Finished</p>
+    <h1 class="heading-page"><%= @match.image_set.name %></h1>
+    <p class="muted">
+      Host: <%= @match.host.username %> ·
+      <%= pluralize(@match.rounds_total, "round") %> ·
+      <%= @match.seconds_per_round %>s per round
+    </p>
+  </div>
+
+  <%# === Final standings === %>
+  <section class="space-y-3">
+    <h2 class="heading-section">Final standings</h2>
+    <div class="card overflow-hidden divide-y divide-forest-50">
+      <% @standings.each_with_index do |player, idx| %>
+        <% rank_pill =
+             case idx
+             when 0 then "bg-amber-100 text-amber-700"
+             when 1 then "bg-gray-100 text-gray-700"
+             when 2 then "bg-orange-100 text-orange-700"
+             else        "bg-forest-50 text-forest-600"
+             end %>
+        <div class="flex items-center gap-4 px-5 py-3.5 bg-white <%= 'opacity-50' if player.left_at.present? %>">
+          <span class="inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold <%= rank_pill %>">
+            <%= idx + 1 %>
+          </span>
+          <img src="<%= player.user.gravatar_url(size: 40) %>" alt=""
+               class="w-7 h-7 rounded-full shrink-0" width="40" height="40">
+          <span class="flex-1 min-w-0">
+            <span class="font-medium text-forest-900 truncate"><%= player.user.username %></span>
+            <% if @match.host_id == player.user_id %>
+              <span class="ml-1 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-forest-100 text-forest-700">Host</span>
+            <% end %>
+            <% if player.user_id == Current.user.id %>
+              <span class="ml-1 text-xs text-gray-400">(you)</span>
+            <% end %>
+            <% if player.left_at.present? %>
+              <span class="ml-1 text-xs text-gray-400">left</span>
+            <% end %>
+          </span>
+          <span class="font-bold text-amber-500 font-display tabular-nums">
+            <%= number_with_delimiter(player.total_score.to_i) %>
+          </span>
+        </div>
+      <% end %>
+    </div>
+  </section>
+
+  <%# === Per-round breakdown === %>
+  <% if @rounds.any? %>
+    <section class="space-y-3">
+      <h2 class="heading-section">Round-by-round</h2>
+      <div class="card overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead class="bg-forest-50 text-forest-700">
+            <tr>
+              <th class="text-left px-4 py-2 font-semibold">Round</th>
+              <% @standings.each do |player| %>
+                <th class="text-right px-3 py-2 font-semibold whitespace-nowrap">
+                  <%= player.user.username %>
+                </th>
+              <% end %>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-forest-50">
+            <% @rounds.each do |round| %>
+              <tr class="bg-white">
+                <td class="px-4 py-2 align-top">
+                  <div class="font-medium text-forest-900">#<%= round.index %></div>
+                  <div class="text-xs text-gray-500 truncate max-w-[16rem]">
+                    <%= round.image.title %>
+                  </div>
+                </td>
+                <% @standings.each do |player| %>
+                  <% g = @guess_index[[ round.id, player.id ]] %>
+                  <td class="px-3 py-2 text-right tabular-nums">
+                    <% if g %>
+                      <div class="font-semibold text-amber-600"><%= g.score.to_i %></div>
+                      <div class="text-xs text-gray-400">
+                        <% if g.distance_km %>
+                          <% km = g.distance_km.to_f %>
+                          <% if km < 1 %>
+                            <%= (km * 1000).round %> m
+                          <% elsif km < 10 %>
+                            <%= km.round(1) %> km
+                          <% else %>
+                            <%= number_with_delimiter(km.round) %> km
+                          <% end %>
+                        <% end %>
+                      </div>
+                    <% else %>
+                      <span class="text-gray-300">—</span>
+                    <% end %>
+                  </td>
+                <% end %>
+              </tr>
+            <% end %>
+            <tr class="bg-forest-50 font-bold">
+              <td class="px-4 py-2 text-left">Total</td>
+              <% @standings.each do |player| %>
+                <td class="px-3 py-2 text-right text-amber-600 tabular-nums">
+                  <%= number_with_delimiter(player.total_score.to_i) %>
+                </td>
+              <% end %>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  <% end %>
+
+  <div class="flex items-center justify-between pt-2">
+    <%= link_to "Home", root_path, class: "btn-ghost" %>
+    <%= link_to "Match overview", match_path(@match.code), class: "btn-secondary" %>
+  </div>
+
+</div>

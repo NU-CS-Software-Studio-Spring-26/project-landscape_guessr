@@ -38,6 +38,7 @@ Rails.application.routes.draw do
       post :start
       get  :state    # JSON snapshot for the polling client
       post :guess    # JSON guess submission
+      get  :results  # final standings + per-round breakdown
     end
   end
   resources :images do
