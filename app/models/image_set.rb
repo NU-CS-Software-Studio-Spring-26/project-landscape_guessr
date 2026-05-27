@@ -6,13 +6,13 @@ class ImageSet < ApplicationRecord
   # drifting out of sync with the model.
   NAME_MIN_LENGTH = 3
   NAME_MAX_LENGTH = 60
-  # Letters (any script), numbers, spaces, and basic punctuation: - _ . , ' & ! ?
-  NAME_ALLOWED_PATTERN = /\A[\p{L}\p{N} \-_.,'&!?]+\z/u
+  # Letters (any script), numbers, spaces, and basic punctuation: - _ . , ' & ! ? ( ) + : /
+  NAME_ALLOWED_PATTERN = /\A[\p{L}\p{N} \-_.,'&!?()+:\/]+\z/u
   # HTML5 pattern attribute — same character class, no anchors (HTML anchors
   # implicitly). The pattern attribute is compiled with the `v` flag, which
   # supports \p{L}/\p{N} in modern browsers.
-  NAME_HTML_PATTERN = "[\\p{L}\\p{N} \\-_.,'&!?]+".freeze
-  NAME_FORMAT_MESSAGE = "may only contain letters, numbers, spaces, and - _ . , ' & ! ?".freeze
+  NAME_HTML_PATTERN = "[\\p{L}\\p{N} \\-_.,'&!?()+:/]+".freeze
+  NAME_FORMAT_MESSAGE = "may only contain letters, numbers, spaces, and - _ . , ' & ! ? ( ) + : /".freeze
 
   # Set by trusted server-side flows (e.g. the auto-created practice set)
   # to bypass the reserved-name check. Never set from user input.
