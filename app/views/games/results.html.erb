@@ -39,6 +39,9 @@
     <p class="text-sm text-gray-400">
       out of <%= number_with_delimiter(@total_rounds * Game::GEOGUESSR_MAX_ROUND_SCORE) %>
       &middot; total distance <%= format_distance_compact(@total_distance_km) %>
+      <% if @duration_seconds %>
+        &middot; time <%= format_duration(@duration_seconds) %>
+      <% end %>
     </p>
   </div>
 

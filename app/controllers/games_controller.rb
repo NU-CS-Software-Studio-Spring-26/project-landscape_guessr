@@ -175,8 +175,11 @@ class GamesController < ApplicationController
     end
 
     if @game.status != "completed"
-      @game.update!(status: "completed", score: @score, completed_at: Time.current)
+      now = Time.current
+      @game.update!(status: "completed", score: @score, completed_at: now,
+                    duration_seconds: (now - @game.created_at).to_i)
     end
+    @duration_seconds = @game.duration_seconds
 
     if @game.challenge
       @challenge_games = @game.challenge.games
