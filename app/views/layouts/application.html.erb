@@ -89,6 +89,7 @@
         <div class="px-4 py-3 space-y-1">
           <% if authenticated? %>
             <%= link_to "Games",      games_path,      data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
+            <%= link_to "Leaderboard", leaderboard_games_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <%= link_to "Image Sets", image_sets_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <%= link_to "Challenges", challenges_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <%= link_to "Practice",   practice_path,   data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
@@ -146,6 +147,10 @@
       <div class="container mx-auto px-4 sm:px-5 py-6 text-xs text-forest-700 flex flex-wrap items-center justify-between gap-3">
         <span class="font-medium">Landscape Guessr &middot; <%= Date.current.year %></span>
         <span class="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <%= button_to "Support us", donation_path,
+                method: :post,
+                data: { turbo: false },
+                class: "btn-secondary text-[11px] py-1 px-2" %>
           <%= link_to "About",  about_path, class: "hover:text-forest-900 transition-colors" %>
           <%= link_to "Legal",  legal_path, class: "hover:text-forest-900 transition-colors" %>
           <%= link_to "GitHub", "https://github.com/NU-CS-Software-Studio-Spring-26/project-landscape_guessr",

@@ -10,6 +10,104 @@
     </div>
   </div>
 
+  <div class="space-y-3">
+    <div class="flex flex-wrap items-center gap-2">
+      <%= form_with url: image_sets_path, method: :get, class: "flex flex-wrap items-center gap-2", data: { turbo_frame: "_top" } do |f| %>
+        <% @selected_tags.each do |slug| %>
+          <%= hidden_field_tag "tags[]", slug %>
+        <% end %>
+        <% case_toggle_label = @tag_case == "sensitive" ? "Ignore case" : "Match case" %>
+        <% case_toggle_value = @tag_case == "sensitive" ? "insensitive" : "sensitive" %>
+        <div class="flex items-stretch">
+          <%= text_field_tag "tags[]",
+                nil,
+                placeholder: "Add tag",
+                class: "form-input text-sm w-44 rounded-r-none" %>
+          <%= link_to "Aa",
+                image_sets_path(index_filter_params.merge(tag_match: @tag_match, tag_case: case_toggle_value)),
+                class: "mt-2 inline-flex items-center justify-center rounded-r-lg border border-l-0 border-forest-200 px-2.5 text-xs font-semibold shadow-sm transition-colors #{@tag_case == 'sensitive' ? 'bg-forest-600 text-white hover:bg-forest-700' : 'bg-white text-forest-700 hover:bg-forest-50'}",
+                title: case_toggle_label,
+                aria: { label: case_toggle_label, pressed: (@tag_case == "sensitive").to_s } %>
+        </div>
+        <%= f.hidden_field :sort, value: @sort %>
+        <%= f.hidden_field :direction, value: @direction %>
+        <%= hidden_field_tag :tag_match, @tag_match %>
+        <%= hidden_field_tag :tag_case, @tag_case %>
+        <%= f.submit "Add filter", class: "btn-secondary text-sm py-1.5" %>
+        <% if @selected_tags.any? %>
+          <%= link_to "Clear all", image_sets_path(sort: @sort, direction: @direction, tag_case: @tag_case), class: "btn-ghost text-sm py-1.5" %>
+        <% end %>
+      <% end %>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-xs text-gray-500 font-medium">Match:</span>
+        <%= link_to "All tags",
+              image_sets_path(index_filter_params.merge(tag_match: "all")),
+              class: "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors #{@tag_match == 'all' ? 'bg-forest-600 text-white shadow-sm' : 'bg-forest-50 text-forest-700 hover:bg-forest-100 border border-forest-200'}" %>
+        <%= link_to "Any tag",
+              image_sets_path(index_filter_params.merge(tag_match: "any")),
+              class: "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors #{@tag_match == 'any' ? 'bg-forest-600 text-white shadow-sm' : 'bg-forest-50 text-forest-700 hover:bg-forest-100 border border-forest-200'}" %>
+      </div>
+
+      <div class="ml-auto">
+        <% sort_label = {
+          ["name","asc"] => "Name (A–Z)",
+          ["name","desc"] => "Name (Z–A)",
+          ["created_at","desc"] => "Newest",
+          ["created_at","asc"] => "Oldest",
+          ["updated_at","desc"] => "Recently updated",
+          ["updated_at","asc"] => "Least recently updated",
+          ["items_count","desc"] => "Most images",
+          ["items_count","asc"] => "Fewest images"
+        }[[@sort, @direction]] || "Sort" %>
+        <% base = index_filter_params %>
+        <% sort_opts = [
+          ["Name (A–Z)", image_sets_path(base.merge(sort: "name", direction: "asc"))],
+          ["Name (Z–A)", image_sets_path(base.merge(sort: "name", direction: "desc"))],
+          ["Newest", image_sets_path(base.merge(sort: "created_at", direction: "desc"))],
+          ["Oldest", image_sets_path(base.merge(sort: "created_at", direction: "asc"))],
+          ["Recently updated", image_sets_path(base.merge(sort: "updated_at", direction: "desc"))],
+          ["Least recently updated", image_sets_path(base.merge(sort: "updated_at", direction: "asc"))],
+          ["Most images", image_sets_path(base.merge(sort: "items_count", direction: "desc"))],
+          ["Fewest images", image_sets_path(base.merge(sort: "items_count", direction: "asc"))]
+        ] %>
+        <div data-controller="dropdown" class="relative">
+          <button type="button" data-action="dropdown#toggle"
+                  class="flex items-center gap-2 rounded-lg border border-forest-200 pl-3 pr-3 py-1.5 text-sm bg-white text-forest-800 hover:bg-forest-50 transition-colors">
+            <span data-dropdown-target="label"><%= sort_label %></span>
+            <svg class="w-4 h-4 text-forest-500 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+          </button>
+          <div data-dropdown-target="menu" class="hidden absolute right-0 top-full mt-1 z-30 bg-white rounded-xl border border-forest-200 shadow-lg overflow-hidden min-w-[12rem]">
+            <% sort_opts.each do |lbl, url| %>
+              <button type="button" data-action="dropdown#pick" data-url="<%= url %>" data-label="<%= lbl %>"
+                      class="w-full text-left px-4 py-2.5 text-sm hover:bg-forest-50 transition-colors <%= sort_label == lbl ? "font-semibold text-forest-600" : "text-forest-800" %>">
+                <%= lbl %>
+              </button>
+            <% end %>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <% if @selected_tags.any? %>
+      <% filter_tag_names = @filter_tags.index_by { |tag| @tag_case == "sensitive" ? tag.name : tag.slug } %>
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-xs text-gray-500 font-medium">Active filters:</span>
+        <% @selected_tags.each do |tag_value| %>
+          <% tag_name = filter_tag_names[tag_value]&.name || tag_value %>
+          <% remaining = @selected_tags - [ tag_value ] %>
+          <%= link_to image_sets_path(tags: remaining.presence, tag_match: @tag_match, tag_case: @tag_case, sort: @sort, direction: @direction),
+                class: "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-forest-600 text-white hover:bg-forest-700 transition-colors",
+                title: "Remove #{tag_name}",
+                aria: { label: "Remove #{tag_name} filter" } do %>
+            <span><%= tag_name %></span>
+            <span aria-hidden="true">&times;</span>
+          <% end %>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+
   <%# My sets %>
   <section class="space-y-3">
     <h2 class="heading-section">My Sets</h2>
@@ -17,7 +115,14 @@
       <p class="text-gray-500 text-sm">You haven't created any sets yet.</p>
     <% else %>
       <% @my_sets.each do |set| %>
-        <%= render "image_sets/set_card", set: set, show_owner_actions: true %>
+        <%= render "image_sets/set_card",
+              set: set,
+              show_owner_actions: true,
+              selected_tags: @selected_tags,
+              tag_match: @tag_match,
+              tag_case: @tag_case,
+              sort: @sort,
+              direction: @direction %>
       <% end %>
     <% end %>
   </section>
@@ -29,7 +134,14 @@
       <p class="text-gray-500 text-sm">No public sets yet.</p>
     <% else %>
       <% @public_sets.each do |set| %>
-        <%= render "image_sets/set_card", set: set, show_owner_actions: false %>
+        <%= render "image_sets/set_card",
+              set: set,
+              show_owner_actions: false,
+              selected_tags: @selected_tags,
+              tag_match: @tag_match,
+              tag_case: @tag_case,
+              sort: @sort,
+              direction: @direction %>
       <% end %>
     <% end %>
   </section>

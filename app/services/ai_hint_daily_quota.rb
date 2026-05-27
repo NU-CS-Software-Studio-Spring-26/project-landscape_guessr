@@ -7,7 +7,7 @@ class AiHintDailyQuota
 
   LIMIT_EXCEEDED_MESSAGE = <<~MSG.squish
     Daily AI hint limit reached (#{LIMIT} per day). Try again tomorrow or use
-    radius and location hints.
+    location hints.
   MSG
 
   def self.for(user:, guest_session_id: nil)

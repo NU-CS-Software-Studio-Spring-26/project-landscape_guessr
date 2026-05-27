@@ -2,6 +2,7 @@ class PracticeController < ApplicationController
   PRACTICE_TIMER_SECONDS = [ 30, 60, 120 ].freeze
   PRACTICE_ATTEMPTS = [ 1, 2 ].freeze
   HINT_TIERS = (1..3).freeze
+  AI_HINT_VERIFIED_EMAIL_MESSAGE = "This feature is only available to users with a verified email".freeze
 
   allow_unauthenticated_access only: %i[ show check hint ]
   skip_before_action :require_email_verified
@@ -11,16 +12,16 @@ class PracticeController < ApplicationController
     if params[:practice_set_id].present?
       return request_authentication unless authenticated?
       if practice_set.blank?
-        redirect_to practice_saved_path, alert: "Saved practice set not found."
+        redirect_to practice_path, alert: "Practice set not found."
         return
       end
     end
 
     @time_limit_seconds = practice_seconds_param
     @attempts = practice_attempts_param
-    @hint_circle_enabled = practice_hint_circle_param
     @ai_hints_enabled = GeminiConfig.enabled?
     @ai_hint_quota_used = hint_quota.used if @ai_hints_enabled
+    @available_sets = available_practice_sets if email_verified?
     load_random_located_image
     return if performed?
 
@@ -32,7 +33,7 @@ class PracticeController < ApplicationController
     resume_session
     @practice_set = practice_set
     unless @practice_set
-      redirect_to practice_saved_path, alert: "Saved practice set not found."
+      redirect_to practice_path, alert: "Practice set not found."
       return
     end
 
@@ -101,6 +102,8 @@ class PracticeController < ApplicationController
 
   def hint
     resume_session
+
+    return render_ai_hint_verified_email_required unless ai_hints_allowed_for_current_user?
 
     unless GeminiConfig.enabled?
       return render json: { error: "ai_hints_disabled" }, status: :service_unavailable
@@ -192,15 +195,19 @@ class PracticeController < ApplicationController
 
   def load_practice_set_image
     @practice_set = practice_set
+    # Fetch located IDs once and reuse — avoids a second DB round-trip when
+    # starting a fresh session, and supplies all_ids to the progress methods
+    # so the session never stores the (potentially large) full ID list.
+    all_ids = PracticeSetProgress.located_image_ids_for(@practice_set)
     progress = PracticeSetProgress.for(session, set_id: @practice_set.id)
     unless progress
-      if PracticeSetProgress.located_image_ids_for(@practice_set).empty?
-        redirect_to practice_saved_path,
-                    alert: "Add images with coordinates to your saved practice set first."
+      if all_ids.empty?
+        redirect_to practice_set_fallback_path,
+                    alert: "The selected practice set has no images with coordinates."
         return
       end
 
-      progress = PracticeSetProgress.start(session, @practice_set)
+      progress = PracticeSetProgress.start(session, @practice_set, all_ids: all_ids)
     end
 
     completed_id = params[:completed_image_id].to_i
@@ -213,17 +220,18 @@ class PracticeController < ApplicationController
 
     @practice_set_progress = progress
     image_id = params[:image_id].to_i
+    remaining = progress.remaining(all_ids: all_ids)
     next_id =
-      if image_id.positive? && progress.remaining.include?(image_id)
+      if image_id.positive? && remaining.include?(image_id)
         image_id
       else
-        progress.current_image_id
+        progress.current_image_id(all_ids: all_ids)
       end
 
     @image = located_images_in_set(@practice_set).find_by(id: next_id)
     return if @image.present?
 
-    redirect_to practice_saved_path, alert: "No images with coordinates are available in your saved practice set."
+    redirect_to practice_set_fallback_path, alert: "No images with coordinates are available in the selected practice set."
   end
 
   def practice_set_mode?
@@ -233,19 +241,33 @@ class PracticeController < ApplicationController
   def practice_set
     return @practice_set if defined?(@practice_set)
 
-    @practice_set = saved_practice_set_from_params
+    @practice_set = practice_set_from_params
   end
 
-  def saved_practice_set_from_params
+  def practice_set_from_params
     return nil unless authenticated?
 
     set_id = params[:practice_set_id].to_i
     return nil if set_id <= 0
 
-    set = Current.user.image_sets.find_by(id: set_id)
-    return nil unless set&.name == ImageSet::SAVED_FOR_PRACTICE_NAME
+    set = ImageSet.find_by(id: set_id)
+    return nil unless set&.playable_by?(Current.user)
+
+    # The "Saved for Practice" set only requires authentication.
+    # Any other set additionally requires a verified email address.
+    return nil if !set.saved_for_practice? && !Current.user.email_verified?
 
     set
+  end
+
+  def available_practice_sets
+    return [] unless email_verified?
+
+    ImageSet.visible_to(Current.user).order(:name)
+  end
+
+  def practice_set_fallback_path
+    @practice_set&.saved_for_practice? ? practice_saved_path : practice_path
   end
 
   def located_images_in_set(set)
@@ -268,10 +290,6 @@ class PracticeController < ApplicationController
     PRACTICE_ATTEMPTS.include?(attempts) ? attempts : 1
   end
 
-  def practice_hint_circle_param
-    params[:hint_circle].to_s == "1"
-  end
-
   def hint_tier_param
     tier = params[:tier].to_i
     HINT_TIERS.cover?(tier) ? tier : 1
@@ -279,6 +297,17 @@ class PracticeController < ApplicationController
 
   def hint_retry_requested?
     ActiveModel::Type::Boolean.new.cast(params[:retry])
+  end
+
+  def ai_hints_allowed_for_current_user?
+    authenticated? && Current.user.email_verified?
+  end
+
+  def render_ai_hint_verified_email_required
+    render json: {
+      status: "failed",
+      error: AI_HINT_VERIFIED_EMAIL_MESSAGE
+    }
   end
 
   def enqueue_hint_job!(image_id, tier)

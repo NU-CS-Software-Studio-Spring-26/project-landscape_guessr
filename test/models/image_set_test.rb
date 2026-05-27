@@ -52,4 +52,56 @@ class ImageSetTest < ActiveSupport::TestCase
     set = image_sets(:alice_private)
     assert_not set.playable_by?(users(:bob))
   end
+
+  test "tag_list assigns tags and normalizes slugs" do
+    set = users(:alice).image_sets.create!(name: "Tagged", visibility: "private", tag_list: "Forest,  alpine , forest")
+    assert_equal %w[Alpine Forest], set.tags.order(:name).pluck(:name)
+    assert_equal "alpine", set.tags.find_by(name: "Alpine")&.slug
+  end
+
+  test "tag_list strips leading and trailing whitespace before creating tags" do
+    set = users(:alice).image_sets.create!(name: "Trimmed Tags", visibility: "private", tag_list: "  Mixed Case Tag  ")
+
+    assert_equal [ "Mixed Case Tag" ], set.tags.pluck(:name)
+    assert_nil Tag.find_by(name: "  Mixed Case Tag  ")
+  end
+
+  test "tagged_with finds sets by tag slug or name" do
+    assert_includes ImageSet.tagged_with("forest"), image_sets(:alice_private)
+    assert_includes ImageSet.tagged_with("  FOREST  "), image_sets(:alice_private)
+    assert_not_includes ImageSet.tagged_with("  forest  "), image_sets(:alice_public)
+  end
+
+  test "tagged_with can match exact tag name casing" do
+    assert_includes ImageSet.tagged_with("  Forest  ", case_sensitive: true), image_sets(:alice_private)
+    assert_not_includes ImageSet.tagged_with("  forest  ", case_sensitive: true), image_sets(:alice_private)
+  end
+
+  test "tagged_with any returns sets matching at least one tag" do
+    matches = ImageSet.tagged_with(%w[forest alpine], match: "any")
+    assert_includes matches, image_sets(:alice_private)
+    assert_includes matches, image_sets(:alice_public)
+  end
+
+  test "tagged_with all returns only sets with every tag" do
+    matches = ImageSet.tagged_with(%w[forest alpine], match: "all")
+    assert_includes matches, image_sets(:alice_private)
+    assert_not_includes matches, image_sets(:alice_public)
+  end
+
+  test "tagged_with all exact names requires each requested casing" do
+    matches = ImageSet.tagged_with([ "Forest", "Alpine" ], match: "all", case_sensitive: true)
+    assert_includes matches, image_sets(:alice_private)
+
+    mismatched = ImageSet.tagged_with([ "Forest", "alpine" ], match: "all", case_sensitive: true)
+    assert_not_includes mismatched, image_sets(:alice_private)
+  end
+
+  test "normalize_tag_slugs deduplicates and parameterizes" do
+    assert_equal %w[forest alpine], ImageSet.normalize_tag_slugs([ "Forest", "alpine", "forest", "" ])
+  end
+
+  test "normalize_tag_names keeps exact casing" do
+    assert_equal [ "Forest", "forest" ], ImageSet.normalize_tag_names([ " Forest ", "forest", "" ])
+  end
 end

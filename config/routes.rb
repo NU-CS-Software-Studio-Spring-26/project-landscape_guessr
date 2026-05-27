@@ -3,6 +3,11 @@ Rails.application.routes.draw do
   get "/about", to: "home#about"
   get "/legal", to: "home#legal"
 
+  resource :donation, only: [ :create ] do
+    get :success
+    get :cancel
+  end
+
   resource :session, only: %i[ new create destroy ]
   resources :passwords, param: :token, only: %i[ new create edit update ]
   resource :registration, only: %i[ new create ]
