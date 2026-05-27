@@ -1,7 +1,7 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
-  static targets = ["latitude", "longitude", "readout", "submit", "next", "result", "otherGuesses", "leaveModal"]
+  static targets = ["latitude", "longitude", "readout", "submit", "next", "result", "otherGuesses", "leaveModal", "timer"]
   static values = { gamePath: String }
 
   connect() {
@@ -22,6 +22,7 @@ export default class extends Controller {
     document.addEventListener("submit", this.#boundSubmit, true)
     document.addEventListener("turbo:before-visit", this.#boundBeforeVisit)
     window.addEventListener("beforeunload", this.#boundBeforeUnload)
+    this.#startTimer()
   }
 
   disconnect() {
@@ -32,6 +33,7 @@ export default class extends Controller {
     window.removeEventListener("beforeunload", this.#boundBeforeUnload)
     document.body.classList.remove("overflow-hidden")
     this.#clearNextPrefetch()
+    this.#stopTimer()
   }
 
   pinChanged(event) {
@@ -86,6 +88,7 @@ export default class extends Controller {
     )
     mapCtrl.showAnswer(answerLat, answerLng)
 
+    this.#stopTimer()
     this.submitTarget.classList.add("hidden")
     this.nextTarget.classList.remove("hidden")
 
@@ -136,6 +139,22 @@ export default class extends Controller {
   #nextPrefetchController
   #prefetchedNextUrl
   #prefetchedImage
+  #timerInterval = null
+  #roundStartTime = null
+
+  #startTimer() {
+    this.#roundStartTime = Date.now()
+    this.#timerInterval = setInterval(() => {
+      if (!this.hasTimerTarget) return
+      const secs = Math.floor((Date.now() - this.#roundStartTime) / 1000)
+      this.timerTarget.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`
+    }, 1000)
+  }
+
+  #stopTimer() {
+    clearInterval(this.#timerInterval)
+    this.#timerInterval = null
+  }
 
   #handleKeydown(event) {
     if (this.#modalOpen()) {

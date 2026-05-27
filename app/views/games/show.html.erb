@@ -87,8 +87,9 @@
             <span data-game-target="readout" class="text-sm text-gray-600">Click the map to drop a pin.</span>
             <p data-game-target="result" class="text-lg font-medium"></p>
             <p data-game-target="otherGuesses" class="hidden text-xs text-gray-500"></p>
+            <span data-game-target="timer" class="ml-auto text-xs text-gray-400 tabular-nums">0:00</span>
             <%= submit_tag "Submit guess", data: { game_target: "submit", action: "game#submitGuess" }, disabled: true,
-                class: "btn-primary ml-auto disabled:opacity-40" %>
+                class: "btn-primary disabled:opacity-40" %>
             <button type="button" data-game-target="next" data-action="game#nextRound"
                     class="btn-primary hidden ml-auto">
               Next round

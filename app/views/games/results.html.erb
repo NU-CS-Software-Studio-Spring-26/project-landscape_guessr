@@ -39,6 +39,9 @@
     <p class="text-sm text-gray-400">
       out of <%= number_with_delimiter(@total_rounds * Game::GEOGUESSR_MAX_ROUND_SCORE) %>
       &middot; total distance <%= format_distance_compact(@total_distance_km) %>
+      <% if @duration_seconds %>
+        &middot; time <%= format_duration(@duration_seconds) %>
+      <% end %>
     </p>
   </div>
 
@@ -81,6 +84,10 @@
           <div>
             <p class="text-xs text-gray-400">Distance</p>
             <p class="font-medium text-forest-700"><%= format_distance_compact(row[:distance_km]) %></p>
+          </div>
+          <div>
+            <p class="text-xs text-gray-400">Time</p>
+            <p class="font-medium text-forest-700 tabular-nums"><%= format_duration(row[:round_duration_seconds]) %></p>
           </div>
         </div>
         <%= link_to "Details ↗", row[:guess].image,

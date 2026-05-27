@@ -27,6 +27,11 @@ module ApplicationHelper
     record.errors[field].any? ? "form-input-error" : "form-input"
   end
 
+  def format_duration(seconds)
+    return nil unless seconds
+    "%d:%02d" % [ seconds / 60, seconds % 60 ]
+  end
+
   def practice_image_set?(image_set, user: Current.user)
     image_set.practice_set_for?(user)
   end
