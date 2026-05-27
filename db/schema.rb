@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_26_000002) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_27_163633) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -88,7 +88,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_26_000002) do
     t.bigint "challenger_id", null: false
     t.datetime "created_at", null: false
     t.bigint "image_set_id"
-    t.string "token", default: "", null: false
+    t.string "token", null: false
     t.datetime "updated_at", null: false
     t.index ["challenger_id"], name: "index_challenges_on_challenger_id"
     t.index ["image_set_id"], name: "index_challenges_on_image_set_id"
@@ -124,7 +124,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_26_000002) do
     t.datetime "completed_at"
     t.datetime "created_at", null: false
     t.bigint "image_set_id"
-    t.float "score"
+    t.integer "score"
     t.string "status"
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
