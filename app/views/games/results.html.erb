@@ -114,9 +114,14 @@
 
   <%# Action buttons %>
   <div class="flex gap-3 pt-2 flex-wrap">
-    <%= button_to "Play Again", games_path, method: :post,
-          params: { image_set_id: @game.image_set_id },
-          class: "btn-primary flex-1" %>
+    <% if @game.challenge %>
+      <%= button_to "Play Again", play_challenge_path(@game.challenge),
+            method: :post, class: "btn-primary flex-1" %>
+    <% else %>
+      <%= button_to "Play Again", games_path, method: :post,
+            params: { image_set_id: @game.image_set_id },
+            class: "btn-primary flex-1" %>
+    <% end %>
     <%= link_to "Leaderboard", leaderboard_games_path(image_set_id: @game.image_set_id),
           class: "btn-secondary flex-1" %>
     <% if @game.challenge %>
