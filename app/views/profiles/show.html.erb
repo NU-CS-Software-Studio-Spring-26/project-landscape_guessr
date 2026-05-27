@@ -1,9 +1,13 @@
 <% content_for :title, "Profile" %>
 
 <div class="w-full max-w-xl mx-auto space-y-6 py-6">
-  <div>
-    <h1 class="heading-page"><%= @user.username %></h1>
-    <p class="muted mt-1"><%= @user.email_address %></p>
+  <div class="flex items-center gap-4">
+    <img src="<%= @user.gravatar_url(size: 80) %>" alt="<%= @user.username %>'s avatar"
+         class="w-16 h-16 rounded-full ring-2 ring-forest-100" width="80" height="80">
+    <div>
+      <h1 class="heading-page"><%= @user.username %></h1>
+      <p class="muted mt-1"><%= @user.email_address %></p>
+    </div>
   </div>
 
   <section class="space-y-3">
