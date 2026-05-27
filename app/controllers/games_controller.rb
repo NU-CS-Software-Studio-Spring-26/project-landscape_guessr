@@ -138,20 +138,22 @@ class GamesController < ApplicationController
   # GET /games/1/results
   def results
     game_images_by_image_id = @game.game_images.index_by(&:image_id)
-    guesses = @game.guesses.includes(:image).order(:created_at)
+    guesses = @game.guesses.includes(:image).order(:created_at).to_a
 
     @rounds = guesses.each_with_index.map do |guess, idx|
       gi = game_images_by_image_id[guess.image_id]
       ans_lat = gi&.answer_lat || guess.image.latitude.to_f
       ans_lng = gi&.answer_lng || guess.image.longitude.to_f
       dist_km = Game.haversine_km(guess.latitude.to_f, guess.longitude.to_f, ans_lat, ans_lng)
+      round_start = idx == 0 ? @game.created_at : guesses[idx - 1].created_at
       {
         guess: guess,
         distance_km: dist_km,
         answer_lat: ans_lat,
         answer_lng: ans_lng,
         round_number: idx + 1,
-        round_score: Game.geoguessr_round_score(dist_km)
+        round_score: Game.geoguessr_round_score(dist_km),
+        round_duration_seconds: (guess.created_at - round_start).to_i
       }
     end
 
