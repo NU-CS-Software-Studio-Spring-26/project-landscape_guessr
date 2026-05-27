@@ -29,6 +29,15 @@ Rails.application.routes.draw do
     member { get :results }
     collection { get :leaderboard }
   end
+  # Multiplayer lobbies. URLs are keyed by short share code, not numeric id,
+  # so the entire join flow is "visit this link." See app/models/match.rb.
+  resources :matches, param: :code, only: %i[ new create show destroy ] do
+    member do
+      post :join
+      post :leave
+      post :start
+    end
+  end
   resources :images do
     collection { get :map }
   end

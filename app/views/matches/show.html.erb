@@ -1,0 +1,100 @@
+<% content_for :title, "Lobby #{@match.code}" %>
+
+<div class="w-full max-w-xl mx-auto space-y-6 py-6">
+
+  <div class="space-y-1">
+    <p class="eyebrow">Multiplayer · <%= @match.status.titleize %></p>
+    <h1 class="heading-page">
+      <%= @match.image_set.name %>
+    </h1>
+    <p class="muted">
+      Host: <%= @match.host.username %> ·
+      <%= pluralize(@match.rounds_total, "round") %> ·
+      <%= @match.seconds_per_round %>s per round
+    </p>
+  </div>
+
+  <% if @match.status == "lobby" %>
+    <%# Share link %>
+    <div class="card px-5 py-4 space-y-2 border-forest-200">
+      <p class="text-sm font-semibold text-forest-800">Invite link</p>
+      <div class="flex items-center gap-2">
+        <code class="flex-1 text-xs bg-forest-50 border border-forest-200 rounded-lg px-3 py-2.5 text-forest-800 truncate select-all font-mono"><%= @share_url %></code>
+        <button type="button"
+                onclick="navigator.clipboard.writeText('<%= @share_url %>').then(() => { this.textContent = 'Copied!'; setTimeout(() => this.textContent = 'Copy', 1500) })"
+                class="btn-secondary text-sm py-2 shrink-0">Copy</button>
+      </div>
+      <p class="muted text-xs">Anyone with the link can join up to <%= Match::LOBBY_CAPACITY %> players.</p>
+    </div>
+
+    <%# Join / start CTA %>
+    <% if !@joined && @at_capacity %>
+      <div class="card px-5 py-4 text-center text-sm text-amber-700 bg-amber-50 border-amber-200">
+        Lobby is full (<%= Match::LOBBY_CAPACITY %> players). Ask the host to start.
+      </div>
+    <% elsif !@joined %>
+      <%= button_to "Join lobby", join_match_path(@match.code), method: :post,
+            class: "btn-primary w-full py-3 text-base" %>
+    <% elsif @is_host %>
+      <%= button_to "Start match (#{pluralize(@players.size, "player")})",
+            start_match_path(@match.code), method: :post,
+            class: "btn-primary w-full py-3 text-base",
+            disabled: !@can_start %>
+    <% else %>
+      <div class="card px-5 py-4 text-center text-sm text-forest-700">
+        Waiting for <strong><%= @match.host.username %></strong> to start the match…
+      </div>
+    <% end %>
+  <% elsif @match.status == "active" %>
+    <%# Game-play view ships in the next commit. For now, show a placeholder. %>
+    <div class="card px-5 py-6 text-center space-y-2">
+      <p class="text-sm font-semibold text-forest-800">Match in progress</p>
+      <p class="muted text-xs">The play view is being wired up — refresh shortly.</p>
+    </div>
+  <% else %>
+    <div class="card px-5 py-6 text-center">
+      <p class="text-sm font-semibold text-forest-800">Match finished</p>
+    </div>
+  <% end %>
+
+  <%# Player list %>
+  <section class="space-y-3">
+    <h2 class="heading-section">
+      Players (<%= @players.size %><%= "/#{Match::LOBBY_CAPACITY}" if @match.status == "lobby" %>)
+    </h2>
+    <div class="card overflow-hidden divide-y divide-forest-50">
+      <% @players.each do |player| %>
+        <div class="flex items-center gap-4 px-5 py-3.5 bg-white">
+          <span class="flex items-center gap-2 flex-1 min-w-0">
+            <img src="<%= player.user.gravatar_url(size: 40) %>" alt=""
+                 class="w-7 h-7 rounded-full shrink-0" width="40" height="40">
+            <span class="font-medium text-forest-900 truncate"><%= player.user.username %></span>
+            <% if @match.host_id == player.user_id %>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-forest-100 text-forest-700">Host</span>
+            <% end %>
+            <% if player.user_id == Current.user.id %>
+              <span class="text-xs text-gray-400">(you)</span>
+            <% end %>
+          </span>
+        </div>
+      <% end %>
+    </div>
+  </section>
+
+  <div class="flex items-center justify-between pt-2">
+    <%= link_to "Home", root_path, class: "btn-ghost" %>
+    <div class="flex items-center gap-2">
+      <% if @joined %>
+        <%= button_to "Leave", leave_match_path(@match.code), method: :post,
+              class: "btn-ghost text-amber-600 hover:text-amber-800",
+              data: { turbo_confirm: "Leave this lobby?" } %>
+      <% end %>
+      <% if @is_host %>
+        <%= button_to "Delete match", match_path(@match.code), method: :delete,
+              class: "btn-ghost text-red-500 hover:text-red-700",
+              data: { turbo_confirm: "Delete this match? This cannot be undone." } %>
+      <% end %>
+    </div>
+  </div>
+
+</div>
