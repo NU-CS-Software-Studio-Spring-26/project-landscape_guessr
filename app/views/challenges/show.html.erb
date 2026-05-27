@@ -37,7 +37,11 @@
         <% @completed.each_with_index do |game, idx| %>
           <div class="flex items-center gap-4 px-5 py-3.5 bg-white hover:bg-forest-50 transition-colors">
             <span class="text-sm font-semibold text-gray-400 w-5 text-right"><%= idx + 1 %></span>
-            <span class="flex-1 font-medium text-forest-900"><%= game.user.username %></span>
+            <span class="flex items-center gap-2 flex-1 min-w-0">
+              <img src="<%= game.user.gravatar_url(size: 40) %>" alt=""
+                   class="w-7 h-7 rounded-full shrink-0" width="40" height="40">
+              <span class="font-medium text-forest-900 truncate"><%= game.user.username %></span>
+            </span>
             <span class="font-bold text-amber-500 font-display"><%= number_with_delimiter(game.score.to_i) %></span>
             <%= link_to "Results ↗", results_game_path(game),
                   class: "text-xs text-gray-400 hover:text-forest-600 hover:underline underline-offset-2" %>
@@ -54,7 +58,11 @@
       <div class="card overflow-hidden divide-y divide-forest-50">
         <% @in_progress.each do |game| %>
           <div class="flex items-center gap-4 px-5 py-3.5">
-            <span class="flex-1 text-sm text-forest-700"><%= game.user.username %></span>
+            <span class="flex items-center gap-2 flex-1 min-w-0">
+              <img src="<%= game.user.gravatar_url(size: 40) %>" alt=""
+                   class="w-7 h-7 rounded-full shrink-0" width="40" height="40">
+              <span class="text-sm text-forest-700 truncate"><%= game.user.username %></span>
+            </span>
             <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">Playing&hellip;</span>
           </div>
         <% end %>
