@@ -1,0 +1,102 @@
+<% content_for :title, "Lobby #{@match.code}" %>
+
+<div class="w-full max-w-5xl mx-auto space-y-6 py-6">
+
+  <div class="space-y-1">
+    <p class="eyebrow">Multiplayer · <%= @match.status.titleize %></p>
+    <h1 class="heading-page">
+      <%= @match.image_set.name %>
+    </h1>
+    <p class="muted">
+      Host: <%= @match.host.username %> ·
+      <%= pluralize(@match.rounds_total, "round") %> ·
+      <%= @match.seconds_per_round %>s per round
+    </p>
+  </div>
+
+  <% if @match.status == "lobby" %>
+    <%# === LOBBY === %>
+    <%= render "lobby" %>
+  <% else %>
+    <%# === ACTIVE / FINISHED — polling client takes over === %>
+    <div data-controller="match-poll"
+         data-match-poll-state-url-value="<%= state_match_path(@match.code, format: :json) %>"
+         data-match-poll-guess-url-value="<%= guess_match_path(@match.code) %>"
+         data-match-poll-results-url-value="<%= results_match_path(@match.code) %>"
+         data-match-poll-interval-ms-value="2000"
+         class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+      <div class="lg:col-span-2 space-y-3">
+        <div class="flex items-center justify-between gap-2">
+          <h2 class="heading-section" data-match-poll-target="roundLabel">
+            <%= @match.current_round ? "Round #{@match.current_round.index} / #{@match.rounds_total}" : "Starting…" %>
+          </h2>
+          <span class="text-2xl font-bold tabular-nums text-forest-900" data-match-poll-target="timer">--s</span>
+        </div>
+
+        <div class="relative h-[55vh] flex items-center justify-center bg-gray-100 rounded-md border border-gray-200">
+          <img data-match-poll-target="image"
+               src="<%= @match.current_round ? image_src(@match.current_round.image, width: 1600) : '' %>"
+               alt="Guess this location"
+               class="max-w-full max-h-full object-contain">
+        </div>
+        <p class="text-xs text-gray-500" data-match-poll-target="imageTitle">
+          <%= @match.current_round&.image&.title %>
+        </p>
+
+        <%= render "shared/guess_map",
+              style: @match.image_set.map_style || "outdoor-v2",
+              class: "w-full h-[50vh]" %>
+
+        <div class="flex items-center gap-2">
+          <span data-match-poll-target="guessHint" class="text-sm text-gray-600">Click the map to drop your pin.</span>
+          <span data-match-poll-target="lockedBadge"
+                class="hidden text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-3 py-0.5">
+            Locked in
+          </span>
+        </div>
+
+        <div data-match-poll-target="reveal" class="hidden card px-4 py-3 space-y-1"></div>
+
+        <div data-match-poll-target="finished" class="hidden card px-4 py-4 text-center bg-amber-50 border-amber-200 space-y-2">
+          <p class="font-semibold text-amber-700">Match finished!</p>
+          <%= link_to "View final results →", results_match_path(@match.code),
+                class: "inline-block btn-primary text-sm" %>
+        </div>
+      </div>
+
+      <aside class="space-y-3">
+        <div class="card overflow-hidden">
+          <div class="px-3 py-2 bg-forest-50 border-b border-forest-100 flex items-center justify-between">
+            <span class="text-xs font-semibold text-forest-800 uppercase tracking-wide">Scoreboard</span>
+            <span class="text-xs text-gray-500" data-match-poll-target="status"><%= @match.status %></span>
+          </div>
+          <div data-match-poll-target="scoreboard" class="divide-y divide-forest-50"></div>
+        </div>
+
+        <div class="card px-4 py-3 text-xs text-gray-500 space-y-1">
+          <div>Code: <code class="font-mono"><%= @match.code %></code></div>
+          <div>Host: <strong class="text-forest-700"><%= @match.host.username %></strong></div>
+          <div><%= pluralize(@match.rounds_total, "round") %>, <%= @match.seconds_per_round %>s each</div>
+        </div>
+      </aside>
+    </div>
+  <% end %>
+
+  <div class="flex items-center justify-between pt-2">
+    <%= link_to "Home", root_path, class: "btn-ghost" %>
+    <div class="flex items-center gap-2">
+      <% if @joined %>
+        <%= button_to "Leave", leave_match_path(@match.code), method: :post,
+              class: "btn-ghost text-amber-600 hover:text-amber-800",
+              data: { turbo_confirm: "Leave this match?" } %>
+      <% end %>
+      <% if @is_host %>
+        <%= button_to "Delete match", match_path(@match.code), method: :delete,
+              class: "btn-ghost text-red-500 hover:text-red-700",
+              data: { turbo_confirm: "Delete this match? This cannot be undone." } %>
+      <% end %>
+    </div>
+  </div>
+
+</div>

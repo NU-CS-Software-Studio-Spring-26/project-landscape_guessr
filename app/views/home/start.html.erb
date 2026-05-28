@@ -22,10 +22,11 @@
     </div>
 
     <%# Quick access cards %>
-    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
       <% [
         { label: "My Games",   sub: "View past results",    path: games_path },
         { label: "Challenges", sub: "Play against friends",  path: challenges_path },
+        { label: "Multiplayer", sub: "Real-time lobby, share a link", path: new_match_path },
         { label: "Practice",   sub: "Quick rounds + saved mistakes", path: practice_path },
         { label: "Image Sets", sub: "Browse & manage sets", path: image_sets_path },
         {

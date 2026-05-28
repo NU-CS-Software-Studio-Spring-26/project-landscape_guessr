@@ -42,6 +42,7 @@
               <%= link_to "Games",       games_path,      class: "text-sm text-forest-700 hover:text-forest-900 font-medium transition-colors" %>
               <%= link_to "Image Sets",  image_sets_path, class: "text-sm text-forest-700 hover:text-forest-900 font-medium transition-colors" %>
               <%= link_to "Challenges",  challenges_path, class: "text-sm text-forest-700 hover:text-forest-900 font-medium transition-colors" %>
+              <%= link_to "Multiplayer", new_match_path, class: "text-sm text-forest-700 hover:text-forest-900 font-medium transition-colors" %>
             <% end %>
           </div>
         </div>
@@ -92,6 +93,7 @@
             <%= link_to "Leaderboard", leaderboard_games_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <%= link_to "Image Sets", image_sets_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <%= link_to "Challenges", challenges_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
+            <%= link_to "Multiplayer", new_match_path,  data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <%= link_to "Practice",   practice_path,   data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <%= link_to "How scoring works", scoring_path, data: { action: "mobile-menu#close" }, class: "block py-2.5 text-sm font-medium text-forest-800 hover:text-forest-600 transition-colors" %>
             <div class="pt-3 border-t border-forest-100 flex items-center justify-between">
