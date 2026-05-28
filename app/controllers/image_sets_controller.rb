@@ -63,6 +63,13 @@ class ImageSetsController < ApplicationController
                 .order("images.title"),
       per_page: 100
     )
+
+    # Pre-resolve Mapillary signed URLs for the page's gallery thumbnails
+    # so each <img> render hits the Rails.cache instead of the Graph API.
+    if @image_set.ai_image_source == "mapillary"
+      mapillary_ids = @items.map { |item| item.image.external_id }.compact
+      MapillaryUrlResolver.warm_urls(mapillary_ids, size: 1024) if mapillary_ids.any?
+    end
   end
 
   # GET /image_sets/new
@@ -451,16 +458,27 @@ class ImageSetsController < ApplicationController
   # SPARQL validation by editing the hidden `ai_query` in devtools.
   def ai_create
     gen = Current.user.ai_generations.find_by(id: params[:generation_id])
-    if gen.nil? || gen.status != "completed" || gen.result.nil? ||
-       gen.result[:cannot_answer] ||
-       gen.result[:sparql_pattern].to_s.strip.empty?
-      # Last condition guards against a generation that completed but
-      # whose result has no usable pattern (would create a set whose
-      # import job runs nil SPARQL).
+    if gen.nil? || gen.status != "completed" || gen.result.nil? || gen.result[:cannot_answer]
       redirect_to ai_new_image_sets_path, alert: "No AI proposal to import." and return
     end
 
     result = gen.result
+    source = (result[:image_source] || "wikidata").to_s
+
+    # Source-specific guards: each source needs different fields populated
+    # before the import job can do anything useful.
+    needs_pattern = source == "wikidata"
+    if needs_pattern && result[:sparql_pattern].to_s.strip.empty?
+      redirect_to ai_new_image_sets_path, alert: "No SPARQL pattern in proposal." and return
+    end
+
+    source_params = {
+      "topic_qid"                 => result[:topic_qid],
+      "combined_qid"              => result[:combined_qid],
+      "commons_intitle_fallback"  => result[:commons_intitle_fallback],
+      "mapillary_min_year"        => result[:mapillary_min_year]
+    }.compact
+
     image_set = Current.user.image_sets.new(
       name:             params[:name].to_s.strip.presence || result[:set_name].presence || "Untitled AI Set",
       visibility:       %w[public private].include?(params[:visibility]) ? params[:visibility] : "private",
@@ -468,7 +486,9 @@ class ImageSetsController < ApplicationController
       ai_query:         result[:sparql_pattern],
       ai_explanation:   result[:explanation].to_s,
       ai_model:         gen.model_used.presence || "flash",
-      ai_region_filter: result[:region_filter],
+      ai_region_filter: result[:region],
+      ai_image_source:  source,
+      ai_source_params: source_params.presence,
       import_state:     "pending"
     )
 
@@ -517,7 +537,7 @@ class ImageSetsController < ApplicationController
   # for letting the user un-stick a stuck job without us needing per-import
   # timestamp tracking.
   def retry_import
-    if @image_set.ai_query.blank?
+    unless @image_set.ai_generated?
       redirect_to @image_set, alert: "This isn't an AI-generated set, nothing to retry." and return
     end
     if @image_set.import_state == "completed"

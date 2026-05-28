@@ -102,7 +102,7 @@ class AiGenerationPipelineTest < ActiveSupport::TestCase
       conversation_json: [ { role: "user", text: "lakes in bayern" } ].to_json
     )
     ai_with_bad_region = AI_RESULT.merge(
-      region_filter: { name: "Bayern", parent_name: "Germany", admin_level: "admin1" }
+      region: { mode: "named", name: "Bayern", parent_name: "Germany", admin_level: "admin1" }
     )
     count_called = false
     with_stubbed_generator(returns: ai_with_bad_region) do

@@ -118,9 +118,24 @@ Run a worker dyno or `bin/jobs` locally so enqueued jobs actually execute.
 
 ### AI-generated image sets (optional)
 
-Signed-in users can build an image set from a natural-language prompt ("volcanoes in Japan") at `/image_sets/ai_new`. A Gemini agent (`AiImageSetGenerator`) translates the prompt into a Wikidata SPARQL pattern via function-calling, the pipeline counts and previews matches, and the user confirms before the import job creates the set.
+Signed-in users can build an image set from a natural-language prompt ("volcanoes in Japan", "streets near the Eiffel Tower", "Mount Fuji photos") at `/image_sets/ai_new`. A Gemini agent (`AiImageSetGenerator`) picks one of three image sources, resolves any Q-IDs / region names via tool calls, the pipeline counts and previews matches, and the user confirms before the import job creates the set.
+
+**Sources** (`image_sets.ai_image_source`):
+
+- `wikidata` — default for topic+region prompts (`churches in Paris`, `lakes in Massachusetts`). One canonical Commons photo per Wikidata item, via `WikidataImporter`.
+- `commons` — high-volume / single-subject prompts (`Mount Fuji photos`, `many photos of buildings in Boston`). Topic Q-ID → P373 → Commons category, then CirrusSearch `deepcategory:` + `nearcoord:` via `CommonsImporter`.
+- `mapillary` — street-level imagery (`streets in Chicago`, `driving through Sweden`). Vector-tile sampling (adaptive z=14 for small regions, z=5 for large) via `MapillaryImporter`. Requires `MAPILLARY_TOKEN` in env. Panoramas are excluded.
+
+**Sub-region modes** (consumed by `RegionResolver`):
+
+- *Mode A* — in-DB named region (continent / country / admin1 / admin2 / city). Triggers a Nominatim boundary fetch for point-bbox seeds.
+- *Mode B* — POI hull / single landmark. Geocodes the names via OpenStreetMap Nominatim (`GeocoderService`).
+- Optional `region_radius_meters` recenters a bbox of that radius on the resolved base — used for `near X` and `Nkm around Y` prompts.
+
+Directional sub-region splits (`north half of Chicago`), multi-region prompts, and named routes are refused with a redirect to the existing filter-by-area workflow.
 
 - **Enabled when `GEMINI_API_KEY` is set** — no separate flag (independent of `AI_HINTS_ENABLED`, which only gates practice hints).
+- `MAPILLARY_TOKEN` (a Mapillary Access Token, not Client Secret) is required only when users invoke Mapillary-source prompts. See `.env.example`.
 - Capped at **20 generations per user per day** (`AI_DAILY_LIMIT` in `ImageSetsController`); counter persists in the `ai_usages` table so it survives dyno restarts.
 - Agent loop and import run inside `AiGenerationJob` / `AiImportImagesJob` on the `:async` queue, so the browser polls `/ai_generations/:id/status` while it works — see the dyno-restart caveat under *Background-processing caveats* below.
 
@@ -153,8 +168,8 @@ export AWS_REGION=us-east-2
 | `ConnectedService` | `User`                        | —                                                                                               | `provider`, `uid`, `email` (unique on `[provider, uid]`; maps OAuth identities to users)                                                                                                                                                                                                                   |
 | `Game`             | `User`, `ImageSet?`           | `game_images`, `guesses`, `images` (through `game_images`)                                      | `status`, `score`, `completed_at`                                                                                                                                                                                                                                                                          |
 | `GameImage`        | `Game`, `Image`               | —                                                                                               | `position` (1–5), `answer_latitude`, `answer_longitude` (snapshot at game-creation time)                                                                                                                                                                                                                   |
-| `Image`            | —                             | `guesses`, `game_images`, `image_set_items`, `image_sets` (through items)                       | `url`, `latitude`, `longitude`, `title`; optional `photo` Active Storage attachment                                                                                                                                                                                                                        |
-| `ImageSet`         | `User?`, `ImageSet?` (parent) | `image_set_items`, `images` (through items), `games`, `filtered_sets`, `image_set_tags`, `tags` | `name`, `visibility` (`private`|`public`), `is_system_default`, `map_style`, `parent_image_set_id`, `region_ids` (bigint[]), `custom_areas` (jsonb), AI-import bookkeeping (`ai_prompt`, `ai_query`, `ai_model`, `ai_region_filter`, `import_state`, `import_progress`, `import_total`, `import_warnings`) |
+| `Image`            | —                             | `guesses`, `game_images`, `image_set_items`, `image_sets` (through items)                       | `url`, `latitude`, `longitude`, `title`; AI-source provenance (`external_source` ∈ {`wikidata`, `commons`, `mapillary`}, `external_id`, `author`, `license`); optional `photo` Active Storage attachment                                                                                                                                                                                                                        |
+| `ImageSet`         | `User?`, `ImageSet?` (parent) | `image_set_items`, `images` (through items), `games`, `filtered_sets`, `image_set_tags`, `tags` | `name`, `visibility` (`private`|`public`), `is_system_default`, `map_style`, `parent_image_set_id`, `region_ids` (bigint[]), `custom_areas` (jsonb), AI-import bookkeeping (`ai_prompt`, `ai_query`, `ai_model`, `ai_image_source`, `ai_source_params` (jsonb — `topic_qid`, `commons_intitle_fallback`, `mapillary_min_year`, …), `ai_region_filter` (jsonb descriptor: Mode A/B + optional radius), `import_state`, `import_progress`, `import_total`, `import_warnings`) |
 | `ImageSetItem`     | `ImageSet`, `Image`           | —                                                                                               | `latitude`, `longitude` (per-set override of the image's coords)                                                                                                                                                                                                                                           |
 | `Region`           | `Region?` (parent)            | `children` (self-join)                                                                          | `name`, `admin_level` (`continent`|`country`|`admin1`|`admin2`|`city`), `iso_code`, `boundary` (jsonb GeoJSON), `population`, `min_lat`/`max_lat`/`min_lng`/`max_lng`, `normalized_name`                                                                                                                   |
 | `Tag`              | —                             | `image_set_tags`, `image_sets`                                                                  | `name`, `slug` (parameterized lowercase value used for default case-insensitive filters)                                                                                                                                                                                                                   |
@@ -242,6 +257,7 @@ heroku buildpacks:add heroku/ruby
 heroku config:set AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... S3_BUCKET=... AWS_REGION=...
 heroku config:set GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=...   # required for Sign in with Google in prod
 heroku config:set GEMINI_API_KEY=... AI_HINTS_ENABLED=1             # optional: AI image-set generation (key alone) + AI practice hints (key + flag)
+heroku config:set MAPILLARY_TOKEN='MLY|...'                          # optional: enables street-imagery AI sets (Mapillary access token, not client secret)
 heroku config:set STRIPE_SECRET_KEY=sk_test_...                    # optional: enables the Support us checkout flow in Stripe test mode
 heroku config:set MALLOC_ARENA_MAX=2 ACTIVE_JOB_ASYNC_MAX_THREADS=1   # caps glibc heap fragmentation + concurrent libvips decodes; needed on 512MB dynos
 git push heroku main:main

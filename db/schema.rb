@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_27_163633) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_27_200000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -182,10 +182,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_27_163633) do
 
   create_table "image_sets", force: :cascade do |t|
     t.text "ai_explanation"
+    t.string "ai_image_source", default: "wikidata", null: false
     t.string "ai_model"
     t.text "ai_prompt"
     t.text "ai_query"
     t.jsonb "ai_region_filter"
+    t.jsonb "ai_source_params"
     t.datetime "created_at", null: false
     t.jsonb "custom_areas", default: [], null: false
     t.text "import_error"
@@ -208,12 +210,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_27_163633) do
   end
 
   create_table "images", force: :cascade do |t|
+    t.string "author"
     t.datetime "created_at", null: false
+    t.string "external_id"
+    t.string "external_source"
     t.decimal "latitude"
+    t.string "license"
     t.decimal "longitude"
     t.string "title"
     t.datetime "updated_at", null: false
     t.string "url"
+    t.index ["external_source", "external_id"], name: "index_images_on_external_source_and_external_id", unique: true, where: "((external_source IS NOT NULL) AND (external_id IS NOT NULL))"
+    t.index ["external_source"], name: "index_images_on_external_source", where: "(external_source IS NOT NULL)"
     t.index ["latitude", "longitude"], name: "index_images_on_coords_not_null", where: "((latitude IS NOT NULL) AND (longitude IS NOT NULL))"
     t.index ["url"], name: "index_images_on_url", unique: true, where: "(url IS NOT NULL)"
   end

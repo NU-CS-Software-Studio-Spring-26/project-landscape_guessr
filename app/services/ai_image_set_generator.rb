@@ -96,6 +96,21 @@ class AiImageSetGenerator
         }
       },
       {
+        # Batched OpenStreetMap Nominatim resolver. Used by the AI to
+        # verify Mode B POI names resolve to the place it expects before
+        # submitting (Nominatim's class/type metadata distinguishes a
+        # park boundary from a random POI with the same name).
+        name: "geocode",
+        description: "Resolve 1-10 place names to coordinates via OpenStreetMap Nominatim. Returns top candidates per query with display_name, class/type, bbox, coords. Use to verify a sub-region name resolves to the place you mean before submitting (read display_name + class). Cache hits are instant; cold lookups rate-limited to ~1/sec.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            queries: { type: "ARRAY", items: { type: "STRING" } }
+          },
+          required: [ "queries" ]
+        }
+      },
+      {
         # Schema kept deliberately MINIMAL — earlier version with verbose
         # descriptions + `enum` constraint triggered Gemini Flash to emit
         # `finishReason: "MALFORMED_FUNCTION_CALL"` (empty parts) on ~40%
@@ -108,21 +123,28 @@ class AiImageSetGenerator
         parameters: {
           type: "OBJECT",
           properties: {
-            sparql_pattern:     { type: "STRING" },
-            set_name:           { type: "STRING" },
-            explanation:        { type: "STRING" },
-            cannot_answer:      { type: "BOOLEAN" },
-            # Sub-national region filter. Flat fields (not a nested OBJECT)
-            # — nested schemas trigger MALFORMED on Flash. Backend looks up
-            # the region in our pre-indexed Region table and injects a BBOX
-            # FILTER into the SPARQL; the AI MUST NOT include wdt:P131* or
-            # any geo constraint of its own when these are set. Country-
-            # level filters stay on wdt:P17 (direct property, cheap).
+            image_source:             { type: "STRING" },  # wikidata | commons | mapillary
+            sparql_pattern:           { type: "STRING" },  # wikidata only
+            topic_qid:                { type: "STRING" },  # commons (for P373 lookup)
+            combined_qid:             { type: "STRING" },  # commons (optional combined-concept Q-ID)
+            commons_intitle_fallback: { type: "STRING" },  # commons (when no category)
+            mapillary_min_year:       { type: "STRING" },  # mapillary (optional)
+            # Sub-region — exactly one BASE mode populated.
+            # Mode A (in-DB)
             region_name:        { type: "STRING" },
             region_parent_name: { type: "STRING" },
-            region_admin_level: { type: "STRING" }
+            region_admin_level: { type: "STRING" },
+            # Mode B (POI hull or single landmark)
+            region_pois:        { type: "ARRAY", items: { type: "STRING" } },
+            region_pois_label:  { type: "STRING" },
+            # Optional radius transform (applies to whichever base is set)
+            region_radius_meters: { type: "NUMBER" },
+
+            set_name:           { type: "STRING" },
+            explanation:        { type: "STRING" },
+            cannot_answer:      { type: "BOOLEAN" }
           },
-          required: %w[sparql_pattern set_name explanation cannot_answer]
+          required: %w[image_source set_name explanation cannot_answer]
         }
       }
     ]
@@ -275,7 +297,7 @@ class AiImageSetGenerator
       toolConfig: {
         functionCallingConfig: {
           mode: "VALIDATED",
-          allowedFunctionNames: %w[search_wikidata inspect_entity submit_answer]
+          allowedFunctionNames: %w[search_wikidata inspect_entity geocode submit_answer]
         }
       },
       generationConfig: {
@@ -360,6 +382,9 @@ class AiImageSetGenerator
     when "inspect_entity"
       qid = args["qid"].to_s
       qid.empty? ? "Inspecting a Wikidata entity…" : "Inspecting #{qid}…"
+    when "geocode"
+      queries = Array(args["queries"]).first(3).join(", ")
+      queries.empty? ? "Geocoding…" : "Geocoding \"#{queries.slice(0, 80)}\"…"
     when "submit_answer"
       "Composing the final query…"
     else
@@ -379,6 +404,24 @@ class AiImageSetGenerator
     when "inspect_entity"
       entity = WikidataEntityInspect.inspect_entity(qid: args["qid"].to_s)
       entity ? { entity: entity } : { error: "no entity found for #{args["qid"]}" }
+    when "geocode"
+      queries = Array(args["queries"]).first(10).map(&:to_s).reject(&:blank?)
+      results = GeocoderService.geocode_many(queries: queries)
+      # Trim the candidate hashes to the minimum the AI needs (cuts down
+      # context bloat from full display_name + addressdetails on every
+      # candidate).
+      slim = results.transform_values do |list|
+        list.first(5).map do |c|
+          {
+            display_name: c[:display_name],
+            class: c[:class], type: c[:type],
+            lat: c[:lat].round(5), lng: c[:lng].round(5),
+            area_km2: c[:area_km2].round(2),
+            importance: c[:importance].round(3)
+          }
+        end
+      end
+      { results: slim }
     else
       { error: "unknown function: #{name}" }
     end
@@ -387,61 +430,104 @@ class AiImageSetGenerator
   # Validate + return the submit_answer payload. Defensive checks even
   # though Gemini's parameter schema should enforce required fields;
   # the AI occasionally violates schemas in practice.
+  ALLOWED_SOURCES = %w[wikidata commons mapillary].freeze
+
   def parse_submit(args)
+    source = args["image_source"].to_s.strip.downcase
+    source = "wikidata" unless ALLOWED_SOURCES.include?(source)
+
     payload = {
-      sparql_pattern: args["sparql_pattern"].to_s,
-      set_name:       args["set_name"].to_s.strip.presence || "Untitled AI Set",
-      explanation:    args["explanation"].to_s.strip,
-      cannot_answer:  args["cannot_answer"] == true,
-      region_filter:  build_region_filter(args)
+      image_source:             source,
+      sparql_pattern:           args["sparql_pattern"].to_s,
+      topic_qid:                args["topic_qid"].to_s.strip.presence,
+      combined_qid:             args["combined_qid"].to_s.strip.presence,
+      commons_intitle_fallback: args["commons_intitle_fallback"].to_s.strip.presence,
+      mapillary_min_year:       args["mapillary_min_year"].to_s.strip.presence,
+      set_name:                 args["set_name"].to_s.strip.presence || "Untitled AI Set",
+      explanation:              args["explanation"].to_s.strip,
+      cannot_answer:            args["cannot_answer"] == true,
+      region:                   build_region_descriptor(args)
     }
 
     return payload if payload[:cannot_answer]
 
-    raise InvalidResponseError, "submit_answer with empty sparql_pattern" if payload[:sparql_pattern].strip.empty?
-
-    # Block any keyword that either breaks our outer wrapping or could
-    # let the AI take the query somewhere we don't control. WDQS is
-    # read-only so INSERT/DELETE/etc would 4xx anyway, but defense in
-    # depth is cheap: a future endpoint with write capability would
-    # silently inherit the gap.
-    #   SELECT/LIMIT       — collide with our outer SELECT + cap
-    #   SERVICE            — arbitrary endpoint calls
-    #   DESCRIBE/ASK/CONSTRUCT — alternate query forms; bypass our wrap
-    #   INSERT/DELETE/LOAD/CLEAR/DROP/WITH — SPARQL Update; should never appear
-    # OPTIONAL/FILTER/UNION inside the pattern are fine; SPARQL allows
-    # them alongside the OPTIONAL+FILTER trailer we add and they're
-    # often necessary (numeric thresholds, alternatives, etc).
-    %w[SELECT LIMIT SERVICE DESCRIBE ASK CONSTRUCT INSERT DELETE LOAD CLEAR DROP WITH].each do |kw|
-      if payload[:sparql_pattern] =~ /\b#{kw}\b/i
-        raise InvalidResponseError, "AI returned #{kw} in sparql_pattern (not allowed)"
+    case source
+    when "wikidata"
+      raise InvalidResponseError, "wikidata source requires sparql_pattern" if payload[:sparql_pattern].strip.empty?
+      validate_sparql!(payload[:sparql_pattern])
+    when "commons"
+      unless payload[:topic_qid] || payload[:combined_qid] || payload[:commons_intitle_fallback]
+        raise InvalidResponseError, "commons source requires topic_qid, combined_qid, or commons_intitle_fallback"
       end
+    when "mapillary"
+      raise InvalidResponseError, "mapillary source requires a region (Mode A or B)" if payload[:region].nil?
     end
 
     payload
   end
 
-  # Assemble the region_filter hash from the three flat AI fields. Returns
-  # nil unless we have BOTH a name and a recognized admin_level; missing
-  # parent_name is OK for countries (no parent) but lookup may be ambiguous
-  # without it for "Georgia" the state vs "Georgia" the country.
+  # Block any keyword that either breaks our outer wrapping or could
+  # let the AI take the query somewhere we don't control.
+  FORBIDDEN_SPARQL_KEYWORDS = %w[SELECT LIMIT SERVICE DESCRIBE ASK CONSTRUCT INSERT DELETE LOAD CLEAR DROP WITH].freeze
+
+  def validate_sparql!(pattern)
+    FORBIDDEN_SPARQL_KEYWORDS.each do |kw|
+      raise InvalidResponseError, "AI returned #{kw} in sparql_pattern (not allowed)" if pattern =~ /\b#{kw}\b/i
+    end
+  end
+
   ALLOWED_ADMIN_LEVELS = %w[continent country admin1 admin2 city].freeze
 
-  def build_region_filter(args)
-    name        = args["region_name"].to_s.strip.presence
-    level       = args["region_admin_level"].to_s.strip.presence
+  # Mode A: region_name + region_admin_level set.
+  # Mode B: region_pois (array) set.
+  # Optional radius (positive number, max 50_000m) applied to either.
+  # Returns nil if neither mode populated.
+  def build_region_descriptor(args)
+    name  = args["region_name"].to_s.strip.presence
+    level = args["region_admin_level"].to_s.strip.presence
     parent_name = args["region_parent_name"].to_s.strip.presence
-    return nil unless name && ALLOWED_ADMIN_LEVELS.include?(level)
-    { name: name, parent_name: parent_name, admin_level: level }
+    pois = Array(args["region_pois"]).map(&:to_s).map(&:strip).reject(&:blank?)
+    radius_raw = args["region_radius_meters"]
+    radius = (radius_raw.is_a?(Numeric) || radius_raw.to_s =~ /\A\d+(\.\d+)?\z/) ? radius_raw.to_f : nil
+    radius = nil if radius && (radius <= 0 || radius > 50_000)
+
+    base =
+      if name && ALLOWED_ADMIN_LEVELS.include?(level)
+        { mode: "named", name: name, parent_name: parent_name, admin_level: level }
+      elsif pois.any?
+        { mode: "pois", pois: pois.first(10), label: args["region_pois_label"].to_s.strip.presence }
+      end
+    return nil unless base
+    radius ? base.merge(radius_meters: radius) : base
   end
 
   def system_prompt
     <<~PROMPT
-      You generate Wikidata SPARQL graph patterns for an image-set
-      creation tool. The user describes images they want. You reason
-      about how Wikidata models that intent, resolve every Q-ID via
-      the search_wikidata tool, then call submit_answer with the
-      final SPARQL pattern.
+      You generate image-set queries from natural-language prompts.
+      Three sources are available — pick the right one, then resolve
+      Q-IDs / region names via tools, then call submit_answer.
+
+      SOURCES (set `image_source` in submit_answer):
+      - "wikidata"  — default for topic+region prompts ("churches in Paris",
+                      "lakes in Massachusetts"). High-quality curated items
+                      with one canonical photo each.
+      - "commons"   — many photos of one subject ("Mount Fuji photos") OR
+                      sparse Wikidata topics (street art, graffiti, murals)
+                      OR explicit "many photos / lots of photos in X".
+      - "mapillary" — street-level imagery for road/street prompts
+                      ("streets in Chicago", "driving through Sweden",
+                      "street view in Shibuya").
+
+      ROUTING DECISIONS (consult before any tool call):
+      - "streets / roads / driving in X" → mapillary
+      - "X in Y" topic+region (typical case) → wikidata
+      - "many photos / lots of photos of X" → commons
+      - Single subject, many angles ("Mount Fuji photos") → commons
+      - Sparse Wikidata topics (street art, graffiti, murals) → commons
+      - Multi-region prompts ("NYC and LA", "50 cities") → cannot_answer
+      - Named routes ("Highway 101", "I-90") → cannot_answer
+      - Directional splits ("north half of Chicago") → cannot_answer
+        (suggest filter-by-area after importing the broader region)
 
       UNIVERSAL PROPERTIES (no need to search for these):
       #{UNIVERSAL_PROPERTIES}
@@ -666,49 +752,84 @@ class AiImageSetGenerator
       50m, population > 100k), the property alone matches too many
       items — keep P31.
 
-      REGION FILTERS:
+      REGION SPEC — TWO BASE MODES + OPTIONAL RADIUS:
 
-      For COUNTRY-level filtering, use `wdt:P17 wd:Q##` in your
-      SPARQL — direct property, cheap, works in WDQS.
+      Pick exactly ONE base mode. Add radius_meters only when the
+      user's prompt specifies one (or implies one — "near X" without
+      a number defaults to ~2000m).
 
-      For SUB-NATIONAL regions (US states, provinces, counties,
-      cities) AND for continents (Africa, Asia, Europe, North America,
-      South America, Oceania, Antarctica), DO NOT use `wdt:P131*` or
-      enumerate countries — set the region_name / region_parent_name
-      / region_admin_level fields instead. The backend looks the
-      region up in our pre-indexed region table and injects a BBOX
-      filter for you (continents have bboxes + buffered polygons
-      seeded for this exact purpose).
+      ---- MODE A (in-DB named region) ----
+      Use when the user names a place that's a city / admin1 / admin2 /
+      country / continent already in our region table.
+      Fields:
+        region_name        — canonical English name. "United States" not
+                             "USA"; "Munich" not "München" (geonames is English).
+        region_admin_level — exactly one of: "continent", "country",
+                             "admin1" (state/province), "admin2" (county),
+                             "city".
+        region_parent_name — parent's English name. For admin1, the
+                             country ("United States"). For city, the
+                             admin1 or admin2 ("Illinois" for Chicago).
+                             Omit for continents and most countries.
 
-      When you set the region fields, your sparql_pattern must NOT
-      include any geo constraint — just class + coord:
+      For ALL Mode A regions including continents, the backend handles
+      the geometry — your wikidata sparql_pattern must NOT include any
+      geo constraint (no wdt:P131*, no wdt:P17 for the same place, no
+      bbox FILTERs). Just class + coord:
+        ?item wdt:P31/wdt:P279* wd:Q23397 ; wdt:P625 ?coord .
 
-        sparql_pattern:        "?item wdt:P31/wdt:P279* wd:Q23397 ; wdt:P625 ?coord ."
-        region_name:           "Massachusetts"
-        region_parent_name:    "United States"
-        region_admin_level:    "admin1"
+      Country-level note: for wikidata source you MAY use wdt:P17 wd:Q##
+      directly in the SPARQL instead of region_admin_level="country" —
+      either works, P17 is slightly faster for countries with odd
+      bbox shapes (Russia, USA).
 
-      REGION FIELD RULES:
-      - region_name: Canonical English name. "United States" not
-        "USA"; "Germany" not "Deutschland"; "Bavaria" not "Bayern".
-        For continents, use exactly one of: "Africa", "Antarctica",
-        "Asia", "Europe", "North America", "Oceania", "South America".
-        Lookup uses GeoNames data which only has English forms.
-      - region_parent_name: Parent administrative region's English
-        name. For admin1, the country ("United States"). For city,
-        the admin1 or admin2 ("Massachusetts" for Cambridge MA,
-        "Cambridgeshire" for Cambridge UK). OMIT for continents
-        (they have no parent).
-      - region_admin_level: exactly one of "continent", "admin1"
-        (states/provinces), "admin2" (counties), or "city". (For
-        countries, see the next bullet — use wdt:P17 instead.)
-      - Omit ALL three fields when the user's "region" isn't a formal
-        admin unit ("the South", "Northern California", "the Mediterranean
-        coast"). Either reinterpret as a country/state, or refuse.
-      - For country-level filtering, leave region fields empty and
-        use `wdt:P17 wd:Q##` in the pattern as before — countries
-        have weirdly-shaped bboxes (Russia, USA) so direct P17 is
-        more accurate.
+      ---- MODE B (POI hull / single landmark) ----
+      Use when:
+        * A sub-city named place that's NOT in our DB ("Shibuya",
+          "Lincoln Park, Chicago", "Mission District", "Marais")
+        * A single landmark used as a radius anchor ("Eiffel Tower",
+          "Times Square", "Yellowstone")
+        * A compound region defined by named places spread across the
+          area ("Bay Area" = SF + Oakland + San Jose + Palo Alto;
+          "downtown Tokyo" = Marunouchi + Ginza + Chiyoda)
+      Fields:
+        region_pois        — array of 1-10 place names, each precise
+                             enough that OpenStreetMap Nominatim resolves
+                             it. Disambiguate with parent ("Lincoln Park,
+                             Chicago" not just "Lincoln Park"; "Cambridge,
+                             Massachusetts" not just "Cambridge").
+        region_pois_label  — short human label for the combined region
+                             ("Bay Area", "downtown Tokyo").
+
+      Call geocode(queries=[...]) FIRST to verify each POI resolves to
+      the right place. Read display_name + class — prefer boundary or
+      place results over railway/amenity. If a query returns nothing
+      useful, rephrase ("Brooklyn" → "Brooklyn, New York").
+
+      ---- OPTIONAL RADIUS ----
+      region_radius_meters — applies to whichever base is set. Centers a
+                             square of that radius on the resolved base
+                             centroid (overrides the base's natural bbox).
+      Use for "near X", "around Y", "within Nkm/miles of Z" prompts.
+      Convert miles to meters (1 mile ≈ 1609m). Cap is 50000m (50km).
+      Examples:
+        "near the Eiffel Tower"          → radius_meters: 2000
+        "5km around downtown LA"         → radius_meters: 5000
+        "10 miles from Yellowstone"      → radius_meters: 16093
+        "within 1 mile of Times Square"  → radius_meters: 1609
+
+      When BOTH base modes are blank and no radius is set, the prompt
+      has no region constraint (rare — most wikidata prompts have one;
+      most commons "subject" prompts don't; mapillary REQUIRES a region).
+
+      REFUSE these region shapes with cannot_answer:
+      - Directional splits ("north half of Chicago", "east side of Berlin")
+        → suggest filter-by-area after importing the broader region.
+      - Freeform corridors ("from A to B", "strip between X and Y")
+        → suggest filter-by-area.
+      - Multi-region ("X and Y", "all states in the US") → suggest
+        importing one region and using filter-by-area, OR the broader
+        continent/country.
 
       EXPLANATION STYLE:
       - Plain English, friendly, no jargon.
@@ -726,26 +847,84 @@ class AiImageSetGenerator
       - When cannot_answer=true, suggest the nearest workable
         alternative if one exists. Avoid bare "I can't" dead-ends.
 
+      COMMONS SOURCE (image_source: "commons"):
+
+      Use Wikimedia Commons CirrusSearch with a category bridge from
+      Wikidata's P373 property. The backend looks up the Commons
+      category for your topic Q-ID, then queries Commons with
+      deepcategory:"<cat>" + nearcoord:.
+
+      Provide ONE of:
+        topic_qid               — Q-ID for the subject. Backend looks up
+                                  its P373 (Commons category). Use for
+                                  most prompts: "Mount Fuji photos" →
+                                  topic_qid: <Mt Fuji Q-ID>.
+        combined_qid            — Optional Q-ID for a combined concept
+                                  ("Millennium Park, Chicago" Q1130516
+                                  has its own P373 → category). When
+                                  available, this gives a tighter
+                                  category than topic+region.
+        commons_intitle_fallback — When no Q-ID has a clean P373, use
+                                   an intitle: search. Free-text 1-4 words.
+
+      Search for the topic Q-ID via search_wikidata. NEVER pass a bare
+      place-name as the topic (e.g. don't submit topic_qid for "Boston"
+      with no specific subject — the category "People photographed in
+      Boston" would dominate the results).
+
+      Commons + region pairing:
+        * topic_qid alone (no region) — for single-subject prompts like
+          "Mount Fuji photos". The category is the geographic boundary.
+        * topic_qid + region (Mode A/B) — backend ANDs deepcategory: with
+          nearcoord: of the region. Use for "lots of buildings in Boston".
+        * combined_qid usually subsumes the region into the category
+          itself, so often no region is needed.
+
+      Don't set sparql_pattern for commons.
+
+      MAPILLARY SOURCE (image_source: "mapillary"):
+
+      Street-level imagery via Mapillary's vector tiles. ALWAYS requires
+      a region (Mode A or B). Adaptive zoom: small regions get z=14
+      tile-by-tile coverage, large regions (states/countries/continents)
+      get a distributed z=5 sample.
+
+      Provide:
+        region_*               — Mode A or B (required).
+        region_radius_meters   — Optional, for "near X" prompts.
+        mapillary_min_year     — Optional string like "2023" — only
+                                 include images captured during or after
+                                 that year. Use when the user says
+                                 "recent" or names a year.
+
+      Don't set topic_qid, combined_qid, sparql_pattern.
+
+      Panoramas (360° images) are always excluded. If the user
+      explicitly asks for "360 panoramas" or "VR street view", refuse
+      with cannot_answer=true and: "Our viewer doesn't support 360
+      panoramas yet — I can give you regular street imagery instead."
+
       EXAMPLE FLOWS
 
-      Country-level (use wdt:P17 in SPARQL, no region_* fields) —
+      Country-level Wikidata (use wdt:P17 in SPARQL, no region_*) —
       user: "volcanoes in Japan"
 
         search_wikidata("volcano") → Q8072 "type of mountain" ✓
         search_wikidata("Japan")   → Q17  "country in East Asia" ✓
         submit_answer(
+          image_source: "wikidata",
           sparql_pattern: "?item wdt:P31/wdt:P279* wd:Q8072 ; wdt:P17 wd:Q17 ; wdt:P625 ?coord .",
           set_name: "Volcanoes of Japan",
           explanation: "I'll find volcanoes located in Japan that have photos.",
           cannot_answer: false
         )
 
-      Sub-national (use region_* fields, NO geo in SPARQL) —
+      Sub-national Wikidata (Mode A, NO geo in SPARQL) —
       user: "lakes in Massachusetts"
 
         search_wikidata("lake") → Q23397 "body of water" ✓
-        (no need to search "Massachusetts" — the backend resolves it)
         submit_answer(
+          image_source: "wikidata",
           sparql_pattern: "?item wdt:P31/wdt:P279* wd:Q23397 ; wdt:P625 ?coord .",
           set_name: "Lakes in Massachusetts",
           explanation: "I'll find lakes located in Massachusetts that have photos.",
@@ -755,20 +934,81 @@ class AiImageSetGenerator
           region_admin_level: "admin1"
         )
 
-      Continent (use region_* fields, NO geo in SPARQL, NO country
-      enumeration) — user: "deserts in Africa"
+      Mapillary streets in a city (Mode A) —
+      user: "streets in Chicago"
 
-        search_wikidata("desert") → Q8514 "type of land with sparse
-                                            vegetation" ✓
-        (no need to search "Africa" — the backend resolves it; do NOT
-         enumerate African countries with VALUES)
         submit_answer(
-          sparql_pattern: "?item wdt:P31/wdt:P279* wd:Q8514 ; wdt:P625 ?coord .",
-          set_name: "Deserts of Africa",
-          explanation: "I'll find deserts located in Africa that have photos.",
+          image_source: "mapillary",
+          set_name: "Streets of Chicago",
+          explanation: "I'll pull street-level photos from across Chicago.",
           cannot_answer: false,
-          region_name: "Africa",
-          region_admin_level: "continent"
+          region_name: "Chicago",
+          region_parent_name: "Illinois",
+          region_admin_level: "city"
+        )
+
+      Mapillary in a sub-city neighborhood (Mode B) —
+      user: "streets in Shibuya"
+
+        geocode(queries: ["Shibuya, Tokyo"])
+          → boundary/administrative, lat 35.66 lng 139.70  ✓
+        submit_answer(
+          image_source: "mapillary",
+          set_name: "Streets of Shibuya",
+          explanation: "Street imagery from across Shibuya.",
+          cannot_answer: false,
+          region_pois: ["Shibuya, Tokyo"]
+        )
+
+      Mapillary with radius around a landmark —
+      user: "streets near the Eiffel Tower"
+
+        geocode(queries: ["Eiffel Tower"])
+          → man_made/tower, lat 48.86 lng 2.29, importance 0.62  ✓
+        submit_answer(
+          image_source: "mapillary",
+          set_name: "Streets Near the Eiffel Tower",
+          explanation: "Street photos within ~2 km of the Eiffel Tower.",
+          cannot_answer: false,
+          region_pois: ["Eiffel Tower"],
+          region_radius_meters: 2000
+        )
+
+      Commons single subject (no region) —
+      user: "Mount Fuji photos"
+
+        search_wikidata("Mount Fuji") → Q39231 "volcano in Japan" ✓
+        submit_answer(
+          image_source: "commons",
+          topic_qid: "Q39231",
+          set_name: "Mount Fuji",
+          explanation: "I'll gather Commons photos from the Mt Fuji category.",
+          cannot_answer: false
+        )
+
+      Commons topic + region —
+      user: "many photos of buildings in Boston"
+
+        search_wikidata("building") → Q41176 ✓
+        submit_answer(
+          image_source: "commons",
+          topic_qid: "Q41176",
+          set_name: "Buildings in Boston",
+          explanation: "I'll pull thousands of building photos from Commons within Boston.",
+          cannot_answer: false,
+          region_name: "Boston",
+          region_parent_name: "Massachusetts",
+          region_admin_level: "city"
+        )
+
+      Refusal example —
+      user: "north half of Chicago"
+
+        submit_answer(
+          image_source: "mapillary",
+          cannot_answer: true,
+          set_name: "North Half of Chicago",
+          explanation: "I can't do directional splits yet. I can import all of Chicago and you can then use the filter-by-area feature on the show page to keep only the north half."
         )
     PROMPT
   end

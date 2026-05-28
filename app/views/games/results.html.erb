@@ -72,6 +72,7 @@
         <div class="flex-1 min-w-0">
           <span class="eyebrow">Round <%= idx + 1 %></span>
           <p class="font-medium text-forest-900 truncate"><%= row[:guess].image.title %></p>
+          <div class="text-gray-500"><%= attribution_for(row[:guess].image, mode: :full) %></div>
         </div>
         <div class="flex gap-4 sm:text-right shrink-0">
           <div>

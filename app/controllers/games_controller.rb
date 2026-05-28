@@ -145,6 +145,12 @@ class GamesController < ApplicationController
     game_images_by_image_id = @game.game_images.index_by(&:image_id)
     guesses = @game.guesses.includes(:image).order(:created_at)
 
+    # Mapillary signed URLs expire (~30 days) and `images.url` is NULL for
+    # Mapillary rows. Warm the URL cache for the entire round's worth of
+    # images in one batched API call so each <img> render gets a cache hit.
+    mapillary_ids = guesses.map(&:image).select { |i| i.external_source == "mapillary" }.map(&:external_id).compact
+    MapillaryUrlResolver.warm_urls(mapillary_ids, size: 2048) if mapillary_ids.any?
+
     @rounds = guesses.each_with_index.map do |guess, idx|
       gi = game_images_by_image_id[guess.image_id]
       ans_lat = gi&.answer_lat || guess.image.latitude.to_f

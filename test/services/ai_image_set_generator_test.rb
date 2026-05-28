@@ -111,9 +111,10 @@ class AiImageSetGeneratorTest < ActiveSupport::TestCase
     end
   end
 
-  test "region_filter is assembled from flat fields when all valid" do
+  test "region descriptor is assembled from Mode A flat fields when all valid" do
     gen = AiImageSetGenerator.new(api_key: "stub")
     args = {
+      image_source: "wikidata",
       sparql_pattern: "?item wdt:P31 wd:Q23397 ; wdt:P625 ?coord .",
       set_name: "Lakes in Massachusetts", explanation: "Lakes in Mass.",
       cannot_answer: false,
@@ -123,12 +124,12 @@ class AiImageSetGeneratorTest < ActiveSupport::TestCase
     }
     queue_gemini_responses([ submit_answer_envelope(args) ]) do
       r = gen.generate(conversation: [ { role: "user", text: "lakes in mass" } ])
-      assert_equal({ name: "Massachusetts", parent_name: "United States", admin_level: "admin1" },
-                   r[:region_filter])
+      assert_equal({ mode: "named", name: "Massachusetts", parent_name: "United States", admin_level: "admin1" },
+                   r[:region])
     end
   end
 
-  test "region_filter is nil when admin_level is missing or invalid" do
+  test "region descriptor is nil when admin_level is missing or invalid" do
     gen = AiImageSetGenerator.new(api_key: "stub")
     args = {
       sparql_pattern: "?item wdt:P31 wd:Q23397 ; wdt:P625 ?coord .",
@@ -137,7 +138,7 @@ class AiImageSetGeneratorTest < ActiveSupport::TestCase
     }
     queue_gemini_responses([ submit_answer_envelope(args) ]) do
       r = gen.generate(conversation: [ { role: "user", text: "x" } ])
-      assert_nil r[:region_filter]
+      assert_nil r[:region]
     end
   end
 

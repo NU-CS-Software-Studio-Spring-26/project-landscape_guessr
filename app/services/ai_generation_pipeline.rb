@@ -52,45 +52,35 @@ class AiGenerationPipeline
       return
     end
 
-    # Validate region_filter UPFRONT — if AI emitted a region we can't
-    # resolve (typo, native-language name, region not in our Region
-    # table), fail with a specific message instead of silently running
-    # the query without region constraint and returning global results.
-    if ai_result[:region_filter] && WikidataImporter.resolve_region_filter(ai_result[:region_filter]).nil?
-      rf = ai_result[:region_filter]
-      label = "#{rf[:name]}#{rf[:parent_name] ? ", #{rf[:parent_name]}" : ""}"
+    # Resolve the region descriptor UPFRONT. RegionResolver returns nil
+    # for un-findable in-DB names, hull failures, or out-of-cap radii.
+    region_resolved =
+      if ai_result[:region]
+        RegionResolver.resolve(ai_result[:region])
+      end
+
+    if ai_result[:region] && region_resolved.nil?
+      label = describe_unresolved_region(ai_result[:region])
       @generation.update!(
         status:           "failed",
         phase:            nil,
         progress_message: nil,
-        error:            "I couldn't find region '#{label}' in our database. Try a canonical English name (e.g. 'Bavaria' not 'Bayern', 'United States' not 'USA')."
+        error:            "I couldn't resolve the region '#{label}'. Try a canonical English name, more specific POI names, or use the filter-by-area feature after importing a broader region."
       )
       return
     end
 
+    source = ai_result[:image_source] || "wikidata"
+
     check_deadline!
     @generation.update!(phase: "counting", progress_message: nil)
-    count = safe_count(
-      ai_result[:sparql_pattern],
-      region_filter: ai_result[:region_filter]
-    )
+    count = safe_count(ai_result, region_resolved: region_resolved, source: source)
     bail_if_canceled!
     @generation.update!(result_count: count)
 
     # Pro retry ONLY on count == 0, NOT on nil.
-    #   count == 0 means Flash's SPARQL ran fine and genuinely returned
-    #     no matches — Pro might compose a less-restrictive pattern.
-    #   count == nil means every per-type query errored or timed out
-    #     against WDQS (catastrophic case: P131* + broad classes). Pro
-    #     re-running the same shape just doubles the wasted wall time.
-    #     Surface the failure so the user can simplify.
-    if count == 0 && model == :flash
+    if count == 0 && model == :flash && source == "wikidata"
       check_deadline!
-      # We're going back to Gemini, so the phase label needs to flip
-      # away from "counting" — otherwise the polling UI shows "Counting
-      # matches in Wikidata…" for the 30-60s the Pro call takes, which
-      # is both inaccurate and confusing. The progress_message gives the
-      # user a heads-up that this is an extra step.
       @generation.update!(
         phase:            "thinking",
         progress_message: "Flash matched 0 — trying again with a stronger model…"
@@ -100,16 +90,11 @@ class AiGenerationPipeline
       if pro_result && !pro_result[:cannot_answer]
         ai_result = pro_result
         conversation[-1] = { role: "model", text: ai_result.to_json }
+        region_resolved = ai_result[:region] ? RegionResolver.resolve(ai_result[:region]) : nil
+        source = ai_result[:image_source] || "wikidata"
         check_deadline!
-        # Re-enter the counting phase for the Pro answer's recount.
-        # CRITICAL: pass region_filter through here too — without it, the
-        # Pro-retry count is unfiltered (fan-out across every type, no
-        # SERVICE wikibase:box) and takes ~90s for a broad umbrella.
         @generation.update!(phase: "counting", progress_message: nil)
-        count = safe_count(
-          ai_result[:sparql_pattern],
-          region_filter: ai_result[:region_filter]
-        )
+        count = safe_count(ai_result, region_resolved: region_resolved, source: source)
         bail_if_canceled!
         @generation.update!(
           model_used:        "pro",
@@ -120,9 +105,6 @@ class AiGenerationPipeline
       end
     end
 
-    # Count failed entirely (every per-type query errored/timed out).
-    # Don't pay another fan-out wall for a sample that will fail the
-    # same way. Mark failed with an actionable message.
     if count.nil?
       @generation.update!(
         status:           "failed",
@@ -135,10 +117,7 @@ class AiGenerationPipeline
 
     check_deadline!
     @generation.update!(phase: "sampling", progress_message: nil)
-    preview = safe_sample(
-      ai_result[:sparql_pattern],
-      region_filter: ai_result[:region_filter]
-    )
+    preview = safe_sample(ai_result, region_resolved: region_resolved, source: source)
     bail_if_canceled!
 
     @generation.update!(
@@ -211,46 +190,98 @@ class AiGenerationPipeline
     end
   end
 
-  def safe_count(pattern, region_filter: nil)
+  def safe_count(ai_result, region_resolved:, source:)
     t0 = Time.now
-    n = WikidataImporter.count(
-      pattern: pattern, region_filter: region_filter,
-      on_progress: lambda do |done, total, sum|
-        # Live running total in the polling UI: "Counted 5 of 14
-        # categories — 1,234 matching items so far". Gives the user
-        # a visible sign of progress even when individual per-type
-        # queries take 20-40s for big classes.
-        @generation.update_columns(
-          progress_message: "Counted #{done} of #{total} #{'category'.pluralize(total)} — " \
-                            "#{ActiveSupport::NumberHelper.number_to_delimited(sum)} matching items so far"
+    n =
+      case source
+      when "commons"
+        commons_category = resolve_commons_category(ai_result)
+        if commons_category.blank? && ai_result[:commons_intitle_fallback].blank?
+          nil
+        else
+          CommonsImporter.count(
+            commons_category: commons_category,
+            intitle_fallback: ai_result[:commons_intitle_fallback],
+            region_resolved:  region_resolved,
+            on_progress: lambda do |done, total, sum|
+              @generation.update_columns(
+                progress_message: "Counted #{done} of #{total} probe #{'point'.pluralize(total)} — " \
+                                  "#{ActiveSupport::NumberHelper.number_to_delimited(sum)} photos so far"
+              )
+            end
+          )
+        end
+      when "mapillary"
+        MapillaryImporter.count(region_resolved: region_resolved)
+      else
+        WikidataImporter.count(
+          pattern: ai_result[:sparql_pattern], region_filter: region_resolved,
+          on_progress: lambda do |done, total, sum|
+            @generation.update_columns(
+              progress_message: "Counted #{done} of #{total} #{'category'.pluralize(total)} — " \
+                                "#{ActiveSupport::NumberHelper.number_to_delimited(sum)} matching items so far"
+            )
+          end
         )
       end
-    )
-    Rails.logger.info "[ai_count] #{(Time.now - t0).round(2)}s -> #{n.inspect}"
+    Rails.logger.info "[ai_count source=#{source}] #{(Time.now - t0).round(2)}s -> #{n.inspect}"
     n
-  rescue WikidataImporter::Error => e
-    Rails.logger.warn "[ai_count] err #{e.class}: #{e.message.slice(0, 200)}"
+  rescue WikidataImporter::Error, CommonsImporter::Error => e
+    Rails.logger.warn "[ai_count source=#{source}] err #{e.class}: #{e.message.slice(0, 200)}"
     nil
   end
 
-  def safe_sample(pattern, region_filter: nil)
+  def safe_sample(ai_result, region_resolved:, source:)
     t0 = Time.now
-    rows = WikidataImporter.sample(
-      pattern: pattern, limit: 30, region_filter: region_filter,
-      on_progress: lambda do |done, total, _qid|
-        # No running thumb count here — sample's block returns rows
-        # (not a number), and the per-type oversample target isn't
-        # what the user actually cares about. Per-category progress
-        # is enough.
-        @generation.update_columns(
-          progress_message: "Loading preview images: #{done} of #{total} #{'category'.pluralize(total)}…"
+    rows =
+      case source
+      when "commons"
+        commons_category = resolve_commons_category(ai_result)
+        CommonsImporter.sample(
+          commons_category: commons_category,
+          intitle_fallback: ai_result[:commons_intitle_fallback],
+          region_resolved:  region_resolved,
+          limit: 30
+        )
+      when "mapillary"
+        MapillaryImporter.sample(region_resolved: region_resolved, limit: 30,
+                                 min_year: ai_result[:mapillary_min_year])
+      else
+        WikidataImporter.sample(
+          pattern: ai_result[:sparql_pattern], limit: 30, region_filter: region_resolved,
+          on_progress: lambda do |done, total, _qid|
+            @generation.update_columns(
+              progress_message: "Loading preview images: #{done} of #{total} #{'category'.pluralize(total)}…"
+            )
+          end
         )
       end
-    )
-    Rails.logger.info "[ai_sample] #{(Time.now - t0).round(2)}s -> #{rows.size} rows"
+    Rails.logger.info "[ai_sample source=#{source}] #{(Time.now - t0).round(2)}s -> #{rows.size} rows"
     rows
-  rescue WikidataImporter::Error => e
-    Rails.logger.warn "[ai_sample] err #{e.class}: #{e.message.slice(0, 200)}"
+  rescue WikidataImporter::Error, CommonsImporter::Error => e
+    Rails.logger.warn "[ai_sample source=#{source}] err #{e.class}: #{e.message.slice(0, 200)}"
     []
+  end
+
+  # P373 lookup for the AI-supplied topic/combined Q-IDs. Returns nil if
+  # neither resolves to an existing Commons category.
+  def resolve_commons_category(ai_result)
+    CommonsCategoryResolver.resolve(
+      topic_qid:    ai_result[:topic_qid],
+      combined_qid: ai_result[:combined_qid]
+    )
+  end
+
+  # Human-readable region label for the "couldn't resolve" error.
+  def describe_unresolved_region(region)
+    return "" unless region.is_a?(Hash)
+    case region[:mode].to_s
+    when "named"
+      "#{region[:name]}#{region[:parent_name] ? ", #{region[:parent_name]}" : ""}"
+    when "pois"
+      region[:label].presence || Array(region[:pois]).first.to_s
+    else
+      "unknown"
+    end
   end
 end

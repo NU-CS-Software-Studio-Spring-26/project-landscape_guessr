@@ -38,6 +38,100 @@ class Image < ApplicationRecord
     image_sets.exists?(user_id: user.id)
   end
 
+  # Bulk-insert importer rows into Image + ImageSetItem, dispatching on
+  # source. Used by CommonsImporter and MapillaryImporter; WikidataImporter
+  # still has its own legacy `insert_rows!` (kept for backward compat — its
+  # URL-based dedup is the right shape for Wikidata's stable Commons URLs).
+  #
+  # Dedup keys by source:
+  #   * mapillary: (external_source, external_id) — `url` is NULL until
+  #     resolved at render time, so URL-dedup wouldn't work
+  #   * commons:   (external_source, external_id) primary, with URL also
+  #     unique-indexed as a fallback safety net
+  #
+  # Each row hash must have at least: external_source, external_id,
+  # lat, lng, url (may be nil for mapillary), and optionally title,
+  # author, license.
+  def self.bulk_insert_for_source!(image_set:, rows:, source:)
+    return 0 if rows.empty?
+
+    new_links = 0
+    inserted  = 0
+
+    ActiveRecord::Base.logger.silence do
+      rows.each_slice(500) do |slice|
+        ImageSetItem.transaction do
+          new_links += insert_slice_by_external_id!(image_set: image_set, slice: slice, source: source)
+        end
+        inserted += slice.size
+        image_set.update_columns(import_progress: inserted)
+      end
+    end
+
+    new_links
+  end
+
+  def self.insert_slice_by_external_id!(image_set:, slice:, source:)
+    ext_ids = slice.filter_map { |r| r[:external_id] }
+    existing = Image.where(external_source: source, external_id: ext_ids).pluck(:external_id, :id).to_h
+
+    new_image_rows = slice.reject { |r| existing.key?(r[:external_id]) }
+                          .uniq { |r| r[:external_id] }
+                          .map do |r|
+      {
+        external_source: source,
+        external_id:     r[:external_id],
+        url:             r[:url],
+        title:           r[:title].presence || "Untitled",
+        latitude:        r[:lat],
+        longitude:       r[:lng],
+        author:          r[:author],
+        license:         r[:license],
+        created_at:      Time.current,
+        updated_at:      Time.current
+      }
+    end
+
+    if new_image_rows.any?
+      result = Image.insert_all(
+        new_image_rows,
+        returning: %i[id external_id],
+        unique_by: :index_images_on_external_source_and_external_id
+      )
+      result.rows.each { |id, ext_id| existing[ext_id] = id }
+      still_missing = new_image_rows.map { |r| r[:external_id] } - existing.keys
+      unless still_missing.empty?
+        Image.where(external_source: source, external_id: still_missing).pluck(:external_id, :id).each do |ext_id, id|
+          existing[ext_id] = id
+        end
+      end
+    end
+
+    candidate_image_ids = slice.filter_map { |r| existing[r[:external_id]] }.uniq
+    already_linked = image_set.image_set_items
+                              .where(image_id: candidate_image_ids)
+                              .pluck(:image_id).to_set
+
+    item_rows = slice.filter_map do |r|
+      image_id = existing[r[:external_id]]
+      next nil unless image_id
+      next nil if already_linked.include?(image_id)
+      already_linked << image_id
+      {
+        image_set_id: image_set.id, image_id: image_id,
+        latitude: r[:lat], longitude: r[:lng],
+        created_at: Time.current, updated_at: Time.current
+      }
+    end
+
+    if item_rows.any?
+      ImageSetItem.insert_all(item_rows, unique_by: %i[image_set_id image_id])
+      item_rows.size
+    else
+      0
+    end
+  end
+
   # Convenience: a Google Maps URL pointing at this image's coordinates.
   # Nil if either coord is missing. Used by the detail and results pages
   # for "Open in Maps ↗" — works for every image (Wikimedia, uploads,

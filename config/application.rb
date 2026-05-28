@@ -14,7 +14,10 @@ module ProjectLandscapeGuessr
     # Please, add to the `ignore` list any other `lib` subdirectories that do
     # not contain `.rb` files, or that should not be reloaded or eager loaded.
     # Common ones are `templates`, `generators`, or `middleware`, for example.
-    config.autoload_lib(ignore: %w[assets tasks])
+    # `proto` holds protoc-generated Ruby that defines top-level constants
+    # (VectorTile, etc.) which don't match Zeitwerk's path → constant rule.
+    # We require the generated file explicitly from Mapillary::TileDecoder.
+    config.autoload_lib(ignore: %w[assets tasks proto])
 
     # Configuration for the application, engines, and railties goes here.
     #

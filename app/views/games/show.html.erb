@@ -54,7 +54,7 @@
           </div>
         </div>
         <div class="flex items-center justify-between gap-2 text-xs text-gray-500">
-          <span>scroll to zoom · drag to pan · double-click to reset</span>
+          <span>scroll to zoom · drag to pan · double-click to reset · <%= attribution_for(@image, mode: :in_round) %></span>
           <%# Inline-replace the displayed photo with the unmodified
               original (often 8000+ px). Stays on the page so the player
               doesn't lose context, and the zoom state persists through

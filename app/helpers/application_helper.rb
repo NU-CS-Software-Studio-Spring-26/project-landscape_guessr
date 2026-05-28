@@ -3,12 +3,18 @@ module ApplicationHelper
   # For Active Storage uploads: returns the blob URL served by Rails.
   # For Wikimedia/external URL images: returns the URL, optionally with a
   # CDN width hint appended as a query param (?width=N).
+  # For Mapillary: signed URLs expire (~30 days) so `images.url` is NULL —
+  # resolve lazily via `MapillaryUrlResolver` (Rails.cache 6h TTL).
   def image_src(image, width: nil)
-    if image.respond_to?(:photo) && image.photo.attached?
-      url_for(image.photo)
-    elsif image.respond_to?(:url) && image.url.present?
-      width ? "#{image.url}?width=#{width}" : image.url
+    return url_for(image.photo) if image.respond_to?(:photo) && image.photo.attached?
+
+    if image.respond_to?(:external_source) && image.external_source == "mapillary"
+      size = width.to_i <= 1024 ? 1024 : 2048
+      return MapillaryUrlResolver.url_for(image.external_id, size: size)
     end
+
+    return nil unless image.respond_to?(:url) && image.url.present?
+    width ? "#{image.url}?width=#{width}" : image.url
   end
 
   # Server-renders a date as a fallback, then swaps to the user's local

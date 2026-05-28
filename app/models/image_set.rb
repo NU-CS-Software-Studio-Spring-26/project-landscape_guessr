@@ -188,6 +188,15 @@ class ImageSet < ApplicationRecord
     parent_image_set_id.present?
   end
 
+  # True for sets created via the AI image-set flow. Wikidata sets carry
+  # ai_query (the SPARQL pattern); Commons/Mapillary sets don't, so we
+  # also check ai_image_source against the default. ai_source_params is
+  # present whenever the source has parameters worth persisting.
+  def ai_generated?
+    return true if ai_query.present?
+    %w[commons mapillary].include?(ai_image_source)
+  end
+
   # AI-import states that mean a background job is mid-flight (or just
   # crashed and left us here). Centralized so the show view, the retry
   # button gate, and any future caller stay in sync — duplicating the

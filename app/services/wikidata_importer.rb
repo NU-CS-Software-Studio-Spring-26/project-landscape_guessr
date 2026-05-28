@@ -349,9 +349,12 @@ class WikidataImporter
     false
   end
 
-  def self.with_region_bbox(pattern, region_filter)
-    region = resolve_region_filter(region_filter)
-    return pattern unless region&.min_lat && region.min_lng && region.max_lat && region.max_lng
+  # `region_or_filter` may be either:
+  #   - A region_filter hash (legacy callers): resolved via resolve_region_filter
+  #   - A RegionResolver::Result struct (Mode A/B + optional radius): bbox used directly
+  def self.with_region_bbox(pattern, region_or_filter)
+    bbox = resolve_bbox(region_or_filter)
+    return pattern unless bbox
     # SERVICE wikibase:box uses Blazegraph's native geo-spatial index —
     # constrains ?item to coords inside the rectangle. Two non-obvious
     # gotchas that BOTH have to be right or the query returns 0:
@@ -373,9 +376,44 @@ class WikidataImporter
     # (measured: 1.8s for lakes-in-MA = 1299 results).
     "SERVICE wikibase:box {\n" \
       "  ?item wdt:P625 ?_box_coord .\n" \
-      "  bd:serviceParam wikibase:cornerSouthWest \"Point(#{region.min_lng} #{region.min_lat})\"^^geo:wktLiteral .\n" \
-      "  bd:serviceParam wikibase:cornerNorthEast \"Point(#{region.max_lng} #{region.max_lat})\"^^geo:wktLiteral .\n" \
+      "  bd:serviceParam wikibase:cornerSouthWest \"Point(#{bbox[:min_lng]} #{bbox[:min_lat]})\"^^geo:wktLiteral .\n" \
+      "  bd:serviceParam wikibase:cornerNorthEast \"Point(#{bbox[:max_lng]} #{bbox[:max_lat]})\"^^geo:wktLiteral .\n" \
       "}\n#{pattern.strip}"
+  end
+
+  # Returns a {min_lat, max_lat, min_lng, max_lng} hash or nil. Triggers
+  # boundary fetch for in-DB regions whose bbox is point-only (GeoNames
+  # city seed bug — every city was seeded with min_lat=max_lat=lat, so
+  # SERVICE wikibase:box returned 0 hits for Paris/NYC/Boston/Tokyo/etc).
+  def self.resolve_bbox(region_or_filter)
+    return nil if region_or_filter.nil?
+
+    if region_or_filter.respond_to?(:bbox) && region_or_filter.bbox.is_a?(Hash)
+      bbox = region_or_filter.bbox
+      return nil unless bbox[:min_lat] && bbox[:min_lng] && bbox[:max_lat] && bbox[:max_lng]
+      return nil if (bbox[:max_lat] - bbox[:min_lat]).abs < 1e-6
+      return bbox
+    end
+
+    region = resolve_region_filter(region_or_filter)
+    return nil unless region
+    ensure_real_bbox!(region)
+    return nil unless region.min_lat && region.min_lng && region.max_lat && region.max_lng
+    return nil if (region.max_lat - region.min_lat).abs < 1e-6 # still degenerate after fetch
+    { min_lat: region.min_lat, max_lat: region.max_lat, min_lng: region.min_lng, max_lng: region.max_lng }
+  end
+
+  # If the region was seeded with a point bbox (GeoNames cities), kick the
+  # lazy Nominatim boundary fetch so we get a real polygon + recomputed bbox.
+  # `fetch_real_boundary!` internally calls `recompute_bbox!` then updates,
+  # so `region.min_lat/max_lat` reflect the real area on return.
+  def self.ensure_real_bbox!(region)
+    return unless region
+    return unless region.min_lat && (region.max_lat - region.min_lat).abs < 1e-6
+    return unless region.boundary.blank?
+    region.fetch_real_boundary!
+  rescue StandardError => e
+    Rails.logger.warn "[wd boundary preflight] #{region.name}: #{e.class}: #{e.message.slice(0, 200)}"
   end
 
   # Drops rows whose coordinates fall outside the region's actual
@@ -392,20 +430,8 @@ class WikidataImporter
   # accurate, not bbox-overshooting). Falls back to the bbox-filtered
   # rows if Nominatim is unreachable — degraded accuracy is better
   # than failing the whole flow.
-  def self.refine_rows_to_region_polygon(rows, region_filter)
-    region = resolve_region_filter(region_filter)
-    return rows unless region
-
-    unless region.boundary.present?
-      begin
-        region.fetch_real_boundary!
-      rescue StandardError => e
-        Rails.logger.warn "[poly_refine] Nominatim fetch failed for #{region.name}: #{e.class}: #{e.message.slice(0, 200)}"
-        return rows
-      end
-    end
-
-    polygon = region.rgeo_boundary
+  def self.refine_rows_to_region_polygon(rows, region_or_filter)
+    polygon = resolve_polygon(region_or_filter)
     return rows unless polygon
 
     factory = RGeo::Geographic.spherical_factory(srid: 4326)
@@ -414,8 +440,31 @@ class WikidataImporter
       point = factory.point(r[:lng], r[:lat])
       polygon.contains?(point) rescue false
     end
-    Rails.logger.info "[poly_refine] region=#{region.name} bbox_in=#{rows.size} polygon_kept=#{kept.size}"
+    Rails.logger.info "[poly_refine] bbox_in=#{rows.size} polygon_kept=#{kept.size}"
     kept
+  end
+
+  # Returns an rgeo polygon for the region, or nil if the region is a
+  # bbox-only Result (Mode B) or not in our DB.
+  def self.resolve_polygon(region_or_filter)
+    return nil if region_or_filter.nil?
+    if region_or_filter.respond_to?(:polygon)
+      return region_or_filter.polygon
+    end
+
+    region = resolve_region_filter(region_or_filter)
+    return nil unless region
+
+    unless region.boundary.present?
+      begin
+        region.fetch_real_boundary!
+      rescue StandardError => e
+        Rails.logger.warn "[poly_refine] Nominatim fetch failed for #{region.name}: #{e.class}: #{e.message.slice(0, 200)}"
+        return nil
+      end
+    end
+
+    region.rgeo_boundary
   end
 
   # === SPARQL builders ===

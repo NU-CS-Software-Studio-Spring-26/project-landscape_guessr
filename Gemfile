@@ -89,3 +89,8 @@ gem "aws-sdk-s3", require: false
 # Geographic region filtering (point-in-polygon via RGeo)
 gem "rgeo", "~> 3.0"
 gem "rgeo-geojson", "~> 2.0"
+
+# Mapbox Vector Tile decoding for Mapillary street-imagery imports.
+# Prebuilt x86_64-linux-gnu/musl binaries are selected on Heroku — no
+# native compile, no Aptfile required (verified in Gemfile.lock platforms).
+gem "google-protobuf", "~> 4.35"

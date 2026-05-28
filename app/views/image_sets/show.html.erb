@@ -10,6 +10,9 @@
       <% if @image_set.filtered? %>
         &middot; <span class="inline-flex items-center text-xs text-forest-600 bg-forest-50 rounded-full px-2 py-0.5">Filtered</span>
       <% end %>
+      <% if @image_set.ai_generated? %>
+        &middot; <%= source_pill(@image_set.ai_image_source) %>
+      <% end %>
     </p>
     <% if @image_set.tags.any? %>
       <div class="flex flex-wrap gap-1 mt-2">
@@ -90,7 +93,7 @@
         This can take a minute or two for big sets. You can leave this page —
         the import keeps running in the background.
       </p>
-      <% if @image_set.owned_by?(Current.user) && @image_set.ai_query.present? %>
+      <% if @image_set.owned_by?(Current.user) && @image_set.ai_generated? %>
         <%# Visible escape hatch for stuck imports — a Heroku dyno restart
             or worker crash can leave us in fetching/looking_up_images/inserting
             with nothing actually running. retry_import accepts any non-
@@ -110,7 +113,7 @@
       <% if @image_set.owned_by?(Current.user) %>
         <p class="text-xs text-red-700"><%= @image_set.import_error.presence || "Unknown error" %></p>
       <% end %>
-      <% if @image_set.owned_by?(Current.user) && @image_set.ai_query.present? %>
+      <% if @image_set.owned_by?(Current.user) && @image_set.ai_generated? %>
         <%# Most failures here are transient (Wikidata 5xx, network blip).
             run_query already retries 3× internally; this button covers
             the case where Wikidata was down for >5s. Reuses ai_query

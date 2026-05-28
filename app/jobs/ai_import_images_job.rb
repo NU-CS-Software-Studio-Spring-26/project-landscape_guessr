@@ -17,11 +17,33 @@ class AiImportImagesJob < ApplicationJob
 
     image_set.update_columns(import_state: "importing", import_error: nil, import_progress: 0)
 
-    WikidataImporter.import!(
-      image_set:     image_set,
-      pattern:       image_set.ai_query,
-      region_filter: image_set.ai_region_filter
-    )
+    region_resolved = image_set.ai_region_filter ? RegionResolver.resolve(image_set.ai_region_filter) : nil
+    params = image_set.ai_source_params || {}
+
+    case image_set.ai_image_source
+    when "commons"
+      commons_category = CommonsCategoryResolver.resolve(
+        topic_qid: params["topic_qid"], combined_qid: params["combined_qid"]
+      )
+      CommonsImporter.import!(
+        image_set:        image_set,
+        commons_category: commons_category,
+        intitle_fallback: params["commons_intitle_fallback"],
+        region_resolved:  region_resolved
+      )
+    when "mapillary"
+      MapillaryImporter.import!(
+        image_set:       image_set,
+        region_resolved: region_resolved,
+        min_year:        params["mapillary_min_year"]
+      )
+    else
+      WikidataImporter.import!(
+        image_set:     image_set,
+        pattern:       image_set.ai_query,
+        region_filter: region_resolved
+      )
+    end
 
     # If the parent had filtered children (uncommon for AI sets, but
     # possible if a user filters one), refresh them so they reflect the
