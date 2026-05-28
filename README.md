@@ -162,6 +162,10 @@ export AWS_REGION=us-east-2
 | `Guess`            | `Game`, `Image`               | —                                                                                               | `latitude`, `longitude` (player's pick)                                                                                                                                                                                                                                                                    |
 | `AiGeneration`     | `User`                        | —                                                                                               | `user_message`, `conversation_json`, `status` (`pending`/`running`/`completed`/`failed`/`canceled`), `phase`, `progress_message`, `result_json` + `result_count` + `preview_json` (filled as the job runs), `error`, `model_used`                                                                          |
 | `AiUsage`          | `User`                        | —                                                                                               | `day`, `count` (unique on `[user_id, day]`) — daily counter for the AI image-set rate limit                                                                                                                                                                                                                |
+| `Match`            | `User` (as `host`), `ImageSet` | `match_players`, `players` (through), `match_rounds`, `match_guesses` (through rounds)         | `status` (`lobby`/`active`/`finished`), short `code` (Crockford-ish, no `0`/`O`/`1`/`I`), `rounds_total`, `seconds_per_round`, `started_at`, `finished_at`; `LOBBY_CAPACITY = 100`                                                                                                                       |
+| `MatchPlayer`      | `Match`, `User`               | `match_guesses`                                                                                 | unique on `[match_id, user_id]`; `joined_at`, `left_at`, `forfeited_at`, running `total_score`                                                                                                                                                                                                            |
+| `MatchRound`       | `Match`, `Image`              | `match_guesses`                                                                                 | unique on `[match_id, index]`; `answer_latitude`/`answer_longitude` snapshot, server-stamped `started_at` / `deadline_at` / `ended_at`                                                                                                                                                                    |
+| `MatchGuess`       | `MatchRound`, `MatchPlayer`   | —                                                                                               | unique on `[match_round_id, match_player_id]`; `latitude`, `longitude`, `submitted_at`; `distance_km` + `score` filled by `MatchEndRound` once the round closes                                                                                                                                           |
 
 
 `GameImage.answer_latitude/longitude` snapshots the answer at game-creation time, so retroactively editing an image's coordinates doesn't change scores for already-played games.
@@ -206,6 +210,12 @@ The same catalog page can sort by name (A-Z / Z-A), creation date (newest / olde
 | `/images`, `/images/map`                                                                  | Paginated images list / world map (admins see all; everyone else sees `Image.visible_to`)                                                  |
 | `/images/:id`                                                                             | Image detail: photo (scroll-zoom), edit form (anyone owning a set with the image), set memberships, "Open in Google Maps"                  |
 | `/practice`                                                                               | Single-image guessing without saving a game (no auth required)                                                                             |
+| `/matches/new`, `POST /matches`                                                           | Create a multiplayer match (host picks image set + rounds + seconds_per_round); redirects to the share-link lobby                          |
+| `/matches/:code`                                                                          | Lobby (share link, join CTA, host start button) → play view (image + map + scoreboard) once the host starts → links to results when done   |
+| `POST /matches/:code/join` / `leave` / `start`                                            | Join the lobby (gated by `LOBBY_CAPACITY = 100`), leave (deletes row in lobby, stamps `left_at` once active), host-only start              |
+| `GET /matches/:code/state.json`                                                           | JSON snapshot polled by the Stimulus clients — never leaks unguessed coords; `last_round_result` reveals only after the round is ended      |
+| `POST /matches/:code/guess`                                                               | JSON guess submission `{lat,lng}`; early-ends the round when every active player has now guessed                                            |
+| `/matches/:code/results`                                                                  | Final standings + N×R round-by-round table after the match finishes                                                                        |
 
 
 ## Scoring
@@ -322,6 +332,22 @@ Reusable styles live in `app/assets/tailwind/application.css` as `@apply` compon
 - Forms: `form-input` (and `form-input-error` for validation states), `select-with-arrow` (custom chevron — pair with `pr-8`)
 - Layout: `page-container` (max-width wrapper for top-level pages)
 - Typography: `heading-hero` / `heading-page` / `heading-section`, `eyebrow` (small all-caps label), `muted` (gray caption text)
+
+### Multiplayer (polling)
+
+Multiplayer matches are HTTP-polled, not WebSocket-pushed. The choice (and a Tier-1 Action Cable alternative) is documented in `docs/multiplayer-sketch.md`; polling won because it ships with zero new infra — no Redis, no Action Cable deploy target, no fork of the existing `guess_map` Stimulus controller.
+
+Server-authoritative timing lives in three pieces and never trusts client clocks:
+
+- `MatchStartRound` picks the next unused image, stamps `started_at` + `deadline_at = now + seconds_per_round`, and enqueues `EndMatchRoundJob` with `wait: seconds_per_round`.
+- `MatchEndRound` (called by the job, *or* by `MatchesController#guess` when the last active player submits) marks `ended_at`, scores every guess via `Game.haversine_km` + `Game.geoguessr_round_score`, and either starts the next round or flips the match to `finished`. Idempotent under a row lock so the timer + early-end race resolves cleanly — whichever fires first wins, the other becomes a cheap DB lookup.
+- `GET /matches/:code/state.json` is the snapshot two Stimulus controllers diff against. `match-lobby-poll` re-renders the player list and `window.location.reload()`s once `status != "lobby"`. `match-poll` (active matches) swaps the image when `current_round.index` changes, listens for `guess-map:pinned` from the existing map controller and POSTs to `/guess`, and renders the reveal when `last_round_result` appears.
+
+Two contracts the JSON payload must honor or cheating becomes trivial:
+- `current_round` carries the image URL and `deadline_at` but **never** the answer coords.
+- `players[].locked_in` is the only "X submitted" signal — other players' guess `lat`/`lng` only ship inside `last_round_result`, which is `null` until `ended_at` is stamped.
+
+`EndMatchRoundJob` runs on the in-process `:async` adapter, so the same dyno-restart caveat from *Background-processing caveats* applies — a deploy mid-match will drop pending round-end timers. If multiplayer becomes load-bearing, swap to `solid_queue` along with the other `:async` jobs.
 
 ### Wikidata seeder
 
