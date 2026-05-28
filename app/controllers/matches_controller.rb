@@ -267,6 +267,7 @@ class MatchesController < ApplicationController
   end
 
   def build_players_payload(current_round)
+    host_id = @match.host_id
     @match.match_players.includes(:user).order(:joined_at).map do |p|
       locked_in = current_round && !current_round.ended? &&
                   current_round.match_guesses.exists?(match_player_id: p.id)
@@ -274,6 +275,7 @@ class MatchesController < ApplicationController
         user_id:     p.user_id,
         username:    p.user.username,
         avatar_url:  p.user.gravatar_url(size: 80),
+        is_host:     p.user_id == host_id,
         locked_in:   locked_in,
         total_score: p.total_score,
         left:        p.left_at.present?

@@ -1,4 +1,12 @@
-<%# Lobby: share link, join CTA / host start CTA, player list. %>
+<%# Lobby: share link, join CTA / host start CTA, player list.
+    The wrapping div mounts match-lobby-poll, which polls state.json so
+    joins appear without a refresh and a host start auto-reloads the page
+    onto the play view. %>
+
+<div data-controller="match-lobby-poll"
+     data-match-lobby-poll-state-url-value="<%= state_match_path(@match.code, format: :json) %>"
+     data-match-lobby-poll-interval-ms-value="2000"
+     class="space-y-6">
 
 <div class="card px-5 py-4 space-y-2 border-forest-200">
   <p class="text-sm font-semibold text-forest-800">Invite link</p>
@@ -31,9 +39,10 @@
 
 <section class="space-y-3">
   <h2 class="heading-section">
-    Players (<%= @players.size %>/<%= Match::LOBBY_CAPACITY %>)
+    Players (<span data-match-lobby-poll-target="playerCount"><%= @players.size %>/<%= Match::LOBBY_CAPACITY %></span>)
   </h2>
-  <div class="card overflow-hidden divide-y divide-forest-50">
+  <div class="card overflow-hidden divide-y divide-forest-50"
+       data-match-lobby-poll-target="playerList">
     <% @players.each do |player| %>
       <div class="flex items-center gap-4 px-5 py-3.5 bg-white">
         <span class="flex items-center gap-2 flex-1 min-w-0">
@@ -51,3 +60,6 @@
     <% end %>
   </div>
 </section>
+
+</div>
+
