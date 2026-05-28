@@ -128,7 +128,11 @@ class RegionResolver
 
     Result.new(
       bbox: bbox,
-      polygon: nil,
+      # A circular polygon so "within Nm of X" is enforced as an actual
+      # circle — the bbox alone is a square whose corners reach ~1.4×N, which
+      # is what let "10 miles around Yellowstone" import points well outside
+      # the intended radius. Importers refine against this.
+      polygon: circle_polygon(center_lat, center_lng, radius_meters),
       label: "within #{radius_meters.to_i}m of #{base.label}",
       source: base.source,
       admin_level: base.admin_level,
@@ -161,6 +165,23 @@ class RegionResolver
     center_lng = (bbox[:min_lng] + bbox[:max_lng]) / 2.0
     radius_m = Math.sqrt(min_area_km2) * 1000.0 / 2.0
     bbox_around(center_lat, center_lng, radius_m)
+  end
+
+  # An approximate circle (segments-gon) centered at (lat, lng), as an RGeo
+  # spherical polygon. Used to enforce radius prompts ("within Nm of X") as a
+  # real circle rather than the enclosing square bbox.
+  def self.circle_polygon(lat, lng, radius_m, segments: 64)
+    factory = RGeo::Geographic.spherical_factory(srid: 4326)
+    dlat = radius_m / 111_320.0
+    dlng = radius_m / (111_320.0 * Math.cos(lat * Math::PI / 180.0))
+    pts = (0..segments).map do |i|
+      theta = 2.0 * Math::PI * i / segments
+      factory.point(lng + dlng * Math.cos(theta), lat + dlat * Math.sin(theta))
+    end
+    factory.polygon(factory.linear_ring(pts))
+  rescue StandardError => e
+    Rails.logger.warn "[region circle] #{e.class}: #{e.message.slice(0, 120)}"
+    nil
   end
 
   # Compute a bbox centered at (lat, lng) extending radius_m in each direction.

@@ -524,6 +524,9 @@ class AiImageSetGenerator
       - "many photos / lots of photos of X" → commons
       - Single subject, many angles ("Mount Fuji photos") → commons
       - Sparse Wikidata topics (street art, graffiti, murals) → commons
+      - Living things (wildlife, animals, birds, fish, plants, trees) →
+        commons. Wikidata has SPECIES/taxa, which carry no coordinates, so a
+        Wikidata query returns 0; Commons has geotagged photos of them.
       - Multi-region prompts ("NYC and LA", "50 cities") → cannot_answer
       - Named routes ("Highway 101", "I-90") → cannot_answer
       - Directional splits ("north half of Chicago") → cannot_answer
@@ -607,6 +610,28 @@ class AiImageSetGenerator
 
       MODELING PRINCIPLES (apply these before composing the pattern):
 
+      - **The match must be geotaggable (check FIRST).** The Wikidata source
+        returns one photo per matched ?item, anchored on that item's own
+        P625 coordinate — so the kind of thing you P31-match MUST be
+        something that HAS a fixed location: places, buildings, structures,
+        monuments, natural features (mountains, lakes, rivers), located
+        events. Taxa/species (animals, birds, fish, plants, trees), people,
+        artworks-as-concepts, vehicles, and organizations have NO P625 and
+        return ZERO rows — even though the class Q-ID exists and looks valid.
+        For those subjects switch to image_source="commons" (geotagged
+        PHOTOS of them exist) or, if Commons coverage is doubtful, refuse.
+        Never emit a Wikidata pattern whose ?item is a taxon/person/vehicle.
+
+      - **Designations & statuses (use a UNION, don't guess the property).**
+        Designations like World Heritage Site, listed/heritage building,
+        national monument, protected-area status are modeled INCONSISTENTLY
+        on Wikidata: some items are P31 the designation-class, others carry
+        it via wdt:P1435 (heritage designation). Catching only one misses
+        the rest. Cover both with a UNION instead of inspecting:
+          { ?item wdt:P31/wdt:P279* wd:Q9259 } UNION { ?item wdt:P1435 wd:Q9259 }
+          ?item wdt:P625 ?coord .
+        (Q9259 = World Heritage Site; substitute the designation's Q-ID.)
+
       - **Attribute, not class.** When the user describes things with an
         ATTRIBUTE (style, designation, status, award, role, period),
         the attribute almost always has its own dedicated PROPERTY.
@@ -659,12 +684,15 @@ class AiImageSetGenerator
       - **Umbrella concepts that span multiple classes.** Applies ONLY
         when the user's request is a vibe / domain / feeling and no
         single Wikidata class captures it. Examples that ARE umbrellas:
-        "nature", "wildlife", "transportation", "architecture",
-        "sports". Examples that are NOT umbrellas (these are specific
-        classes — use a single type, do not enumerate): "rivers
-        worldwide", "volcanoes worldwide", "skyscrapers in Asia",
-        "birds in Brazil". Broad scope ≠ umbrella; only enumerate when
-        no single class fits.
+        "nature", "architecture", "infrastructure". Examples that are NOT
+        umbrellas (these are specific classes — use a single type, do not
+        enumerate): "rivers worldwide", "volcanoes worldwide", "skyscrapers
+        in Asia", "lighthouses worldwide". Broad scope ≠ umbrella; only
+        enumerate when no single class fits. Whatever sub-types you pick,
+        each MUST be geotaggable (see the first principle) — decompose
+        "transportation" into bridges/stations/airports/ports (placed
+        infrastructure), never into "car/train/plane" (vehicles, no P625);
+        "wildlife" has no geotaggable decomposition at all → use Commons.
 
         For umbrellas: ENUMERATE EXHAUSTIVELY by sub-domain. Think of
         the umbrella like a Wikipedia category page — what *kinds* of
@@ -898,19 +926,27 @@ class AiImageSetGenerator
           and far-flung mistagged files. Use this for single-subject
           prompts: "Mount Fuji photos" → topic_qid only.
 
-      Search for the topic Q-ID via search_wikidata. NEVER pass a bare
-      place-name as the topic (topic_qid for "Boston" with no subject would
-      surface "People photographed in Boston"). The subject is the noun
-      ("buildings", "churches", "street art"), the place goes in region_*.
+      Search for the topic Q-ID via search_wikidata. The rule depends on
+      whether the prompt names a SUBJECT:
+        * Prompt names a subject (a noun: "buildings", "churches", "street
+          art") → that noun is the topic_qid; the place goes in region_*.
+          Do NOT make the place the topic (topic_qid for "Boston" alongside
+          a real subject surfaces "People photographed in Boston").
+        * Prompt names NO subject — a bare "photos of <city>" → the city
+          itself is the topic_qid. This is acceptable but broad (a city
+          category holds maps, documents and people too, only partly pruned
+          by the coordinate anchor). If the user more likely wants varied
+          on-the-ground imagery, prefer mapillary instead.
 
       Don't set sparql_pattern for commons.
 
       MAPILLARY SOURCE (image_source: "mapillary"):
 
       Street-level imagery via Mapillary's vector tiles. ALWAYS requires
-      a region (Mode A or B). Adaptive zoom: small regions get z=14
-      tile-by-tile coverage, large regions (states/countries/continents)
-      get a distributed z=5 sample.
+      a region (Mode A or B). The backend samples z=14 tiles spread evenly
+      across the region (a city gets full coverage; a state/country gets a
+      distributed sample), so any region size works — you just supply the
+      region, never a zoom.
 
       Provide:
         region_*               — Mode A or B (required).
@@ -1022,6 +1058,22 @@ class AiImageSetGenerator
           region_name: "Boston",
           region_parent_name: "Massachusetts",
           region_admin_level: "city"
+        )
+
+      Living things → Commons, NOT Wikidata (no geotagged taxa) —
+      user: "wildlife in Kenya"
+
+        search_wikidata("wildlife") → animal/taxon concepts — NOT geotaggable.
+        (A Wikidata `?item wdt:P31/wdt:P279* wd:Q729 ; wdt:P17 wd:Q114` returns
+         0: Wikidata has species, not located specimens.) Route to Commons:
+        submit_answer(
+          image_source: "commons",
+          topic_qid: "Q729",     # animal — backend builds "Animals in Kenya" + nearcoord
+          set_name: "Wildlife in Kenya",
+          explanation: "I'll gather geotagged wildlife photos from Commons across Kenya.",
+          cannot_answer: false,
+          region_name: "Kenya",
+          region_admin_level: "country"
         )
 
       Refusal example —

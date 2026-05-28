@@ -26,10 +26,18 @@ class CommonsImporter
   READ_TIMEOUT = 60
 
   PROBE_RADIUS_KM = 30
-  PER_PROBE_HARD_CAP = 500     # MediaWiki srlimit max
-  HARD_CAP = 10_000             # Match WikidataImporter
+  PER_REQUEST_LIMIT = 500      # gsrlimit max per CirrusSearch request
+  # Max rows paginated from a single nearcoord probe. CirrusSearch caps
+  # gsroffset at 10k (offset+limit ≤ 10000), so we stay well under to leave
+  # headroom and keep one probe from monopolising a multi-probe import.
+  PER_PROBE_CAP = 5_000
+  HARD_CAP = 10_000             # total rows per import (matches WikidataImporter)
   PREVIEW_OVERSAMPLE = 3
-  THUMB_WIDTH = 1024
+  # Commons file pages render thumbnails via Special:FilePath; image_src
+  # appends ?width=N at display time. Same convention as Wikidata/Wikipedia
+  # images — and it means we DON'T request a server-rendered thumbnail in
+  # the bulk fetch (iiurlwidth), which silently kills gsroffset pagination.
+  FILEPATH = "https://commons.wikimedia.org/wiki/Special:FilePath/".freeze
   IMAGE_EXTENSIONS = /\.(jpe?g|png)\z/i
 
   class Error < StandardError; end
@@ -59,7 +67,7 @@ class CommonsImporter
       max_rows: target,
       on_progress: on_progress
     )
-    refine_to_polygon(rows, region_resolved).shuffle.first(limit)
+    dedupe_by_external_id(refine_to_polygon(rows, region_resolved)).shuffle.first(limit)
   end
 
   def self.import!(image_set:, commons_category:, intitle_fallback: nil, region_resolved: nil)
@@ -75,7 +83,6 @@ class CommonsImporter
       }
     )
     rows = refine_to_polygon(rows, region_resolved)
-    rows = rows.reject { |r| r[:url].blank? || !r[:url].match?(IMAGE_EXTENSIONS) }
     rows = dedupe_by_external_id(rows)
 
     image_set.update_columns(import_state: "inserting", import_total: rows.size, import_progress: 0)
@@ -146,7 +153,7 @@ class CommonsImporter
       remaining = max_rows - rows.size
       fetched = fetch_probe_rows(
         commons_category: commons_category, intitle_fallback: intitle_fallback,
-        probe: probe, limit: [ remaining, PER_PROBE_HARD_CAP ].min
+        probe: probe, limit: [ remaining, PER_PROBE_CAP ].min
       )
       rows.concat(fetched)
       on_progress&.call(idx + 1, probes.size, rows.size)
@@ -162,7 +169,7 @@ class CommonsImporter
     srsearch = build_srsearch(commons_category: commons_category, intitle_fallback: intitle_fallback, probe: probe)
 
     while rows.size < limit
-      batch_limit = [ limit - rows.size, PER_PROBE_HARD_CAP ].min
+      batch_limit = [ limit - rows.size, PER_REQUEST_LIMIT ].min
       params = {
         action: "query",
         generator: "search",
@@ -171,9 +178,16 @@ class CommonsImporter
         gsrlimit: batch_limit,
         gsroffset: sroffset,
         prop: "imageinfo|coordinates",
-        iiprop: "url|extmetadata",
-        iiurlwidth: THUMB_WIDTH,
-        coprop: "type|name|country",
+        # No iiurlwidth: asking for a server-rendered thumbnail silently
+        # drops the gsroffset continuation (verified), capping a probe to a
+        # single 500-row page. We build the thumb URL ourselves below.
+        iiprop: "extmetadata",
+        coprop: "type",
+        # `coordinates` defaults to colimit=10 — without this a 500-file
+        # batch returns coordinates for only the first 10, so the other ~490
+        # are silently dropped at `next unless coord` below. This one missing
+        # param is what made Commons imports yield ~0 despite huge counts.
+        colimit: PER_REQUEST_LIMIT,
         format: "json", formatversion: 2
       }
       data = api_get(params)
@@ -182,22 +196,22 @@ class CommonsImporter
       break if pages.empty?
 
       pages.each do |p|
-        ii = (p["imageinfo"] || []).first
         coord = (p["coordinates"] || []).first
-        next unless ii && coord
+        next unless coord
 
-        url = ii["thumburl"].presence || ii["url"]
-        next if url.blank?
+        title = p["title"].to_s.sub(/\AFile:/, "")
+        next unless title.match?(IMAGE_EXTENSIONS)
 
+        ii = (p["imageinfo"] || []).first
         rows << {
           external_source: "commons",
           external_id: p["pageid"].to_s,
-          url: url,
-          title: p["title"].to_s.sub(/\AFile:/, ""),
+          url: filepath_url(title),
+          title: title,
           lat: coord["lat"].to_f,
           lng: coord["lon"].to_f,
-          author: extract_author(ii.dig("extmetadata")),
-          license: extract_license(ii.dig("extmetadata"))
+          author: extract_author(ii&.dig("extmetadata")),
+          license: extract_license(ii&.dig("extmetadata"))
         }
       end
 
@@ -207,6 +221,14 @@ class CommonsImporter
     end
 
     rows
+  end
+
+  # Display URL for a Commons file. Special:FilePath resolves to the file
+  # (or a width-N thumb when image_src appends ?width). Space→%20 because
+  # encode_www_form_component uses '+' for spaces, which Special:FilePath
+  # would treat as a literal '+' in the filename.
+  def self.filepath_url(filename)
+    FILEPATH + URI.encode_www_form_component(filename).gsub("+", "%20")
   end
 
   # Author/license from extmetadata are HTML — strip tags lightly. We

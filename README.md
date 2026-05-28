@@ -123,14 +123,14 @@ Signed-in users can build an image set from a natural-language prompt ("volcanoe
 **Sources** (`image_sets.ai_image_source`):
 
 - `wikidata` — default for topic+region prompts (`churches in Paris`, `lakes in Massachusetts`). One canonical Commons photo per Wikidata item, via `WikidataImporter`.
-- `commons` — high-volume / single-subject prompts (`Mount Fuji photos`, `many photos of buildings in Boston`). Topic Q-ID → P373 → Commons category, then CirrusSearch `deepcategory:` + `nearcoord:` via `CommonsImporter`. For topic+region it builds the region-anchored category (`Buildings in Boston`); region-less subjects are anchored on the topic's own P625 coordinate.
-- `mapillary` — street-level imagery (`streets in Chicago`, `driving through Sweden`). Stratified z=14 vector-tile sampling (a grid of tiles spread evenly across the region's bbox) via `MapillaryImporter`. Requires `MAPILLARY_TOKEN` in env. Panoramas are excluded.
+- `commons` — high-volume / single-subject prompts (`Mount Fuji photos`, `many photos of buildings in Boston`). Topic Q-ID → P373 → Commons category, then CirrusSearch `deepcategory:` + `nearcoord:` via `CommonsImporter`. For topic+region it builds the region-anchored category (`Buildings in Boston`); region-less subjects are anchored on the topic's own P625 coordinate. Only geotagged files are kept (the `coordinates` prop is paged with `colimit` so it isn't capped at 10 per request), and display URLs are `Special:FilePath/<file>` (thumb size applied by `image_src ?width`) — not server-rendered thumbnails, which would break pagination.
+- `mapillary` — street-level imagery (`streets in Chicago`, `driving through Sweden`). Coverage-aware z=14 vector-tile sampling via `MapillaryImporter`: a few cheap low-zoom `sequence` tiles map where imagery actually exists, then z=14 `image` tiles are fetched only at covered locations, spread across the region and spatially thinned (so sparse regions like a national park spread along roads instead of clustering). Requires `MAPILLARY_TOKEN` in env. Panoramas are excluded.
 
 **Sub-region modes** (consumed by `RegionResolver`):
 
 - *Mode A* — in-DB named region (continent / country / admin1 / admin2 / city). Triggers a Nominatim boundary fetch for point-bbox seeds.
 - *Mode B* — POI hull / single landmark. Geocodes the names via OpenStreetMap Nominatim (`GeocoderService`).
-- Optional `region_radius_meters` recenters a bbox of that radius on the resolved base — used for `near X` and `Nkm around Y` prompts.
+- Optional `region_radius_meters` recenters a bbox of that radius on the resolved base — used for `near X` and `Nkm around Y` prompts. The radius is enforced as a circular polygon (not just the square bbox), so importers drop points beyond the radius. Ambiguous bare city names with no `parent_name` resolve to the most-populous match (so `Paris` → France, not Paris, Ontario).
 
 Directional sub-region splits (`north half of Chicago`), multi-region prompts, and named routes are refused with a redirect to the existing filter-by-area workflow.
 

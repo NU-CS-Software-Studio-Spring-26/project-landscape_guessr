@@ -56,4 +56,10 @@ class MapillaryTileDecoderTest < ActiveSupport::TestCase
     # < EMPTY_TILE_BYTES threshold
     assert_empty Mapillary::TileDecoder.decode("x" * 50, "image", 14, 0, 0)
   end
+
+  test "coverage_points returns [] for empty/ocean tile bytes" do
+    assert_empty Mapillary::TileDecoder.coverage_points("", 8, 0, 0)
+    assert_empty Mapillary::TileDecoder.coverage_points(nil, 8, 0, 0)
+    assert_empty Mapillary::TileDecoder.coverage_points("x" * 50, 8, 0, 0)
+  end
 end

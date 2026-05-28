@@ -75,8 +75,28 @@ class Image < ApplicationRecord
     ext_ids = slice.filter_map { |r| r[:external_id] }
     existing = Image.where(external_source: source, external_id: ext_ids).pluck(:external_id, :id).to_h
 
+    # images.url is globally unique. The same file can arrive under two
+    # source identities — e.g. a Commons file already imported as a Wikidata
+    # P18 — sharing one Special:FilePath URL. Inserting it again would
+    # violate the url index, so resolve any row whose URL already exists
+    # (under any source) onto that existing image and reuse it. Rows with a
+    # blank URL (Mapillary, resolved lazily) are exempt — they have no URL
+    # to collide on, and many legitimately share NULL.
+    unresolved_urls = slice.reject { |r| existing.key?(r[:external_id]) }
+                           .filter_map { |r| r[:url].presence }.uniq
+    if unresolved_urls.any?
+      by_url = Image.where(url: unresolved_urls).pluck(:url, :id).to_h
+      slice.each do |r|
+        next if r[:url].blank? || existing.key?(r[:external_id])
+        id = by_url[r[:url]]
+        existing[r[:external_id]] = id if id  # only map when a real match exists
+      end
+    end
+
+    seen_urls = Set.new
     new_image_rows = slice.reject { |r| existing.key?(r[:external_id]) }
                           .uniq { |r| r[:external_id] }
+                          .select { |r| r[:url].blank? || seen_urls.add?(r[:url]) }
                           .map do |r|
       {
         external_source: source,

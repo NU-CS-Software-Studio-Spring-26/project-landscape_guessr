@@ -161,6 +161,53 @@ module Mapillary
       end
     end
 
+    # Decode the `sequence` layer's LINESTRING geometry into [lat, lng]
+    # vertices. Mapillary exposes a `sequence` layer (drive paths) at low
+    # zooms where the per-image `image` layer doesn't exist (z≤12). It's a
+    # cheap COVERAGE MAP: a few z=8 sequence tiles reveal exactly which z=14
+    # tiles have imagery, so we can aim the (expensive) z=14 fetches at real
+    # coverage instead of blindly gridding a region that's mostly wilderness.
+    #
+    # MVT LINESTRING geometry (spec §4.3): a MoveTo(1) starts each part,
+    # followed by LineTo(2) for the rest; each carries zigzag-encoded
+    # (dx, dy) deltas applied to a running cursor.
+    def self.coverage_points(tile_bytes, z, x, y)
+      return [] if tile_bytes.nil? || tile_bytes.bytesize < EMPTY_TILE_BYTES
+
+      tile = VectorTile::Tile.decode(tile_bytes)
+      layer = tile.layers.find { |l| l.name == "sequence" }
+      return [] unless layer
+
+      extent = layer.extent
+      points = []
+      layer.features.each do |f|
+        next unless f.type == :LINESTRING
+        geom = f.geometry
+        i = 0
+        cx = 0
+        cy = 0
+        while i < geom.size
+          cmd_int = geom[i]
+          cmd_id  = cmd_int & 0x7
+          count   = cmd_int >> 3
+          i += 1
+          if cmd_id == 1 || cmd_id == 2 # MoveTo or LineTo
+            count.times do
+              break if i + 1 >= geom.size
+              cx += (geom[i] >> 1) ^ -(geom[i] & 1)
+              cy += (geom[i + 1] >> 1) ^ -(geom[i + 1] & 1)
+              i += 2
+              lat, lng = tile_to_latlng(z, x, y, cx, cy, extent)
+              points << [ lat, lng ]
+            end
+          else # ClosePath (no args) or unknown — stop this feature
+            break
+          end
+        end
+      end
+      points
+    end
+
     # MVT Value is a union — pick whichever field is populated. proto3-style
     # implicit presence means we can't distinguish "explicit false" from
     # "unset bool" cheaply, so bool comes LAST and we return nil if no

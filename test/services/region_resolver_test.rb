@@ -44,6 +44,20 @@ class RegionResolverTest < ActiveSupport::TestCase
     restore_geocoder
   end
 
+  test "radius transform attaches a circle polygon that excludes bbox corners" do
+    sample = { lat: 48.8584, lng: 2.2945, bbox: { min_lat: 48.85, max_lat: 48.87, min_lng: 2.28, max_lng: 2.31 }, display_name: "Eiffel Tower", class: "man_made", area_km2: 1.0, importance: 0.6 }
+    stub_geocoder_match("Eiffel Tower", sample)
+    r = RegionResolver.resolve(mode: "pois", pois: [ "Eiffel Tower" ], radius_meters: 2000)
+    assert_not_nil r.polygon, "radius mode must carry a circle polygon so the radius is enforced"
+    factory = RGeo::Geographic.spherical_factory(srid: 4326)
+    center = factory.point((r.bbox[:min_lng] + r.bbox[:max_lng]) / 2, (r.bbox[:min_lat] + r.bbox[:max_lat]) / 2)
+    corner = factory.point(r.bbox[:max_lng], r.bbox[:max_lat]) # ~1.4× radius out
+    assert r.polygon.contains?(center), "center must be inside the circle"
+    assert_not r.polygon.contains?(corner), "bbox corner (~2.8km) must be outside a 2km circle"
+  ensure
+    restore_geocoder
+  end
+
   test "radius transform rejects 0 or > 50000" do
     sample = { lat: 0.0, lng: 0.0, bbox: { min_lat: -0.01, max_lat: 0.01, min_lng: -0.01, max_lng: 0.01 }, display_name: "X", class: "place", area_km2: 0.01, importance: 0.5 }
     stub_geocoder_match("X", sample)

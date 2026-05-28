@@ -331,7 +331,13 @@ class WikidataImporter
     parent_name = rf[:parent_name].to_s.strip.presence
     return nil unless name && level
     candidates = Region.where(name: name, admin_level: level)
-    return candidates.first if parent_name.blank?
+    if parent_name.blank?
+      # No disambiguator given: prefer the most populous match so a bare
+      # "Paris"/"Cambridge" resolves to the well-known city instead of
+      # whichever row happened to be seeded first (which silently sent
+      # "churches in Paris" to Paris, Ontario — 0 results).
+      return candidates.order(Arel.sql("population DESC NULLS LAST")).first
+    end
     candidates.detect { |r| ancestor_named?(r, parent_name) }
   end
 
