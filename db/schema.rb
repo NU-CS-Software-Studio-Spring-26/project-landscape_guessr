@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_27_181429) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_27_190004) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -88,7 +88,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_27_181429) do
     t.bigint "challenger_id", null: false
     t.datetime "created_at", null: false
     t.bigint "image_set_id"
-    t.string "token", default: "", null: false
+    t.string "token", null: false
     t.datetime "updated_at", null: false
     t.index ["challenger_id"], name: "index_challenges_on_challenger_id"
     t.index ["image_set_id"], name: "index_challenges_on_image_set_id"
@@ -125,7 +125,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_27_181429) do
     t.datetime "created_at", null: false
     t.integer "duration_seconds"
     t.bigint "image_set_id"
-    t.float "score"
+    t.integer "score"
     t.string "status"
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
@@ -219,6 +219,68 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_27_181429) do
     t.index ["url"], name: "index_images_on_url", unique: true, where: "(url IS NOT NULL)"
   end
 
+  create_table "match_guesses", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.decimal "distance_km", precision: 12, scale: 3
+    t.decimal "latitude", precision: 10, scale: 6, null: false
+    t.decimal "longitude", precision: 10, scale: 6, null: false
+    t.bigint "match_player_id", null: false
+    t.bigint "match_round_id", null: false
+    t.integer "score"
+    t.datetime "submitted_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["match_player_id"], name: "index_match_guesses_on_match_player_id"
+    t.index ["match_round_id", "match_player_id"], name: "index_match_guesses_on_round_and_player", unique: true
+    t.index ["match_round_id"], name: "index_match_guesses_on_match_round_id"
+  end
+
+  create_table "match_players", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.datetime "forfeited_at"
+    t.datetime "joined_at", null: false
+    t.datetime "left_at"
+    t.bigint "match_id", null: false
+    t.integer "total_score", default: 0, null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["match_id", "user_id"], name: "index_match_players_on_match_id_and_user_id", unique: true
+    t.index ["match_id"], name: "index_match_players_on_match_id"
+    t.index ["user_id"], name: "index_match_players_on_user_id"
+  end
+
+  create_table "match_rounds", force: :cascade do |t|
+    t.decimal "answer_latitude", precision: 10, scale: 6, null: false
+    t.decimal "answer_longitude", precision: 10, scale: 6, null: false
+    t.datetime "created_at", null: false
+    t.datetime "deadline_at", null: false
+    t.datetime "ended_at"
+    t.bigint "image_id", null: false
+    t.integer "index", null: false
+    t.bigint "match_id", null: false
+    t.datetime "started_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["image_id"], name: "index_match_rounds_on_image_id"
+    t.index ["match_id", "index"], name: "index_match_rounds_on_match_id_and_index", unique: true
+    t.index ["match_id"], name: "index_match_rounds_on_match_id"
+  end
+
+  create_table "matches", force: :cascade do |t|
+    t.string "code", null: false
+    t.datetime "created_at", null: false
+    t.datetime "finished_at"
+    t.bigint "host_id", null: false
+    t.bigint "image_set_id", null: false
+    t.integer "rounds_total", default: 5, null: false
+    t.integer "seconds_per_round", default: 60, null: false
+    t.datetime "started_at"
+    t.string "status", default: "lobby", null: false
+    t.datetime "updated_at", null: false
+    t.index ["code"], name: "index_matches_on_code", unique: true
+    t.index ["host_id"], name: "index_matches_on_host_id"
+    t.index ["image_set_id"], name: "index_matches_on_image_set_id"
+    t.index ["status"], name: "index_matches_on_status"
+  end
+
   create_table "regions", force: :cascade do |t|
     t.string "admin_level", null: false
     t.jsonb "boundary"
@@ -303,6 +365,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_27_181429) do
   add_foreign_key "image_set_tags", "tags"
   add_foreign_key "image_sets", "image_sets", column: "parent_image_set_id"
   add_foreign_key "image_sets", "users"
+  add_foreign_key "match_guesses", "match_players"
+  add_foreign_key "match_guesses", "match_rounds"
+  add_foreign_key "match_players", "matches"
+  add_foreign_key "match_players", "users"
+  add_foreign_key "match_rounds", "images"
+  add_foreign_key "match_rounds", "matches"
+  add_foreign_key "matches", "image_sets"
+  add_foreign_key "matches", "users", column: "host_id"
   add_foreign_key "regions", "regions", column: "parent_id"
   add_foreign_key "saved_practice_images", "images"
   add_foreign_key "saved_practice_images", "users"
