@@ -34,6 +34,19 @@ class RegionResolver
   # point bbox).
   MIN_HULL_AREA_KM2 = 0.25  # 500m × 500m
 
+  # Builds a Result centred on a single coordinate. Used by Commons to
+  # anchor a `nearcoord:` filter on a region-less subject's own location
+  # (e.g. Mount Fuji's P625) so deepcategory pollution + far-flung
+  # mistagged files get pruned. The bbox is small on purpose — the Commons
+  # hex-lattice turns it into a single 30km nearcoord probe at the centre.
+  def self.around_point(lat:, lng:, radius_m: 500.0, label: nil)
+    Result.new(
+      bbox: bbox_around(lat, lng, radius_m),
+      polygon: nil, label: label, source: :point,
+      admin_level: nil, parent_name: nil, region_id: nil
+    )
+  end
+
   def self.resolve(descriptor)
     return nil if descriptor.blank?
     d = descriptor.transform_keys(&:to_sym) rescue descriptor

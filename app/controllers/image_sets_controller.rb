@@ -22,7 +22,9 @@ class ImageSetsController < ApplicationController
     else
       Tag.where(slug: @selected_tags).order(:name).to_a
     end
-    @sort = IMAGE_SET_INDEX_SORTS.include?(params[:sort]) ? params[:sort] : "name"
+    # Default to newest-first so freshly created (incl. AI) sets surface at
+    # the top without the user having to change the sort.
+    @sort = IMAGE_SET_INDEX_SORTS.include?(params[:sort]) ? params[:sort] : "created_at"
     @direction =
       if %w[asc desc].include?(params[:direction])
         params[:direction]
@@ -255,12 +257,21 @@ class ImageSetsController < ApplicationController
   # GET /image_sets/1/map
   def map
     items = @image_set.effective_items.joins(:image).includes(image: { photo_attachment: :blob })
+
+    # Mapillary images store url=NULL and resolve a signed URL lazily via the
+    # Graph API. Calling image_src per image here meant one synchronous Graph
+    # request for EVERY point — a 1,300-image set took minutes to render. The
+    # map only needs coordinates; the popup thumbnail is a nicety we drop for
+    # Mapillary (the "Details →" link still resolves the full image on demand).
+    skip_urls = @image_set.ai_image_source == "mapillary"
+
     @image_data = items.filter_map do |item|
       lat = item.latitude || item.image.latitude
       lng = item.longitude || item.image.longitude
       next unless lat && lng
       img = item.image
-      { id: img.id, lat: lat.to_f, lng: lng.to_f, title: item.title, url: view_context.image_src(img) }
+      { id: img.id, lat: lat.to_f, lng: lng.to_f, title: item.title,
+        url: skip_urls ? nil : view_context.image_src(img) }
     end
 
     respond_to do |format|
@@ -564,6 +575,7 @@ class ImageSetsController < ApplicationController
       state:    @image_set.import_state,
       progress: @image_set.import_progress.to_i,
       total:    @image_set.import_total.to_i,
+      source:   @image_set.ai_image_source.presence || "wikidata",
       error:    @image_set.import_error
     }
   end

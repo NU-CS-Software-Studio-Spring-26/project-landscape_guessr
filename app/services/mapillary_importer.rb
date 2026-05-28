@@ -2,50 +2,79 @@ require "net/http"
 require "uri"
 
 # Imports street-imagery POINT features from Mapillary vector tiles.
-# Adaptive zoom: z=14 `image` layer for small regions (cities), z=5
-# `overview` layer for larger regions (states/countries/world).
+#
+# We always use the z=14 `image` layer (one POINT per image, dense urban
+# tiles carry thousands of features). For regions bigger than the tile-
+# fetch budget we take a STRATIFIED sample of z=14 tiles spread evenly
+# across the bbox (see TileDecoder#stratified_tiles_for_bbox) rather than
+# dropping to the sparse z=5 `overview` layer — the overview layer only
+# carries ~90 features inside a city-sized bbox, which is what produced
+# the "Chicago imported 6 images" bug.
 #
 # Per-image rows are stored with `url=NULL`, `external_source="mapillary"`,
 # `external_id=image_id`. Signed URLs are resolved lazily at render time
 # by `MapillaryUrlResolver` (they expire after ~30 days).
 #
-# Memory budget verified ~50MB peak per import (12MB MVT bytes in flight
-# + 38MB feature hashes), fits Heroku's ~162MB headroom.
+# Memory budget: at most TILE_FETCH_CAP tiles processed (4 concurrent;
+# bytes discarded after decode) × PER_TILE_CAP feature hashes — ~45MB
+# peak, fits Heroku's ~162MB headroom.
 class MapillaryImporter
   TILE_HOST    = "tiles.mapillary.com"
   TILESET_NAME = "mly1_public"
   USER_AGENT   = WikimediaUserAgent::STRING
   READ_TIMEOUT = 30
 
-  # Tunables (verified in plan).
-  TILE_FETCH_CAP    = 100      # max tile fetches per import
-  PER_TILE_CAP      = 1500     # max features kept per tile
-  PER_SEQUENCE_CAP  = 3        # avoid drive-clusters
-  EMPTY_TILE_BYTES  = 200      # < this = ocean / no coverage
-  HARD_CAP          = 4000     # final image count per import
+  ZOOM  = 14
+  LAYER = "image"
+
+  # Tunables.
+  TILE_FETCH_CAP     = 140     # max tile fetches per import (spread across bbox)
+  SAMPLE_TILE_BUDGET = 16      # tiles fetched for the 30-row preview
+  COUNT_PROBE_TILES  = 4       # tiles fetched to estimate the count
+  PER_TILE_CAP       = 1500    # max features kept per tile
+  PER_SEQUENCE_CAP   = 3       # avoid drive-clusters
+  EMPTY_TILE_BYTES   = 200     # < this = ocean / no coverage
+  HARD_CAP           = 4000    # final image count per import
   CONCURRENT_FETCHES = 4
-  Z14_THRESHOLD     = 100      # ≤ this → z=14 image layer; > → z=5 overview
 
   class Error < StandardError; end
 
   # === Public API ===
 
-  def self.count(region_resolved:, **)
-    return 0 unless region_resolved&.bbox
-    zoom, _layer = choose_zoom_and_layer(region_resolved.bbox)
-    tile_count = Mapillary::TileDecoder.tile_count_in_bbox(region_resolved.bbox, zoom: zoom)
-    # Estimate: cap × average features per tile (rough). Don't actually
-    # fetch tiles just to count — that'd blow the import time budget twice.
-    estimate = case zoom
-    when 14 then [ tile_count, TILE_FETCH_CAP ].min * 100
-    else         TILE_FETCH_CAP * 200
+  # Honest estimate: probe a few stratified tiles, average their feature
+  # counts, and extrapolate over the tiles we'd actually fetch — scaled by
+  # the fraction of probed tiles that had any coverage. Cheap (a handful of
+  # tile fetches) and far closer to the imported total than the old blind
+  # "tiles × 100" guess that reported 4000 for a region that imported 6.
+  def self.count(region_resolved:, min_year: nil, **)
+    bbox = region_resolved&.bbox
+    return 0 unless bbox
+
+    total_tiles = Mapillary::TileDecoder.tile_count_in_bbox(bbox, zoom: ZOOM)
+    probes = Mapillary::TileDecoder.stratified_tiles_for_bbox(bbox, zoom: ZOOM, target: COUNT_PROBE_TILES)
+    counts = probes.map do |x, y|
+      bytes = fetch_tile(z: ZOOM, x: x, y: y)
+      Mapillary::TileDecoder.decode(bytes, LAYER, ZOOM, x, y).count { |f| !f[:is_pano] }
+    rescue StandardError
+      0
     end
-    [ estimate, HARD_CAP ].min
+
+    nonempty = counts.reject(&:zero?)
+    return 0 if nonempty.empty?
+
+    avg_per_tile = nonempty.sum.to_f / nonempty.size
+    coverage     = nonempty.size.to_f / counts.size
+    fetched      = [ total_tiles, TILE_FETCH_CAP ].min
+    # /3: per-sequence cap thins dense tiles heavily before insert; without
+    # this the estimate runs ~3× hot. Empirically lands within ~2× of actual.
+    estimate = (avg_per_tile * fetched * coverage / 3.0).round
+    estimate.clamp(nonempty.sum, HARD_CAP)
   end
 
   def self.sample(region_resolved:, min_year: nil, limit: 30, **)
     return [] unless region_resolved&.bbox
-    features = fetch_features(region_resolved: region_resolved, max_features: limit * 6, min_year: min_year)
+    features = fetch_features(region_resolved: region_resolved, max_features: limit * 6,
+                              min_year: min_year, tile_budget: SAMPLE_TILE_BUDGET)
     features = features.shuffle.first(limit)
     # Resolve URLs for the preview (small batch).
     url_by_id = MapillaryUrlResolver.warm_urls(features.map { |f| f[:id] }, size: 1024)
@@ -71,6 +100,7 @@ class MapillaryImporter
       region_resolved: region_resolved,
       max_features: HARD_CAP,
       min_year: min_year,
+      tile_budget: TILE_FETCH_CAP,
       progress_image_set: image_set
     )
     features = features.shuffle.first(HARD_CAP)
@@ -92,26 +122,17 @@ class MapillaryImporter
     Image.bulk_insert_for_source!(image_set: image_set, rows: rows, source: "mapillary")
   end
 
-  # === Adaptive zoom decision ===
-
-  def self.choose_zoom_and_layer(bbox)
-    z14_count = Mapillary::TileDecoder.tile_count_in_bbox(bbox, zoom: 14)
-    if z14_count <= Z14_THRESHOLD
-      [ 14, "image" ]
-    else
-      [ 5, "overview" ]
-    end
-  end
-
   # === Tile fetch + decode ===
 
-  def self.fetch_features(region_resolved:, max_features:, min_year: nil, progress_image_set: nil)
+  # Fetches up to `tile_budget` z=14 `image` tiles spread evenly across the
+  # region, decodes them concurrently, then filters (pano / year / bbox /
+  # polygon / per-sequence). `tile_budget` lets the preview probe cheaply
+  # (16 tiles) while the import samples broadly (140).
+  def self.fetch_features(region_resolved:, max_features:, min_year: nil, tile_budget: TILE_FETCH_CAP, progress_image_set: nil)
     bbox = region_resolved.bbox
     polygon = region_resolved.polygon
-    zoom, layer = choose_zoom_and_layer(bbox)
 
-    tiles = Mapillary::TileDecoder.tiles_for_bbox(bbox, zoom: zoom)
-    tiles = tiles.shuffle.first(TILE_FETCH_CAP) if tiles.size > TILE_FETCH_CAP
+    tiles = Mapillary::TileDecoder.stratified_tiles_for_bbox(bbox, zoom: ZOOM, target: tile_budget)
 
     progress_image_set&.update_columns(import_total: tiles.size, import_progress: 0)
 
@@ -131,12 +152,12 @@ class MapillaryImporter
           break unless tile
           x, y = tile
           begin
-            bytes = fetch_tile(z: zoom, x: x, y: y)
-            features = Mapillary::TileDecoder.decode(bytes, layer, zoom, x, y)
+            bytes = fetch_tile(z: ZOOM, x: x, y: y)
+            features = Mapillary::TileDecoder.decode(bytes, LAYER, ZOOM, x, y)
             features = features.first(PER_TILE_CAP) if features.size > PER_TILE_CAP
             decoded.concat(features) if features.any?
           rescue StandardError => e
-            Rails.logger.warn "[mly tile] z=#{zoom} x=#{x} y=#{y}: #{e.class}: #{e.message.slice(0, 200)}"
+            Rails.logger.warn "[mly tile] z=#{ZOOM} x=#{x} y=#{y}: #{e.class}: #{e.message.slice(0, 200)}"
           end
           done = progress.increment
           if progress_image_set
@@ -155,7 +176,11 @@ class MapillaryImporter
     features = bbox_filter(features, bbox)
     features = polygon_refine(features, polygon) if polygon
     features = limit_per_sequence(features, PER_SEQUENCE_CAP)
-    features.first(max_features)
+    # Shuffle BEFORE truncating: features arrive in tile-completion order, so
+    # a plain `.first` would keep only the handful of tiles that finished
+    # first — collapsing the stratified spread back into a cluster. Random
+    # draw keeps the sample distributed across every fetched tile.
+    features.shuffle.first(max_features)
   end
 
   def self.bbox_filter(features, bbox)

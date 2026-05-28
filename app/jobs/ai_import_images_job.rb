@@ -23,13 +23,14 @@ class AiImportImagesJob < ApplicationJob
     case image_set.ai_image_source
     when "commons"
       commons_category = CommonsCategoryResolver.resolve(
-        topic_qid: params["topic_qid"], combined_qid: params["combined_qid"]
+        topic_qid: params["topic_qid"], combined_qid: params["combined_qid"],
+        region_label: region_resolved&.label
       )
       CommonsImporter.import!(
         image_set:        image_set,
         commons_category: commons_category,
         intitle_fallback: params["commons_intitle_fallback"],
-        region_resolved:  region_resolved
+        region_resolved:  CommonsImporter.effective_region(region_resolved: region_resolved, topic_qid: params["topic_qid"])
       )
     when "mapillary"
       MapillaryImporter.import!(

@@ -58,6 +58,16 @@ export default class extends Controller {
     inserting:         "Importing images…",
   }
 
+  // The "fetching" phase means very different things per source — Wikidata
+  // fans out across categories, Commons across geographic probe areas,
+  // Mapillary across map tiles. Labelling everything "from Wikidata" was
+  // plain wrong for Commons/Mapillary sets.
+  static fetchingLabels = {
+    wikidata:  ["Fetching matching items from Wikidata", "categories"],
+    commons:   ["Searching Wikimedia Commons", "areas"],
+    mapillary: ["Fetching street-imagery tiles", "tiles"],
+  }
+
   #render(data) {
     const labels = this.constructor.stageLabels
     // fetching, looking_up_images, and inserting all advance per batch.
@@ -83,15 +93,18 @@ export default class extends Controller {
     }
   }
 
-  // fetching gets a special label because the X/Y meaning is "8 of 14
-  // categories done", not "8 of 14 images". Wording matters: "categories"
-  // makes clear that we're fanning out across the AI's per-type queries.
+  // fetching gets a special label because the X/Y meaning depends on the
+  // source: "8 of 14 categories" (Wikidata), "3 of 9 areas" (Commons),
+  // "40 of 140 tiles" (Mapillary) — never "images".
   #labelFor(data, labels) {
     if (data.state === "fetching") {
+      const source = data.source || "wikidata"
+      const [verb, unit] = this.constructor.fetchingLabels[source] ||
+                           this.constructor.fetchingLabels.wikidata
       if (data.total > 0) {
-        return `Fetching matching items from Wikidata (${data.progress} of ${data.total} categories done)…`
+        return `${verb} (${data.progress} of ${data.total} ${unit} done)…`
       }
-      return "Fetching matching items from Wikidata…"
+      return `${verb}…`
     }
     return labels[data.state] || data.state || ""
   }

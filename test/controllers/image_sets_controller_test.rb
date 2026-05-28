@@ -130,10 +130,10 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
     assert_select "a[href*='tags%5B%5D=Forest'][href*='tags%5B%5D=Alpine'][href*='tag_match=any'][href*='tag_case=sensitive'][href*='sort=created_at'][href*='direction=desc']", text: "Alpine"
   end
 
-  test "index falls back to default sort when invalid sort is given" do
+  test "index falls back to default sort (newest) when invalid sort is given" do
     get image_sets_path(sort: "hax")
     assert_response :success
-    assert_select "span[data-dropdown-target='label']", text: "Name (A–Z)"
+    assert_select "span[data-dropdown-target='label']", text: "Newest"
   end
 
   test "show is accessible for public set by any logged-in user" do

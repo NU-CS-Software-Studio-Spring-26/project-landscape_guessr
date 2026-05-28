@@ -6,10 +6,15 @@ require "json"
 # Wikimedia Commons category name suitable for `deepcategory:`. Uses
 # Wikidata P373 ("Commons category") as the canonical bridge.
 #
-# Candidate order:
-#   1. combined_qid's P373 (more specific, e.g. Q4348747 "Millennium Park,
+# Candidate order (first that EXISTS on Commons wins):
+#   1. combined_qid's P373 — most specific (e.g. Q1130516 "Millennium Park,
 #      Chicago" → "Millennium Park, Chicago")
-#   2. topic_qid's P373 (the AI's chosen topic, e.g. Q243 → "Eiffel Tower")
+#   2. "<topic category> in <region>" — the region-anchored category, which
+#      is what makes "buildings in Boston" work. deepcategory on the generic
+#      root P373 of "building" ("Buildings") can't expand its enormous tree
+#      and returns ~1 hit; "Buildings in Boston" expands fine (~11k hits).
+#   3. topic_qid's P373 — the bare subject category (e.g. "Mount Fuji"),
+#      used for region-less subject prompts and already-specific topics.
 #
 # Each candidate is verified to actually exist on Commons before being
 # returned — P373 occasionally points to renamed/merged categories.
@@ -19,13 +24,26 @@ class CommonsCategoryResolver
   EXISTENCE_CACHE_TTL = 7.days
 
   # Returns a category name (without the "Category:" prefix) or nil.
-  def self.resolve(topic_qid: nil, combined_qid: nil)
-    [ combined_qid, topic_qid ].compact.each do |qid|
-      cat = WikidataPropertyLookup.commons_category_for(qid)
-      next if cat.blank?
+  # `region_label` (e.g. "Boston") enables the region-anchored combined
+  # category that fixes generic-topic prompts.
+  def self.resolve(topic_qid: nil, combined_qid: nil, region_label: nil)
+    candidates(topic_qid: topic_qid, combined_qid: combined_qid, region_label: region_label).each do |cat|
       return cat if category_exists?(cat)
     end
     nil
+  end
+
+  # Ordered, de-duped list of candidate category names to probe.
+  def self.candidates(topic_qid:, combined_qid:, region_label:)
+    list = []
+    list << WikidataPropertyLookup.commons_category_for(combined_qid) if combined_qid.present?
+
+    topic_cat = topic_qid.present? ? WikidataPropertyLookup.commons_category_for(topic_qid) : nil
+    if topic_cat.present? && region_label.present?
+      list << "#{topic_cat} in #{region_label}"
+    end
+    list << topic_cat
+    list.compact.map(&:strip).reject(&:blank?).uniq
   end
 
   # action=query&titles=Category:<name> — pages with `missing` key don't

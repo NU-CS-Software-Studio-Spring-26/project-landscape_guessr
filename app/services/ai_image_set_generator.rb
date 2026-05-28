@@ -623,6 +623,23 @@ class AiImageSetGenerator
         directly links X to Y. For "all capitals of countries":
         `?country wdt:P36 ?item`, not `?item wdt:P31 wd:Q5119`.
 
+      - **Exclude nuisance subclasses with MINUS.** A broad
+        wdt:P31/wdt:P279* walk can drag in a high-volume subclass the user
+        doesn't mean, which then dominates the random sample. The canonical
+        case is "churches" (wd:Q16970): Wikidata models cemetery
+        tomb-chapels as "sepulchral chapel" (wd:Q1424583, a subclass of
+        church building) and individual "grave" (wd:Q173387) items, and in
+        cities like Paris or Rome these graves outnumber real churches ~3:1
+        — a plain Q16970 walk returns mostly items labelled "Grave of …".
+        Exclude them:
+          ?item wdt:P31/wdt:P279* wd:Q16970 ; wdt:P625 ?coord .
+          MINUS { ?item wdt:P31/wdt:P279* wd:Q1424583 }   # sepulchral chapels (graves)
+          MINUS { ?item wdt:P31 wd:Q173387 }              # graves
+        MINUS is allowed. Apply the same idea whenever a category has an
+        obvious funerary/edge subclass (tombs, mausoleums) you don't want;
+        note the exclusion in `explanation`. If a refinement turn says the
+        results are "graves" / "tombs" / wrong sub-type, ADD the MINUS.
+
       - **Sovereign filtering.** If "country" must mean an actual
         sovereign nation (not territory/region), search for the
         sovereign-state concept Q-ID and constrain with that.
@@ -850,35 +867,41 @@ class AiImageSetGenerator
       COMMONS SOURCE (image_source: "commons"):
 
       Use Wikimedia Commons CirrusSearch with a category bridge from
-      Wikidata's P373 property. The backend looks up the Commons
-      category for your topic Q-ID, then queries Commons with
-      deepcategory:"<cat>" + nearcoord:.
+      Wikidata's P373 property. The backend bridges your topic Q-ID to a
+      Commons category, then queries with deepcategory: + nearcoord:.
 
-      Provide ONE of:
-        topic_qid               — Q-ID for the subject. Backend looks up
-                                  its P373 (Commons category). Use for
-                                  most prompts: "Mount Fuji photos" →
-                                  topic_qid: <Mt Fuji Q-ID>.
-        combined_qid            — Optional Q-ID for a combined concept
-                                  ("Millennium Park, Chicago" Q1130516
-                                  has its own P373 → category). When
-                                  available, this gives a tighter
-                                  category than topic+region.
-        commons_intitle_fallback — When no Q-ID has a clean P373, use
-                                   an intitle: search. Free-text 1-4 words.
+      Provide:
+        topic_qid               — Q-ID for the SUBJECT (not the place).
+                                  Backend looks up its P373 Commons
+                                  category. "Mount Fuji photos" → Mt Fuji
+                                  Q-ID; "buildings in Boston" → building
+                                  Q-ID (Q41176).
+        region_*                — Mode A/B region when the prompt names a
+                                  place ("…in Boston", "…in Paris"). REQUIRED
+                                  for "<subject> in <place>" prompts.
+        combined_qid            — Optional Q-ID for an already-combined
+                                  concept ("Millennium Park, Chicago"
+                                  Q1130516 → its own P373 category). Rarely
+                                  needed now (see below).
+        commons_intitle_fallback — Only when no Q-ID has a clean P373:
+                                   an intitle: free-text search, 1-4 words.
+
+      What the backend does with these (you don't engineer around it):
+        * topic_qid + region → it builds the REGION-ANCHORED category
+          "<TopicCategory> in <Region>" (e.g. "Buildings in Boston") and
+          deepcategory-searches that + nearcoord of the region. This is
+          why you must give BOTH a generic subject AND the region: the
+          bare root category ("Buildings") is too huge for Commons to
+          expand and returns almost nothing on its own.
+        * topic_qid with NO region → it anchors nearcoord: on the
+          subject's OWN coordinates (the topic's P625), pruning pollution
+          and far-flung mistagged files. Use this for single-subject
+          prompts: "Mount Fuji photos" → topic_qid only.
 
       Search for the topic Q-ID via search_wikidata. NEVER pass a bare
-      place-name as the topic (e.g. don't submit topic_qid for "Boston"
-      with no specific subject — the category "People photographed in
-      Boston" would dominate the results).
-
-      Commons + region pairing:
-        * topic_qid alone (no region) — for single-subject prompts like
-          "Mount Fuji photos". The category is the geographic boundary.
-        * topic_qid + region (Mode A/B) — backend ANDs deepcategory: with
-          nearcoord: of the region. Use for "lots of buildings in Boston".
-        * combined_qid usually subsumes the region into the category
-          itself, so often no region is needed.
+      place-name as the topic (topic_qid for "Boston" with no subject would
+      surface "People photographed in Boston"). The subject is the noun
+      ("buildings", "churches", "street art"), the place goes in region_*.
 
       Don't set sparql_pattern for commons.
 

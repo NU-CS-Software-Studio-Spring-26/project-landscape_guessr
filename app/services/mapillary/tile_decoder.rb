@@ -47,14 +47,58 @@ module Mapillary
     end
 
     # All slippy tiles (x, y) covering a bbox at the given zoom.
+    #
+    # WARNING: enumerates every tile in the range — only safe for small
+    # regions. For anything country-scale+ at z=14 the range is millions
+    # of tiles and this OOMs. Use `stratified_tiles_for_bbox` for sampling.
     def self.tiles_for_bbox(bbox, zoom:)
-      x0, y0 = lonlat_to_tile(bbox[:min_lng], bbox[:max_lat], zoom)  # NW
-      x1, y1 = lonlat_to_tile(bbox[:max_lng], bbox[:min_lat], zoom)  # SE
-      x_lo, x_hi = [ x0, x1 ].minmax
-      y_lo, y_hi = [ y0, y1 ].minmax
+      x_lo, x_hi, y_lo, y_hi = tile_range(bbox, zoom)
       tiles = []
       (x_lo..x_hi).each { |x| (y_lo..y_hi).each { |y| tiles << [ x, y ] } }
       tiles
+    end
+
+    # The (x_lo, x_hi, y_lo, y_hi) tile bounds of a bbox at a zoom — four
+    # integers, no allocation per tile, so it's safe at any region size.
+    def self.tile_range(bbox, zoom)
+      x0, y0 = lonlat_to_tile(bbox[:min_lng], bbox[:max_lat], zoom)  # NW
+      x1, y1 = lonlat_to_tile(bbox[:max_lng], bbox[:min_lat], zoom)  # SE
+      [ *[ x0, x1 ].minmax, *[ y0, y1 ].minmax ]
+    end
+
+    # Returns up to `target` tiles spread EVENLY across the bbox's tile
+    # range, WITHOUT enumerating every tile (so it works for a single
+    # neighborhood or the whole world). Lays a coarse grid sized to ~target
+    # cells over the range and takes one tile per cell (cell centre).
+    #
+    # This is what fixes the "Chicago imported 6 images" bug: instead of
+    # dropping to the sparse z=5 overview layer for medium/large regions,
+    # we keep the dense z=14 `image` layer and just sample a representative
+    # spread of its tiles. Each sampled tile is a real, densely-populated
+    # street-level location; spreading them across the range gives coverage
+    # without clustering.
+    def self.stratified_tiles_for_bbox(bbox, zoom:, target:)
+      x_lo, x_hi, y_lo, y_hi = tile_range(bbox, zoom)
+      nx = x_hi - x_lo + 1
+      ny = y_hi - y_lo + 1
+      total = nx * ny
+      return tiles_for_bbox(bbox, zoom: zoom) if total <= target
+
+      # Grid dimensions proportional to the range's aspect ratio, product ≈ target.
+      aspect = nx.to_f / ny
+      gx = [ nx, [ 1, Math.sqrt(target * aspect).round ].max ].min
+      gy = [ ny, [ 1, (target.to_f / gx).ceil ].max ].min
+
+      tiles = []
+      gy.times do |j|
+        gx.times do |i|
+          # Cell centre, clamped into range.
+          x = x_lo + ((i + 0.5) * nx / gx).floor
+          y = y_lo + ((j + 0.5) * ny / gy).floor
+          tiles << [ [ x, x_hi ].min, [ y, y_hi ].min ]
+        end
+      end
+      tiles.uniq
     end
 
     # Quick count for the adaptive zoom decision — no allocations.

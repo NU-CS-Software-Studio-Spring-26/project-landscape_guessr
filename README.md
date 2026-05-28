@@ -123,8 +123,8 @@ Signed-in users can build an image set from a natural-language prompt ("volcanoe
 **Sources** (`image_sets.ai_image_source`):
 
 - `wikidata` — default for topic+region prompts (`churches in Paris`, `lakes in Massachusetts`). One canonical Commons photo per Wikidata item, via `WikidataImporter`.
-- `commons` — high-volume / single-subject prompts (`Mount Fuji photos`, `many photos of buildings in Boston`). Topic Q-ID → P373 → Commons category, then CirrusSearch `deepcategory:` + `nearcoord:` via `CommonsImporter`.
-- `mapillary` — street-level imagery (`streets in Chicago`, `driving through Sweden`). Vector-tile sampling (adaptive z=14 for small regions, z=5 for large) via `MapillaryImporter`. Requires `MAPILLARY_TOKEN` in env. Panoramas are excluded.
+- `commons` — high-volume / single-subject prompts (`Mount Fuji photos`, `many photos of buildings in Boston`). Topic Q-ID → P373 → Commons category, then CirrusSearch `deepcategory:` + `nearcoord:` via `CommonsImporter`. For topic+region it builds the region-anchored category (`Buildings in Boston`); region-less subjects are anchored on the topic's own P625 coordinate.
+- `mapillary` — street-level imagery (`streets in Chicago`, `driving through Sweden`). Stratified z=14 vector-tile sampling (a grid of tiles spread evenly across the region's bbox) via `MapillaryImporter`. Requires `MAPILLARY_TOKEN` in env. Panoramas are excluded.
 
 **Sub-region modes** (consumed by `RegionResolver`):
 

@@ -195,14 +195,14 @@ class AiGenerationPipeline
     n =
       case source
       when "commons"
-        commons_category = resolve_commons_category(ai_result)
+        commons_category = resolve_commons_category(ai_result, region_resolved)
         if commons_category.blank? && ai_result[:commons_intitle_fallback].blank?
           nil
         else
           CommonsImporter.count(
             commons_category: commons_category,
             intitle_fallback: ai_result[:commons_intitle_fallback],
-            region_resolved:  region_resolved,
+            region_resolved:  CommonsImporter.effective_region(region_resolved: region_resolved, topic_qid: ai_result[:topic_qid]),
             on_progress: lambda do |done, total, sum|
               @generation.update_columns(
                 progress_message: "Counted #{done} of #{total} probe #{'point'.pluralize(total)} — " \
@@ -236,11 +236,11 @@ class AiGenerationPipeline
     rows =
       case source
       when "commons"
-        commons_category = resolve_commons_category(ai_result)
+        commons_category = resolve_commons_category(ai_result, region_resolved)
         CommonsImporter.sample(
           commons_category: commons_category,
           intitle_fallback: ai_result[:commons_intitle_fallback],
-          region_resolved:  region_resolved,
+          region_resolved:  CommonsImporter.effective_region(region_resolved: region_resolved, topic_qid: ai_result[:topic_qid]),
           limit: 30
         )
       when "mapillary"
@@ -263,12 +263,15 @@ class AiGenerationPipeline
     []
   end
 
-  # P373 lookup for the AI-supplied topic/combined Q-IDs. Returns nil if
-  # neither resolves to an existing Commons category.
-  def resolve_commons_category(ai_result)
+  # P373 lookup for the AI-supplied topic/combined Q-IDs. Passes the
+  # resolved region's label so the resolver can prefer the region-anchored
+  # combined category ("Buildings in Boston") over the un-expandable
+  # generic root ("Buildings"). Returns nil if nothing resolves.
+  def resolve_commons_category(ai_result, region_resolved = nil)
     CommonsCategoryResolver.resolve(
       topic_qid:    ai_result[:topic_qid],
-      combined_qid: ai_result[:combined_qid]
+      combined_qid: ai_result[:combined_qid],
+      region_label: region_resolved&.label
     )
   end
 

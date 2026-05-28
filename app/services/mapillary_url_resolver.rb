@@ -27,26 +27,36 @@ class MapillaryUrlResolver
     end
   end
 
-  # Populates the cache for many image IDs at once. Used by the controller
-  # to pre-resolve before rendering a results page with 5 round images.
-  # Returns {image_id => url} only for newly resolved IDs (cache hits aren't returned).
+  # Resolves many image IDs at once and returns the FULL {image_id => url}
+  # map for every requested id — cache hits included. Callers (the preview
+  # sampler, the gallery) read URLs straight off the return value, so
+  # returning only freshly-fetched ids meant a second call for the same
+  # images (all now cached) came back empty and rendered blank thumbnails
+  # with dead `href=""` links. Read-through is the correct contract.
   def self.warm_urls(image_ids, size: DEFAULT_SIZE)
     ids = Array(image_ids).map(&:to_s).reject(&:blank?).uniq
     return {} if ids.empty?
 
-    to_fetch = ids.reject { |id| Rails.cache.exist?(cache_key(id, size)) }
-    return {} if to_fetch.empty?
+    result = {}
+    to_fetch = []
+    ids.each do |id|
+      cached = Rails.cache.read(cache_key(id, size))
+      if cached.nil? && !Rails.cache.exist?(cache_key(id, size))
+        to_fetch << id
+      else
+        result[id] = cached
+      end
+    end
 
-    fresh = {}
     to_fetch.each_slice(BATCH_SIZE) do |batch|
       batch_result = fetch_batch(batch, size)
       batch.each do |id|
         url = batch_result[id]
         Rails.cache.write(cache_key(id, size), url, expires_in: CACHE_TTL)
-        fresh[id] = url if url
+        result[id] = url
       end
     end
-    fresh
+    result.compact
   end
 
   def self.cache_key(image_id, size)

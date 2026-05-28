@@ -82,6 +82,23 @@ class CommonsImporter
     Image.bulk_insert_for_source!(image_set: image_set, rows: rows, source: "commons")
   end
 
+  # === Effective region ===
+
+  # The region whose `nearcoord:` we anchor on. If the AI named a region,
+  # use it. Otherwise, for a region-less subject prompt ("Mount Fuji
+  # photos"), anchor on the subject's OWN coordinates so deepcategory
+  # pollution and ungeotagged/mistagged files (a "Mount Fuji" photo
+  # geotagged in Hong Kong) get pruned. Returns nil only when there's no
+  # region AND the topic has no coordinate — then the query runs
+  # category-only (rare; e.g. an intitle fallback with no topic).
+  def self.effective_region(region_resolved:, topic_qid: nil)
+    return region_resolved if region_resolved
+    return nil if topic_qid.blank?
+    coord = WikidataPropertyLookup.coordinate_for(topic_qid)
+    return nil unless coord
+    RegionResolver.around_point(lat: coord[:lat], lng: coord[:lng], label: nil)
+  end
+
   # === Probe + query plumbing ===
 
   def self.probes_for(region_resolved)
