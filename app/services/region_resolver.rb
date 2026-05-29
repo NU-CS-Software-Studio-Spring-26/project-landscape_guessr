@@ -88,7 +88,12 @@ class RegionResolver
     region = WikidataImporter.resolve_region_filter(
       name: d[:name], admin_level: d[:admin_level], parent_name: d[:parent_name]
     )
-    return nil unless region
+    # Many real places aren't in our seeded region table (Reykjavik), or are
+    # filed under a parent chain that doesn't match what the AI emitted
+    # (Berlin lives under "State of Berlin", Kyoto under "Kyōto Shi"). Rather
+    # than fail "<topic> in <city>" for any non-seeded place, geocode the name
+    # like a Mode B POI so it still resolves to a real bbox.
+    return resolve_named_via_geocode(d) unless region
 
     # Force boundary upgrade for point-bbox seeded rows (cities) — same fix
     # as wikidata Paris path. Without this, named cities have point bboxes.
@@ -113,6 +118,15 @@ class RegionResolver
       parent_name: d[:parent_name],
       region_id: region.id
     )
+  end
+
+  # Fallback for a Mode A name we couldn't resolve in-DB: geocode "<name>,
+  # <parent>" (the parent disambiguates "Berlin, Germany" from "Berlin,
+  # Maryland") through the same Mode B POI path, yielding a bbox.
+  def self.resolve_named_via_geocode(d)
+    query = [ d[:name], d[:parent_name] ].compact.map(&:to_s).reject(&:blank?).join(", ")
+    return nil if query.blank?
+    resolve_pois({ pois: [ query ], label: d[:name].to_s.presence || query })
   end
 
   def self.resolve_pois(d)

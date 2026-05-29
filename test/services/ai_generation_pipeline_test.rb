@@ -102,12 +102,19 @@ class AiGenerationPipelineTest < ActiveSupport::TestCase
       conversation_json: [ { role: "user", text: "lakes in bayern" } ].to_json
     )
     ai_with_bad_region = AI_RESULT.merge(
-      region: { mode: "named", name: "Bayern", parent_name: "Germany", admin_level: "admin1" }
+      region: { mode: "named", name: "Nowhere_Xyzzy", parent_name: "Nowhere", admin_level: "admin1" }
     )
     count_called = false
+    # Not in the DB AND geocoding finds nothing → truly unresolvable. Stub the
+    # geocoder so the Mode-A→geocode fallback returns empty without a real
+    # Nominatim call.
     with_stubbed_generator(returns: ai_with_bad_region) do
-      stub_class_method(WikidataImporter, :count, ->(*_a, **_k) { count_called = true; 0 }) do
-        AiGenerationPipeline.new(generation: gen).run
+      stub_class_method(GeocoderService, :geocode_many, ->(**_k) { {} }) do
+        stub_class_method(GeocoderService, :best_match, ->(*_a) { nil }) do
+          stub_class_method(WikidataImporter, :count, ->(*_a, **_k) { count_called = true; 0 }) do
+            AiGenerationPipeline.new(generation: gen).run
+          end
+        end
       end
     end
     refute count_called, "count should not run when region is unresolvable"

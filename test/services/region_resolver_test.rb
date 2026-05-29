@@ -11,9 +11,10 @@ class RegionResolverTest < ActiveSupport::TestCase
   end
 
   def restore_geocoder
-    %i[best_match geocode_many].each do |m|
-      GeocoderService.singleton_class.remove_method(m) if GeocoderService.singleton_class.method_defined?(m)
-    end
+    # Reload the service to restore the REAL class methods. (remove_method
+    # alone would leave them undefined — the stub overwrote the originals — so
+    # any later test that reaches real geocoding would NoMethodError.)
+    load Rails.root.join("app/services/geocoder_service.rb").to_s
   end
 
   test "returns nil for blank descriptor" do
@@ -85,11 +86,14 @@ class RegionResolverTest < ActiveSupport::TestCase
     # lookup without a fixture, so just assert that the inference happens —
     # the failure mode would be "returns nil because mode is blank".
     desc = { name: "Nonexistent_Test_Region", parent_name: "X", admin_level: "city" }
-    # Real Region.find_by returns nil here → resolve_named returns nil → final nil.
-    # The test passes either way (both paths hit nil), but explicitly checks
-    # that we don't ArgumentError on the legacy hash shape.
+    # Not in the DB → resolve_named falls back to geocoding; with the geocoder
+    # stubbed to find nothing, that returns nil. The test checks we infer
+    # mode="named" from the legacy shape and don't ArgumentError on it.
+    stub_geocoder_match("__no_match__", nil)
     assert_nothing_raised do
-      RegionResolver.resolve(desc)
+      assert_nil RegionResolver.resolve(desc)
     end
+  ensure
+    restore_geocoder
   end
 end
