@@ -198,6 +198,31 @@ class AiGenerationPipelineTest < ActiveSupport::TestCase
     assert_nil gen.phase
   end
 
+  test "antimeridian region (wrapped ~360° bbox) fails with a clear message; never counts" do
+    gen = AiGeneration.create!(
+      user: @user, status: "pending", user_message: "streets in new zealand",
+      conversation_json: [ { role: "user", text: "streets in new zealand" } ].to_json
+    )
+    ai = AI_RESULT.merge(image_source: "mapillary", sparql_pattern: "",
+                         region: { mode: "named", name: "New Zealand", admin_level: "country" })
+    wrapped = RegionResolver::Result.new(
+      bbox: { min_lat: -47.0, max_lat: -34.0, min_lng: -179.0, max_lng: 179.0 },
+      polygon: nil, label: "New Zealand", source: :named, admin_level: "country", parent_name: nil, region_id: nil
+    )
+    count_called = false
+    with_stubbed_generator(returns: ai) do
+      stub_class_method(RegionResolver, :resolve, wrapped) do
+        stub_class_method(MapillaryImporter, :count, ->(*_a, **_k) { count_called = true; 0 }) do
+          AiGenerationPipeline.new(generation: gen).run
+        end
+      end
+    end
+    refute count_called, "must not count a dateline-wrapped region"
+    gen.reload
+    assert_equal "failed", gen.status
+    assert_match(/180|meridian|sub-region/i, gen.error.to_s)
+  end
+
   private
 
   # Variant of with_stubbed_generator that also counts invocations.

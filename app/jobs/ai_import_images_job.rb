@@ -20,12 +20,24 @@ class AiImportImagesJob < ApplicationJob
     region_resolved = image_set.ai_region_filter ? RegionResolver.resolve(image_set.ai_region_filter) : nil
     params = image_set.ai_source_params || {}
 
+    # The proposal phase resolved the region fine, but the job re-resolves here
+    # (minutes later, fresh process). A transient Nominatim/WDQS hiccup that now
+    # returns nil would make the importers silently no-op (`return unless
+    # region_resolved&.bbox`) and we'd mark the set "completed" with ZERO images
+    # and no error. Fail loudly instead — the user gets the Restart button.
+    if image_set.ai_region_filter.present? && region_resolved.nil?
+      raise "Couldn't resolve this set's region right now (the geocoding service may be briefly unavailable). Use Restart to try again."
+    end
+
     case image_set.ai_image_source
     when "commons"
       commons_category = CommonsCategoryResolver.resolve(
         topic_qid: params["topic_qid"], combined_qid: params["combined_qid"],
         region_label: region_resolved&.label
       )
+      if commons_category.blank? && params["commons_intitle_fallback"].blank?
+        raise "Couldn't resolve a Commons category for this set right now. Use Restart to try again."
+      end
       CommonsImporter.import!(
         image_set:        image_set,
         commons_category: commons_category,
@@ -51,6 +63,17 @@ class AiImportImagesJob < ApplicationJob
     # possible if a user filters one), refresh them so they reflect the
     # new images.
     RematerializeFilteredSetsJob.perform_later(image_set.id) if image_set.filtered_sets.exists?
+
+    # Never report a silent "completed" empty set. A genuine 0 (sparse coverage,
+    # a category with nothing geotagged in-region) is surfaced as a clear
+    # message + Restart button rather than an empty gallery with no explanation.
+    if image_set.images.count.zero?
+      image_set.update_columns(
+        import_state: "failed",
+        import_error: "No images found for this query. The area may have no coverage for this source — try a broader region or a different prompt."
+      )
+      return
+    end
 
     image_set.update_columns(import_state: "completed")
   rescue StandardError => e

@@ -473,6 +473,14 @@ class ImageSetsController < ApplicationController
       redirect_to ai_new_image_sets_path, alert: "No AI proposal to import." and return
     end
 
+    # Single-use: ai_create enqueues the expensive WDQS/Commons/Mapillary import
+    # and has no rate limit of its own (only ai_generate does). Without this, the
+    # same completed generation_id could be POSTed repeatedly to trigger unbounded
+    # imports. One import per proposal bounds it to the 20/day generation cap.
+    if gen.imported_at.present?
+      redirect_to ai_new_image_sets_path, alert: "This proposal was already imported. Generate a new one to import again." and return
+    end
+
     result = gen.result
     source = (result[:image_source] || "wikidata").to_s
 
@@ -505,6 +513,7 @@ class ImageSetsController < ApplicationController
     )
 
     if image_set.save
+      gen.update_columns(imported_at: Time.current)
       AiImportImagesJob.perform_later(image_set.id)
       redirect_to image_set, notice: "Set created — importing images in the background."
     else

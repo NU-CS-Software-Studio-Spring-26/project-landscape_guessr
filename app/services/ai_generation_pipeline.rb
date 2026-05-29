@@ -48,7 +48,7 @@ class AiGenerationPipeline
     )
 
     if ai_result[:cannot_answer]
-      @generation.update!(status: "completed", phase: nil, progress_message: nil)
+      complete!
       return
     end
 
@@ -66,6 +66,23 @@ class AiGenerationPipeline
         phase:            nil,
         progress_message: nil,
         error:            "I couldn't resolve the region '#{label}'. Try a canonical English name, more specific POI names, or use the filter-by-area feature after importing a broader region."
+      )
+      return
+    end
+
+    # Antimeridian guard. A region whose polygon straddles the 180° meridian
+    # (Russia, New Zealand, Fiji, Kiribati, Chukotka) resolves to a ~360°-wide
+    # bbox spanning the whole planet, which corrupts the tile/probe math for
+    # every source (the import then returns almost nothing). Rather than ship a
+    # risky dateline-aware tiling refactor, tell the user clearly and let them
+    # pick a sub-region. (`:global` mode is the legitimate full-world bbox.)
+    if region_resolved && region_resolved.source != :global &&
+       (region_resolved.bbox[:max_lng] - region_resolved.bbox[:min_lng]) > 180.0
+      @generation.update!(
+        status:           "failed",
+        phase:            nil,
+        progress_message: nil,
+        error:            "This region crosses the 180° meridian (e.g. Russia, New Zealand, Fiji), which isn't fully supported yet — results would be unreliable. Try a more specific city or sub-region within it."
       )
       return
     end
@@ -120,11 +137,7 @@ class AiGenerationPipeline
     preview = safe_sample(ai_result, region_resolved: region_resolved, source: source)
     bail_if_canceled!
 
-    @generation.update!(
-      status:       "completed",
-      phase:        nil,
-      preview_json: preview.to_json
-    )
+    complete!(preview_json: preview.to_json)
   rescue Canceled
     # User-initiated cancel hit a checkpoint. Leave status as "canceled"
     # (set by the cancel endpoint); just clear the per-phase noise.
@@ -132,6 +145,19 @@ class AiGenerationPipeline
   end
 
   private
+
+  # Mark the generation completed ATOMICALLY — only if it's still "running".
+  # A cancel that lands in the tiny window between the last `bail_if_canceled!`
+  # and this write would otherwise be clobbered by a plain `update!(status:
+  # "completed")` (which persists the stale in-memory "running"). The
+  # conditional update_all touches 0 rows if a cancel won the race → we raise
+  # Canceled and the rescue leaves status="canceled" intact.
+  def complete!(**attrs)
+    n = AiGeneration.where(id: @generation.id, status: "running").update_all(
+      { status: "completed", phase: nil, progress_message: nil, updated_at: Time.current }.merge(attrs)
+    )
+    raise Canceled if n.zero?
+  end
 
   # Re-reads status from DB; raises Canceled if the cancel endpoint
   # has flipped the row to "canceled". The rescue Canceled at the

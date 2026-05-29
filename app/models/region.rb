@@ -208,28 +208,35 @@ class Region < ApplicationRecord
     polys = Array(features).select { |f| %w[Polygon MultiPolygon].include?(f.dig("geometry", "type")) }
     return nil if polys.empty?
 
+    point = nil
     if anchor
       factory = RGeo::Geographic.spherical_factory(srid: 4326)
       point = factory.point(anchor[1], anchor[0])
-      containing = polys.select do |f|
-        geom = RGeo::GeoJSON.decode(f["geometry"].to_json) rescue nil
-        geom && (geom.contains?(point) rescue false)
-      end
-      return (containing.presence || polys).min_by { |f| boundary_candidate_rank(f) }["geometry"]
     end
-
-    polys.first["geometry"]
+    polys.min_by { |f| boundary_candidate_rank(f, point) }["geometry"]
   end
 
-  def self.boundary_candidate_rank(feature)
+  # Rank candidates: prefer a LOCAL admin type (city/town/municipality) over a
+  # same-named state/region/country FIRST. This is what makes "São Paulo" the
+  # city (a `municipality` polygon) beat the State of São Paulo even though the
+  # stored anchor centroid — itself derived from a previously-wrong state bbox —
+  # falls only inside the state (a hard "must contain the anchor" filter
+  # excluded the city and picked the state, a circular failure). Containment is
+  # now a SOFT tiebreak after tier, then smaller polygon wins.
+  def self.boundary_candidate_rank(feature, point = nil)
     at = feature.dig("properties", "addresstype").to_s
     tier = if CITY_ADDRESSTYPES.include?(at) then 0
     elsif BROAD_ADDRESSTYPES.include?(at) then 2
     else 1
     end
+    contains = 0
+    if point
+      geom = RGeo::GeoJSON.decode(feature["geometry"].to_json) rescue nil
+      contains = (geom && (geom.contains?(point) rescue false)) ? 0 : 1
+    end
     bbox = compute_bbox(feature["geometry"])
     area = bbox ? (bbox[:max_lat] - bbox[:min_lat]) * (bbox[:max_lng] - bbox[:min_lng]) : Float::INFINITY
-    [ tier, area ]
+    [ tier, contains, area ]
   end
 
   # Reduce a city MultiPolygon to its central metropolis: keep the polygon that

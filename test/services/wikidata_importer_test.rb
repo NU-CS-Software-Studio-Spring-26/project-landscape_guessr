@@ -1,6 +1,31 @@
 require "test_helper"
 
 class WikidataImporterTest < ActiveSupport::TestCase
+  test "build_count_sparql caps the scan with a LIMIT subquery (so a 232k P279* count can't time out)" do
+    sparql = WikidataImporter.build_count_sparql("?item wdt:P31/wdt:P279* wd:Q23413 ; wdt:P625 ?coord .")
+    assert_includes sparql, "SELECT (COUNT(*) AS ?c)"
+    assert_includes sparql, "SELECT * WHERE"
+    assert_includes sparql, "LIMIT #{WikidataImporter::HARD_CAP}", "must bound the inner scan at the import ceiling"
+  end
+
+  test "with_region_bbox skips the SERVICE box for a global region (no spatial selectivity = timeout)" do
+    pattern = "?item wdt:P31/wdt:P279* wd:Q39715 ; wdt:P625 ?coord ."
+    global = RegionResolver.world_result
+    out = WikidataImporter.with_region_bbox(pattern, global)
+    refute_includes out, "wikibase:box", "a whole-globe box just forces a full scan — skip it"
+    assert_equal pattern, out
+  end
+
+  test "with_region_bbox DOES wrap a normal bounded region in a SERVICE box" do
+    region = RegionResolver::Result.new(
+      bbox: { min_lat: 47.0, max_lat: 55.0, min_lng: 6.0, max_lng: 15.0 },
+      polygon: nil, label: "Germany", source: :named, admin_level: "country", parent_name: "Europe", region_id: nil
+    )
+    out = WikidataImporter.with_region_bbox("?item wdt:P31 wd:Q23413 ; wdt:P625 ?coord .", region)
+    assert_includes out, "SERVICE wikibase:box"
+    assert_includes out, "wikibase:cornerSouthWest"
+  end
+
   test "build_random_sparql emits SHA512+RAND ORDER BY shape with nonce + label outside" do
     sparql = WikidataImporter.build_random_sparql(pattern: "?item wdt:P31 wd:Q8072 .", limit: 100)
     # Per-call nonce: WDQS caches by query text. Without this, RAND()

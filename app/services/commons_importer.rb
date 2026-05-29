@@ -29,9 +29,11 @@ class CommonsImporter
   MAX_PROBES = 200             # hex-lattice cap (a 30km circle can't tile a continent)
   # A big region's hex lattice can be 200 probes; each probe is a separate
   # CirrusSearch query (deepcategory is 2-5s). Querying all 200 blows the
-  # pipeline's time budget, so count SAMPLES probes and extrapolates, and the
-  # preview/import walk a bounded, evenly-strided subset of the lattice.
-  COUNT_PROBE_SAMPLE  = 8
+  # pipeline's time budget, so the preview/import walk a bounded, evenly-strided
+  # subset of the lattice, and COUNT estimates the import by counting that SAME
+  # subset (IMPORT_PROBE_CAP probes) concurrently — never a uniform 8-probe
+  # extrapolation, which missed the city clusters and reported 0 for countries.
+  COUNT_CONCURRENCY   = 8
   SAMPLE_PROBE_CAP    = 12
   IMPORT_PROBE_CAP    = 40
   HTTP_MAX_ATTEMPTS   = 3      # retry transient 5xx / timeouts (e.g. deepcategory 504)
@@ -56,22 +58,61 @@ class CommonsImporter
   def self.count(commons_category:, intitle_fallback: nil, region_resolved: nil, on_progress: nil)
     return 0 if commons_category.blank? && intitle_fallback.blank?
 
-    probes = probes_for(region_resolved)
-    # For a big region the lattice can be 200 probes — querying every one (each
-    # a 2-5s deepcategory count) blows the time budget. Sample an evenly-spread
-    # subset and extrapolate by the sampled fraction.
-    sample = sample_probes(probes, COUNT_PROBE_SAMPLE)
-    sum = 0
-    sample.each_with_index do |probe, idx|
-      begin
-        sum += count_one_probe(commons_category: commons_category, intitle_fallback: intitle_fallback, probe: probe)
-      rescue Error => e
-        Rails.logger.warn "[commons count] probe #{idx} failed: #{e.message.slice(0, 120)}"
+    # Estimate the import yield by counting the SAME probes the import will
+    # fetch (sample_probes(.., IMPORT_PROBE_CAP)), concurrently. The old code
+    # counted 8 evenly-strided probes and ×(200/8) extrapolated — but geotagged
+    # photos cluster in cities, so a uniform stride missed them and reported
+    # wildly-low or 0 counts for countries ("churches in France" → 0 despite
+    # Paris alone having 1292). Clamp to HARD_CAP since that's the import ceiling.
+    probes = sample_probes(probes_for(region_resolved), IMPORT_PROBE_CAP)
+    # A city / region-less subject is a single probe (possibly nil = no
+    # nearcoord) — count it directly (concurrency is pointless and a nil probe
+    # can't be enqueued unambiguously).
+    if probes.size <= 1
+      n = begin
+        count_one_probe(commons_category: commons_category, intitle_fallback: intitle_fallback, probe: probes.first)
+      rescue Error
+        0
       end
-      scaled = (sum.to_f / (idx + 1) * sample.size * (probes.size.to_f / sample.size)).round
-      on_progress&.call(idx + 1, sample.size, scaled)
+      on_progress&.call(1, 1, [ n, HARD_CAP ].min)
+      return [ n, HARD_CAP ].min
     end
-    probes.size <= sample.size ? sum : (sum.to_f / sample.size * probes.size).round
+
+    total = Concurrent::AtomicFixnum.new(0)
+    done  = Concurrent::AtomicFixnum.new(0)
+    each_probe_concurrent(probes) do |probe|
+      n = begin
+        count_one_probe(commons_category: commons_category, intitle_fallback: intitle_fallback, probe: probe)
+      rescue Error => e
+        Rails.logger.warn "[commons count] probe failed: #{e.message.slice(0, 120)}"
+        0
+      end
+      total.increment(n)
+      d = done.increment
+      on_progress&.call(d, probes.size, [ total.value, HARD_CAP ].min)
+    end
+    [ total.value, HARD_CAP ].min
+  end
+
+  # Run a totalhits count for each probe concurrently (deepcategory probes are
+  # 1-5s of network wait each; a country's 40 probes sequentially would blow the
+  # proposal's time budget). Shared thread-pool; per-probe errors handled by the
+  # caller's begin/rescue.
+  def self.each_probe_concurrent(probes)
+    return if probes.empty?
+    queue = Queue.new
+    probes.each { |p| queue << p }
+    pool = [ probes.size, COUNT_CONCURRENCY ].min
+    threads = Array.new(pool) do
+      Thread.new do
+        loop do
+          probe = queue.pop(true) rescue nil
+          break unless probe
+          yield probe
+        end
+      end
+    end
+    threads.each(&:join)
   end
 
   def self.sample(commons_category:, intitle_fallback: nil, region_resolved: nil, limit: 30, on_progress: nil)
@@ -132,7 +173,17 @@ class CommonsImporter
 
   def self.probes_for(region_resolved)
     return [ nil ] if region_resolved.nil?
-    Geo::HexLattice.probes_for_bbox(region_resolved.bbox, radius_km: PROBE_RADIUS_KM, max_probes: 200)
+    probes = Geo::HexLattice.probes_for_bbox(region_resolved.bbox, radius_km: PROBE_RADIUS_KM, max_probes: 200)
+    # Keep only probes whose centre is inside the region polygon. A country's
+    # bbox is mostly ocean/neighbours at the corners; without this the strided
+    # count/import sample wastes most of its budget on empty water (the "churches
+    # in France → 0" case: the few sampled probes all landed off-land). No-op for
+    # Mode-B (polygon-less) regions. Never strands the import if the polygon is odd.
+    polygon = region_resolved.polygon
+    return probes unless polygon
+    factory = RGeo::Geographic.spherical_factory(srid: 4326)
+    inside = probes.select { |p| polygon.contains?(factory.point(p[:lng], p[:lat])) rescue true }
+    inside.presence || probes
   end
 
   # Builds the CirrusSearch query string. Quoting handled by us — Cirrus

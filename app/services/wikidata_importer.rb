@@ -107,7 +107,7 @@ class WikidataImporter
     types   = extract_types(pattern)
 
     if types.empty?
-      rows = run_query(build_count_sparql(pattern))
+      rows = run_query(build_count_sparql(pattern), read_timeout: IMPORT_READ_TIMEOUT)
       n = rows.first&.dig("c", "value").to_i
       on_progress&.call(1, 1, n)
       return n
@@ -119,7 +119,12 @@ class WikidataImporter
         pattern: pattern, qid: qid,
         limit: HARD_CAP, count_only: true, with_label: false
       )
-      rows = run_query(sparql)
+      # Count runs in the background job (not the request thread), so give it the
+      # same 120s budget as import! — a country-sized COUNT(*) over a P279* set
+      # inside SERVICE wikibase:box is genuinely ~60s ("castles in Germany" =
+      # 59.8s), and the old 60s ceiling killed it nondeterministically → nil →
+      # "Wikidata too busy" on a mainstream prompt.
+      rows = run_query(sparql, read_timeout: IMPORT_READ_TIMEOUT)
       n = rows.first&.dig("c", "value").to_i
       sums[qid] = n
       if on_progress
@@ -363,6 +368,12 @@ class WikidataImporter
   #   - A region_filter hash (legacy callers): resolved via resolve_region_filter
   #   - A RegionResolver::Result struct (Mode A/B + optional radius): bbox used directly
   def self.with_region_bbox(pattern, region_or_filter)
+    # A whole-globe SERVICE box gives Blazegraph no spatial selectivity — it
+    # forces a full scan of the (often huge P279*) set and times out
+    # ("lighthouses worldwide" never completed). A global region needs no
+    # spatial filter; query the bare pattern instead.
+    return pattern if region_or_filter.respond_to?(:source) && region_or_filter.source == :global
+
     bbox = resolve_bbox(region_or_filter)
     return pattern unless bbox
     # SERVICE wikibase:box uses Blazegraph's native geo-spatial index —
@@ -499,10 +510,20 @@ class WikidataImporter
   end
 
   def self.build_count_sparql(pattern)
+    # Cap the scan with a LIMIT subquery. A P279* class can match hundreds of
+    # thousands of items ("castles in Germany" ≈ 232k); an uncapped COUNT(*)
+    # over that inside SERVICE wikibase:box runs past even the 120s budget → nil
+    # → "Wikidata too busy" on a mainstream prompt. We only ever import up to
+    # HARD_CAP, so counting beyond it is wasted work — WDQS stops at the LIMIT
+    # and returns HARD_CAP for anything larger ("up to 10,000", honest since
+    # that's the import ceiling). Small result sets still count exactly.
     <<~SPARQL
       SELECT (COUNT(*) AS ?c) WHERE {
-        #{pattern}
-        #{image_or_article_block}
+        { SELECT * WHERE {
+            #{pattern}
+            #{image_or_article_block}
+          } LIMIT #{HARD_CAP}
+        }
       }
     SPARQL
   end
@@ -577,7 +598,13 @@ class WikidataImporter
         result =
           begin
             yield(qid)
-          rescue Error => e
+          rescue StandardError => e
+            # Was `rescue Error` — a non-WikidataImporter::Error in a worker
+            # thread (malformed-200 JSON::ParserError, an RGeo/NoMethodError)
+            # would propagate out of the thread and be re-raised on the main
+            # thread by `threads.map(&:value)`, escaping the pipeline's
+            # safe_count/safe_sample net (which only rescue our Error) and
+            # crashing the job. Treat any per-type failure as a dropped type.
             Rails.logger.warn "[wdqs per-type] qid=#{qid} #{e.class}: #{e.message.slice(0, 200)}" if defined?(Rails)
             on_error&.call(qid, e)
             nil
