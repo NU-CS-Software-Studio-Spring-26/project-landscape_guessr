@@ -133,20 +133,33 @@ class Region < ApplicationRecord
     search_parts = [ name ]
     search_parts << ancestors[:admin1] if admin_level != "admin1" && ancestors[:admin1]
     search_parts << ancestors[:country] if ancestors[:country]
+    # Drop parts that duplicate an earlier one (normalized): a city whose admin1
+    # shares its name ("Tokyo, Tokyo, Japan", "Beijing, Beijing, China") made
+    # Nominatim return a street ADDRESS (a Point), not the city polygon — which
+    # then fell through to the reverse-geocode sliver (only Shinjuku for Tokyo).
+    # Deduped → "Tokyo, Japan" → the real 東京都 polygon.
+    seen = Set.new
+    search_parts = search_parts.reject { |p| n = self.class.normalize_admin_name(p); n.blank? || !seen.add?(n) }
     search_query = search_parts.join(", ")
 
-    geojson = self.class.nominatim_search_boundary(search_query)
+    # The place's own centroid (GeoNames-seeded point / current bbox centre):
+    # used both to pick the right polygon among candidates and to anchor island
+    # clipping. Verified to land inside the correct central polygon.
+    anchor = (min_lat && max_lat && min_lng && max_lng) ? [ (min_lat + max_lat) / 2.0, (min_lng + max_lng) / 2.0 ] : nil
 
-    if !geojson && min_lat && max_lat && min_lng && max_lng
-      lat = (min_lat + max_lat) / 2.0
-      lng = (min_lng + max_lng) / 2.0
-      geojson = self.class.nominatim_reverse_boundary(lat, lng)
-    end
+    geojson = self.class.nominatim_search_boundary(search_query, anchor: anchor)
+    geojson ||= self.class.nominatim_reverse_boundary(anchor[0], anchor[1]) if anchor
 
     unless geojson
       mark_boundary_fetch_failed!
       return nil
     end
+
+    # A "city" can be a province-level municipality whose MultiPolygon carries
+    # far-flung islands (Tokyo's Izu/Ogasawara chain ~100-1000km out, Shanghai's
+    # offshore islets). Keep the central metropolis, drop the islands. Cities
+    # ONLY — countries/states must keep their islands (Greece, Indonesia).
+    geojson = self.class.clip_city_boundary(geojson, anchor) if admin_level == "city" && anchor
 
     update!(boundary: geojson)
     recompute_bbox!
@@ -162,11 +175,11 @@ class Region < ApplicationRecord
     Rails.cache.write("region_boundary_fail:#{id}", Time.current, expires_in: BOUNDARY_FAILURE_TTL)
   end
 
-  def self.nominatim_search_boundary(query)
+  def self.nominatim_search_boundary(query, anchor: nil)
     require "net/http"
     params = {
       q: query, format: "geojson",
-      polygon_geojson: 1, polygon_threshold: 0.0001, limit: 1
+      polygon_geojson: 1, polygon_threshold: 0.0001, limit: 5
     }
     uri = URI("https://nominatim.openstreetmap.org/search")
     uri.query = URI.encode_www_form(params)
@@ -174,18 +187,111 @@ class Region < ApplicationRecord
     data = nominatim_request(uri)
     return nil unless data
 
-    feature = data.dig("features", 0)
-    geom = feature&.dig("geometry")
-    return nil unless geom && %w[Polygon MultiPolygon].include?(geom["type"])
-    geom
+    pick_boundary_candidate(data["features"], anchor)
   rescue => e
     Rails.logger.warn("Nominatim search failed: #{e.message}")
     nil
   end
 
+  # Local admin types we prefer over a state/province/region that shares a name.
+  CITY_ADDRESSTYPES  = %w[city town municipality borough village hamlet suburb].freeze
+  BROAD_ADDRESSTYPES = %w[state province region country].freeze
+
+  # Choose the best boundary among up to 5 Nominatim candidates. When we know
+  # the place's centroid, prefer a polygon that actually CONTAINS it — this
+  # rescues cities whose #1 result is a Point (Istanbul, Auckland, Cusco, Mexico
+  # City all have a usable polygon at #2-3 that the old limit=1 threw away,
+  # falling through to a reverse-geocode sliver). Among containing polygons,
+  # prefer the most local admin type (city/town over state/region), then the
+  # smallest — so "Cusco" lands on the city/region, not the whole department.
+  def self.pick_boundary_candidate(features, anchor)
+    polys = Array(features).select { |f| %w[Polygon MultiPolygon].include?(f.dig("geometry", "type")) }
+    return nil if polys.empty?
+
+    if anchor
+      factory = RGeo::Geographic.spherical_factory(srid: 4326)
+      point = factory.point(anchor[1], anchor[0])
+      containing = polys.select do |f|
+        geom = RGeo::GeoJSON.decode(f["geometry"].to_json) rescue nil
+        geom && (geom.contains?(point) rescue false)
+      end
+      return (containing.presence || polys).min_by { |f| boundary_candidate_rank(f) }["geometry"]
+    end
+
+    polys.first["geometry"]
+  end
+
+  def self.boundary_candidate_rank(feature)
+    at = feature.dig("properties", "addresstype").to_s
+    tier = if CITY_ADDRESSTYPES.include?(at) then 0
+    elsif BROAD_ADDRESSTYPES.include?(at) then 2
+    else 1
+    end
+    bbox = compute_bbox(feature["geometry"])
+    area = bbox ? (bbox[:max_lat] - bbox[:min_lat]) * (bbox[:max_lng] - bbox[:min_lng]) : Float::INFINITY
+    [ tier, area ]
+  end
+
+  # Reduce a city MultiPolygon to its central metropolis: keep the polygon that
+  # contains the city centroid, plus polygons within METRO_GAP_KM of it (so
+  # contiguous metro pieces across water — Chongming I. for Shanghai, Staten I.
+  # for NYC — stay, while far islands go). No-op for a single Polygon or when
+  # nothing is far enough to drop. `anchor` = [lat, lng].
+  METRO_GAP_KM = 20.0
+  def self.clip_city_boundary(geojson, anchor)
+    return geojson unless geojson.is_a?(Hash) && geojson["type"] == "MultiPolygon"
+    polys = geojson["coordinates"]
+    return geojson if polys.size <= 1
+
+    alat, alng = anchor
+    boxes = polys.map { |poly| ring_bbox(poly[0]) }
+    anchor_idx = polys.each_index.find { |i| point_in_ring?(alng, alat, polys[i][0]) }
+    anchor_idx ||= boxes.each_index.min_by { |i| bbox_gap_km(boxes[i], min_lat: alat, max_lat: alat, min_lng: alng, max_lng: alng) }
+    base = boxes[anchor_idx]
+
+    kept = polys.each_index.select { |i| i == anchor_idx || bbox_gap_km(base, boxes[i]) <= METRO_GAP_KM }
+    return geojson if kept.size == polys.size # nothing dropped
+
+    coords = kept.map { |i| polys[i] }
+    coords.size == 1 ? { "type" => "Polygon", "coordinates" => coords[0] } : { "type" => "MultiPolygon", "coordinates" => coords }
+  end
+
+  # Bounding box of a GeoJSON linear ring ([[lng, lat], ...]).
+  def self.ring_bbox(ring)
+    lats = ring.map { |c| c[1] }
+    lngs = ring.map { |c| c[0] }
+    { min_lat: lats.min, max_lat: lats.max, min_lng: lngs.min, max_lng: lngs.max }
+  end
+
+  # Approximate gap in km between two bboxes (0 if they overlap) — nearest-edge,
+  # not centroid, so a large near-piece isn't wrongly dropped.
+  def self.bbox_gap_km(a, b)
+    dlat = [ a[:min_lat] - b[:max_lat], b[:min_lat] - a[:max_lat], 0.0 ].max
+    dlng = [ a[:min_lng] - b[:max_lng], b[:min_lng] - a[:max_lng], 0.0 ].max
+    lat0 = (a[:min_lat] + a[:max_lat]) / 2.0
+    lat_km = dlat * 111.0
+    lng_km = dlng * 111.0 * Math.cos(lat0 * Math::PI / 180.0)
+    Math.sqrt(lat_km**2 + lng_km**2)
+  end
+
+  # Ray-casting point-in-polygon against a single ring ([[lng, lat], ...]).
+  def self.point_in_ring?(lng, lat, ring)
+    inside = false
+    j = ring.size - 1
+    ring.each_index do |i|
+      xi, yi = ring[i]
+      xj, yj = ring[j]
+      inside = !inside if (yi > lat) != (yj > lat) && lng < (xj - xi) * (lat - yi) / (yj - yi) + xi
+      j = i
+    end
+    inside
+  end
+
   def self.nominatim_reverse_boundary(lat, lng)
     require "net/http"
-    params = { lat: lat, lon: lng, format: "json", polygon_geojson: 1, zoom: 10 }
+    # zoom 8 (county/region) not 10 (city) — for a province-level "city" like
+    # Tokyo, reverse at zoom 10 returns a single ward (the old 6km sliver).
+    params = { lat: lat, lon: lng, format: "json", polygon_geojson: 1, zoom: 8 }
     uri = URI("https://nominatim.openstreetmap.org/reverse")
     uri.query = URI.encode_www_form(params)
 

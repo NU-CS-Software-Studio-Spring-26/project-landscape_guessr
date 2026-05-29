@@ -3,15 +3,20 @@ require "uri"
 
 # Imports street-imagery POINT features from Mapillary vector tiles.
 #
-# We always import from the z=14 `image` layer (one POINT per image; dense
-# urban tiles carry thousands). For regions bigger than the fetch budget we
-# don't blindly grid the bbox — most of a park/country is empty wilderness,
-# so a uniform z=14 grid lands on coverage in only a handful of tiles and the
-# import collapses into a few clusters. Instead we build a COVERAGE MAP from a
-# few cheap low-zoom `sequence` tiles (drive paths), which reveals exactly
-# which z=14 tiles have imagery, and fetch z=14 tiles only at covered
-# locations — spread across the region and spatially thinned. See
-# `tiles_to_fetch` / `covered_z14_tiles`.
+# Three scales, picked by region size (see `use_overview?`):
+#
+#   * Small (≤ TILE_FETCH_CAP z=14 tiles — a neighbourhood, radius, or most
+#     cities): fetch EVERY z=14 `image` tile in the bbox. Full coverage.
+#   * Medium (metro → country, where the coverage probe can fetch all its z6
+#     tiles): build a COVERAGE MAP from cheap low-zoom `sequence` tiles (drive
+#     paths), which reveals exactly which z=14 tiles have imagery, and fetch
+#     z=14 tiles only at covered locations — spread across the region and
+#     spatially thinned. See `tiles_to_fetch` / `covered_z14_tiles`.
+#   * Large (continent / world / huge country): the z=14 `image` layer doesn't
+#     exist below z14 and the sequence-coverage probe can only sample ~20 spots
+#     at world scale (the "1514 images in 20 clusters" bug). So we switch to the
+#     globally-decimated z=4/5 `overview` POINT layer — ~150 z4 tiles blanket
+#     the whole world. See `use_overview?` / `fetch_overview_raw`.
 #
 # Per-image rows are stored with `url=NULL`, `external_source="mapillary"`,
 # `external_id=image_id`. Signed URLs are resolved lazily at render time
@@ -59,6 +64,19 @@ class MapillaryImporter
   HARD_CAP           = 4000    # final image count per import
   CONCURRENT_FETCHES = 8
 
+  # `overview` layer (z4-5): a globally-decimated POINT-per-image layer that
+  # exists where the z14 `image` layer doesn't. One z4 tile spans a continent,
+  # so the whole world is only ~153 z4 tiles — the only way to get an even
+  # GLOBAL spread. NOT used for cities: within a single city the overview layer
+  # is far too sparse (~90 pts), so city/metro imports stay on z14.
+  OVERVIEW_LAYER        = "overview"
+  OVERVIEW_MAX_ZOOM     = 5     # finer spread; used when its tiling fits the cap
+  OVERVIEW_MIN_ZOOM     = 4     # whole world = 153 z4 tiles
+  OVERVIEW_FETCH_CAP    = 200   # z5 tiles ≤ this → z5, else z4
+  OVERVIEW_TILE_CAP     = 220   # max overview tiles per import (world z4 = 153)
+  OVERVIEW_PER_TILE_CAP = 2000  # memory bound; a z4 tile can carry 8k+ points
+  OVERVIEW_COUNT_PROBES = 10    # overview tiles sampled to estimate the count
+
   class Error < StandardError; end
 
   # === Public API ===
@@ -73,6 +91,7 @@ class MapillaryImporter
   def self.count(region_resolved:, min_year: nil, **)
     bbox = region_resolved&.bbox
     return 0 unless bbox
+    return overview_count(region_resolved) if use_overview?(bbox)
 
     tiles = tiles_to_fetch(region_resolved, TILE_FETCH_CAP)
     return 0 if tiles.empty?
@@ -102,6 +121,34 @@ class MapillaryImporter
     estimate = (avg_per_tile * tiles.size * coverage).round
     # clamp the floor too: a couple of dense urban probe tiles can push
     # nonempty.sum past HARD_CAP, and clamp(min, max) with min > max raises.
+    estimate.clamp([ nonempty.sum, HARD_CAP ].min, HARD_CAP)
+  end
+
+  # Count for overview-scale regions: sample a handful of overview tiles, count
+  # in-region points per tile, extrapolate over all overview tiles. Cheap (≤10
+  # tiles) and never blocks on fetching the whole world just to size the set.
+  def self.overview_count(region_resolved)
+    bbox = region_resolved.bbox
+    polygon = region_resolved.polygon
+    z = overview_zoom(bbox)
+    all = Mapillary::TileDecoder.tiles_for_bbox(bbox, zoom: z)
+    return 0 if all.empty?
+
+    probes = all.sample([ OVERVIEW_COUNT_PROBES, all.size ].min)
+    counts = Concurrent::Array.new
+    each_tile_concurrent(probes, z) do |bytes, x, y|
+      feats = Mapillary::TileDecoder.decode(bytes, OVERVIEW_LAYER, z, x, y).reject { |f| f[:is_pano] }
+      feats = bbox_filter(feats, bbox)
+      feats = polygon_refine(feats, polygon) if polygon
+      counts << feats.size
+    end
+    counts = counts.to_a
+    nonempty = counts.reject(&:zero?)
+    return 0 if nonempty.empty?
+
+    avg_per_tile = nonempty.sum.to_f / nonempty.size
+    coverage     = nonempty.size.to_f / counts.size
+    estimate = (avg_per_tile * all.size * coverage).round
     estimate.clamp([ nonempty.sum, HARD_CAP ].min, HARD_CAP)
   end
 
@@ -167,18 +214,58 @@ class MapillaryImporter
     bbox = region_resolved.bbox
     polygon = region_resolved.polygon
 
-    tiles = tiles_to_fetch(region_resolved, tile_budget)
+    raw =
+      if use_overview?(bbox)
+        fetch_overview_raw(bbox, [ tile_budget, OVERVIEW_TILE_CAP ].min, progress_image_set)
+      else
+        fetch_image_raw(tiles_to_fetch(region_resolved, tile_budget), progress_image_set)
+      end
 
+    filter_and_thin(raw, bbox: bbox, polygon: polygon, min_year: min_year, max_features: max_features)
+  end
+
+  # Continent / world / huge country (USA, Russia, Brazil, ...): below z14 the
+  # `image` layer doesn't exist and the sequence-coverage probe can only sample
+  # tiles too sparsely, so use the global `overview` layer instead. Threshold
+  # mirrors the coverage probe's own fetch-all cap — if we can't fetch every z6
+  # coverage tile, the region is overview-scale.
+  def self.use_overview?(bbox)
+    Mapillary::TileDecoder.tile_count_in_bbox(bbox, zoom: COVERAGE_MIN_ZOOM) > COVERAGE_FETCH_CAP
+  end
+
+  # Prefer z5 (finer spread) when its full tiling fits the cap; drop to z4 only
+  # for the very largest regions (z5 world = 1024 tiles, z4 world = 153).
+  def self.overview_zoom(bbox)
+    if Mapillary::TileDecoder.tile_count_in_bbox(bbox, zoom: OVERVIEW_MAX_ZOOM) <= OVERVIEW_FETCH_CAP
+      OVERVIEW_MAX_ZOOM
+    else
+      OVERVIEW_MIN_ZOOM
+    end
+  end
+
+  # z14 `image`-layer fetch (small / medium regions). PER_TILE_CAP bounds memory.
+  def self.fetch_image_raw(tiles, progress_image_set)
+    decode_tiles_concurrent(tiles, ZOOM, LAYER, progress_image_set, per_tile_cap: PER_TILE_CAP)
+  end
+
+  # `overview`-layer fetch (continent / world). Fetch every overview tile that
+  # tiles the bbox (stratified-sampled down to `max_tiles` for the preview).
+  def self.fetch_overview_raw(bbox, max_tiles, progress_image_set)
+    z = overview_zoom(bbox)
+    tiles = Mapillary::TileDecoder.tiles_for_bbox(bbox, zoom: z)
+    tiles = Mapillary::TileDecoder.stratified_tiles_for_bbox(bbox, zoom: z, target: max_tiles) if tiles.size > max_tiles
+    decode_tiles_concurrent(tiles, z, OVERVIEW_LAYER, progress_image_set, per_tile_cap: OVERVIEW_PER_TILE_CAP)
+  end
+
+  # Fetch + decode a tile list concurrently into a flat feature array, updating
+  # the import progress bar per completed tile. `per_tile_cap` bounds memory.
+  def self.decode_tiles_concurrent(tiles, zoom, layer, progress_image_set, per_tile_cap: nil)
     progress_image_set&.update_columns(import_total: tiles.size, import_progress: 0)
-
-    min_ts = min_year ? Time.utc(min_year.to_i).to_i * 1000 : nil
-
     decoded = Concurrent::Array.new
     progress = Concurrent::AtomicFixnum.new(0)
-
-    each_tile_concurrent(tiles, ZOOM) do |bytes, x, y|
-      features = Mapillary::TileDecoder.decode(bytes, LAYER, ZOOM, x, y)
-      features = features.first(PER_TILE_CAP) if features.size > PER_TILE_CAP
+    each_tile_concurrent(tiles, zoom) do |bytes, x, y|
+      features = Mapillary::TileDecoder.decode(bytes, layer, zoom, x, y)
+      features = features.first(per_tile_cap) if per_tile_cap && features.size > per_tile_cap
       decoded.concat(features) if features.any?
       done = progress.increment
       if progress_image_set
@@ -187,17 +274,21 @@ class MapillaryImporter
         end
       end
     end
+    decoded.to_a
+  end
 
-    features = decoded.to_a
+  # Shared post-fetch pipeline: drop panos / old / out-of-region features, cap
+  # per drive, then spatially thin so dense tiles don't dominate (keep a roughly
+  # equal share per occupied z=14 cell). Shuffle BEFORE truncating — features
+  # arrive in tile-completion order, so a plain `.first` would collapse the
+  # spread back into whichever tiles finished first.
+  def self.filter_and_thin(features, bbox:, polygon:, min_year:, max_features:)
+    min_ts = min_year ? Time.utc(min_year.to_i).to_i * 1000 : nil
     features = features.reject { |f| f[:is_pano] }
     features = features.select { |f| f[:captured_at].to_i >= min_ts } if min_ts
     features = bbox_filter(features, bbox)
     features = polygon_refine(features, polygon) if polygon
     features = limit_per_sequence(features, PER_SEQUENCE_CAP)
-    # Spatially thin so dense tiles don't dominate: keep a roughly equal
-    # share per occupied z=14 cell. Then shuffle BEFORE truncating (features
-    # arrive in tile-completion order, so a plain `.first` would collapse the
-    # spread back into whichever tiles finished first).
     features = spatial_thin(features, max_features)
     features.shuffle.first(max_features)
   end
@@ -294,21 +385,35 @@ class MapillaryImporter
     threads.each(&:join)
   end
 
-  # Pick `budget` tiles from `covered` spread evenly across the bbox: lay a
-  # coarse grid over the tile range and take one covered tile per cell, so
-  # the fetched tiles span the whole region rather than bunching where
-  # coverage is densest.
+  # Pick `budget` tiles from `covered`, spread across the bbox: lay a coarse
+  # grid (~budget cells) over the tile range, then round-robin across the
+  # NON-EMPTY cells — one tile per cell per pass — until the budget is filled.
+  #
+  # The round-robin fill is what stops a region whose coverage is CONCENTRATED
+  # in part of its bbox (Beijing: a dense centre inside a 210km municipality,
+  # ~50 occupied cells of a 300-cell grid) from collapsing to one-tile-per-cell
+  # (~50 tiles) and wasting 5/6 of the budget — the old "Beijing returns 391
+  # images" bug. We still spread (first pass hits every occupied cell) but then
+  # keep drawing from the covered cells until we've used the whole budget.
   def self.spread_sample_tiles(covered, budget, bbox)
+    return covered if covered.size <= budget
     x_lo, x_hi, y_lo, y_hi = Mapillary::TileDecoder.tile_range(bbox, ZOOM)
     nx = (x_hi - x_lo + 1).to_f
     ny = (y_hi - y_lo + 1).to_f
     aspect = nx / ny
     gx = [ Math.sqrt(budget * aspect).round, 1 ].max
     gy = [ (budget.to_f / gx).ceil, 1 ].max
-    by_cell = covered.group_by do |x, y|
-      [ ((x - x_lo) * gx / nx).floor, ((y - y_lo) * gy / ny).floor ]
+    buckets = covered.group_by { |x, y| [ ((x - x_lo) * gx / nx).floor, ((y - y_lo) * gy / ny).floor ] }
+                     .values.map(&:shuffle)
+    picked = []
+    while picked.size < budget && buckets.any?(&:any?)
+      buckets.each do |bucket|
+        next if bucket.empty?
+        picked << bucket.pop
+        break if picked.size >= budget
+      end
     end
-    by_cell.values.map(&:sample).first(budget)
+    picked
   end
 
   # Keep a roughly equal share of features per occupied z=14 cell so a few

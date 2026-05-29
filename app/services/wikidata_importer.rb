@@ -338,7 +338,11 @@ class WikidataImporter
       # "churches in Paris" to Paris, Ontario — 0 results).
       return candidates.order(Arel.sql("population DESC NULLS LAST")).first
     end
-    candidates.detect { |r| ancestor_named?(r, parent_name) }
+    # A country-level parent often matches MANY same-named cities (8 "Brooklyn"s
+    # under the USA). `detect` returned the first (Brooklyn, Indiana → 0 images);
+    # pick the most populous of those under the parent instead → NYC's Brooklyn.
+    candidates.select { |r| ancestor_named?(r, parent_name) }
+              .max_by { |r| r.population.to_i }
   end
 
   # True if any region in r's parent chain has the given name. Bounded walk
