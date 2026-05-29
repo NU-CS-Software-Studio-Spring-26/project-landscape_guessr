@@ -24,6 +24,11 @@ class RegionResolver
     end
   end
 
+  # Whole-globe region for "streets around the world" / "anywhere". Latitude
+  # is trimmed to the populated band (skips the empty polar caps) and the full
+  # longitude span; no polygon — the whole world has nothing to refine against.
+  WORLD_BBOX = { min_lat: -58.0, max_lat: 74.0, min_lng: -180.0, max_lng: 180.0 }.freeze
+
   # Cap for radius transform — anything above 50km is almost certainly a
   # prompt that should use Mode A (city/state level) instead.
   MAX_RADIUS_METERS = 50_000
@@ -51,6 +56,10 @@ class RegionResolver
     return nil if descriptor.blank?
     d = descriptor.transform_keys(&:to_sym) rescue descriptor
 
+    # Whole-world prompts ("streets around the world"): no named region to
+    # look up — hand back the global bbox directly.
+    return world_result if d[:mode].to_s == "global" || d[:admin_level].to_s == "world"
+
     # Backwards-compat: pre-v2 ai_region_filter was a bare {name:,
     # parent_name:, admin_level:} hash. Treat as Mode A.
     mode = d[:mode].to_s
@@ -68,6 +77,13 @@ class RegionResolver
     radius.present? ? apply_radius(base, radius.to_f) : base
   end
 
+  def self.world_result
+    Result.new(
+      bbox: WORLD_BBOX.dup, polygon: nil, label: "the world",
+      source: :global, admin_level: "world", parent_name: nil, region_id: nil
+    )
+  end
+
   def self.resolve_named(d)
     region = WikidataImporter.resolve_region_filter(
       name: d[:name], admin_level: d[:admin_level], parent_name: d[:parent_name]
@@ -77,6 +93,12 @@ class RegionResolver
     # Force boundary upgrade for point-bbox seeded rows (cities) — same fix
     # as wikidata Paris path. Without this, named cities have point bboxes.
     WikidataImporter.ensure_real_bbox!(region)
+    # Also ensure a real boundary polygon (no-op for cities that just got one,
+    # or for continents). Countries/states otherwise have only a rectangular
+    # bbox, so Commons/Mapillary would import points from neighbours sharing
+    # the bbox (e.g. "streets in Sweden" landing in Finland/Latvia). Cheap and
+    # cached: ~0.9s once per region via Nominatim, then stored.
+    region.fetch_real_boundary! if region.boundary.blank?
     return nil unless region.min_lat && region.max_lat && region.min_lng && region.max_lng
 
     Result.new(

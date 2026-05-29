@@ -26,6 +26,15 @@ class CommonsImporter
   READ_TIMEOUT = 60
 
   PROBE_RADIUS_KM = 30
+  MAX_PROBES = 200             # hex-lattice cap (a 30km circle can't tile a continent)
+  # A big region's hex lattice can be 200 probes; each probe is a separate
+  # CirrusSearch query (deepcategory is 2-5s). Querying all 200 blows the
+  # pipeline's time budget, so count SAMPLES probes and extrapolates, and the
+  # preview/import walk a bounded, evenly-strided subset of the lattice.
+  COUNT_PROBE_SAMPLE  = 8
+  SAMPLE_PROBE_CAP    = 12
+  IMPORT_PROBE_CAP    = 40
+  HTTP_MAX_ATTEMPTS   = 3      # retry transient 5xx / timeouts (e.g. deepcategory 504)
   PER_REQUEST_LIMIT = 500      # gsrlimit max per CirrusSearch request
   # Max rows paginated from a single nearcoord probe. CirrusSearch caps
   # gsroffset at 10k (offset+limit ≤ 10000), so we stay well under to leave
@@ -48,12 +57,21 @@ class CommonsImporter
     return 0 if commons_category.blank? && intitle_fallback.blank?
 
     probes = probes_for(region_resolved)
-    total = 0
-    probes.each_with_index do |probe, idx|
-      total += count_one_probe(commons_category: commons_category, intitle_fallback: intitle_fallback, probe: probe)
-      on_progress&.call(idx + 1, probes.size, total)
+    # For a big region the lattice can be 200 probes — querying every one (each
+    # a 2-5s deepcategory count) blows the time budget. Sample an evenly-spread
+    # subset and extrapolate by the sampled fraction.
+    sample = sample_probes(probes, COUNT_PROBE_SAMPLE)
+    sum = 0
+    sample.each_with_index do |probe, idx|
+      begin
+        sum += count_one_probe(commons_category: commons_category, intitle_fallback: intitle_fallback, probe: probe)
+      rescue Error => e
+        Rails.logger.warn "[commons count] probe #{idx} failed: #{e.message.slice(0, 120)}"
+      end
+      scaled = (sum.to_f / (idx + 1) * sample.size * (probes.size.to_f / sample.size)).round
+      on_progress&.call(idx + 1, sample.size, scaled)
     end
-    total
+    probes.size <= sample.size ? sum : (sum.to_f / sample.size * probes.size).round
   end
 
   def self.sample(commons_category:, intitle_fallback: nil, region_resolved: nil, limit: 30, on_progress: nil)
@@ -65,22 +83,26 @@ class CommonsImporter
       intitle_fallback: intitle_fallback,
       region_resolved: region_resolved,
       max_rows: target,
-      on_progress: on_progress
+      probe_cap: SAMPLE_PROBE_CAP
     )
     dedupe_by_external_id(refine_to_polygon(rows, region_resolved)).shuffle.first(limit)
   end
 
-  def self.import!(image_set:, commons_category:, intitle_fallback: nil, region_resolved: nil)
-    image_set.update_columns(import_state: "fetching", import_progress: 0, import_total: 0)
+  # expected_count (from the proposal the user already saw) drives the
+  # progress bar so it advances smoothly during the fetch — without it, a
+  # single-probe region (a city) reported "0 of 1 areas" and looked frozen
+  # until the import finished.
+  def self.import!(image_set:, commons_category:, intitle_fallback: nil, region_resolved: nil, expected_count: nil)
+    target = expected_count.to_i > 0 ? [ expected_count.to_i, HARD_CAP ].min : HARD_CAP
+    image_set.update_columns(import_state: "fetching", import_progress: 0, import_total: target)
 
     rows = collect_rows(
       commons_category: commons_category,
       intitle_fallback: intitle_fallback,
       region_resolved: region_resolved,
       max_rows: HARD_CAP,
-      on_progress: ->(done, total, _sum) {
-        image_set.update_columns(import_progress: done, import_total: total)
-      }
+      probe_cap: IMPORT_PROBE_CAP,
+      on_rows: ->(n) { image_set.update_columns(import_progress: [ n, target ].min) }
     )
     rows = refine_to_polygon(rows, region_resolved)
     rows = dedupe_by_external_id(rows)
@@ -141,29 +163,45 @@ class CommonsImporter
     data.dig("query", "searchinfo", "totalhits").to_i
   end
 
-  # Walks every probe in turn, paginating up to max_rows. Stops early
-  # once max_rows reached. on_progress fires after each probe with
-  # (done_probes, total_probes, rows_so_far).
-  def self.collect_rows(commons_category:, intitle_fallback:, region_resolved:, max_rows:, on_progress: nil)
-    probes = probes_for(region_resolved)
+  # Walks a bounded, evenly-spread subset of the region's probes, paginating
+  # up to max_rows. Stops early once max_rows reached. A probe that errors
+  # (e.g. a transient 504 on one nearcoord area) is logged and skipped rather
+  # than failing the whole import. on_rows fires per page with the running
+  # total so the progress bar advances even within a single probe.
+  def self.collect_rows(commons_category:, intitle_fallback:, region_resolved:, max_rows:, probe_cap: IMPORT_PROBE_CAP, on_rows: nil)
+    probes = sample_probes(probes_for(region_resolved), probe_cap)
     rows = []
 
-    probes.each_with_index do |probe, idx|
+    probes.each do |probe|
       break if rows.size >= max_rows
-      remaining = max_rows - rows.size
-      fetched = fetch_probe_rows(
-        commons_category: commons_category, intitle_fallback: intitle_fallback,
-        probe: probe, limit: [ remaining, PER_PROBE_CAP ].min
-      )
-      rows.concat(fetched)
-      on_progress&.call(idx + 1, probes.size, rows.size)
+      base = rows.size
+      begin
+        fetched = fetch_probe_rows(
+          commons_category: commons_category, intitle_fallback: intitle_fallback,
+          probe: probe, limit: [ max_rows - rows.size, PER_PROBE_CAP ].min,
+          on_page: on_rows ? ->(probe_rows) { on_rows.call(base + probe_rows) } : nil
+        )
+        rows.concat(fetched)
+      rescue Error => e
+        Rails.logger.warn "[commons collect] probe failed, skipping: #{e.message.slice(0, 120)}"
+      end
+      on_rows&.call(rows.size)
     end
     rows
   end
 
+  # Evenly-strided subset of `items` (≤ n). The hex lattice is row-ordered, so
+  # striding keeps geographic spread (vs `.first(n)` which clusters in a corner).
+  def self.sample_probes(items, n)
+    return items if items.size <= n
+    stride = items.size.to_f / n
+    (0...n).map { |i| items[(i * stride).floor] }
+  end
+
   # Single probe → up to `limit` rows. Uses generator=search +
-  # prop=imageinfo|coordinates to get URL+coord in one API hit.
-  def self.fetch_probe_rows(commons_category:, intitle_fallback:, probe:, limit:)
+  # prop=imageinfo|coordinates to get URL+coord in one API hit. on_page fires
+  # after each gsroffset page with the running row count for this probe.
+  def self.fetch_probe_rows(commons_category:, intitle_fallback:, probe:, limit:, on_page: nil)
     rows = []
     sroffset = 0
     srsearch = build_srsearch(commons_category: commons_category, intitle_fallback: intitle_fallback, probe: probe)
@@ -214,6 +252,8 @@ class CommonsImporter
           license: extract_license(ii&.dig("extmetadata"))
         }
       end
+
+      on_page&.call(rows.size)
 
       cont = data["continue"]
       break unless cont && cont["gsroffset"]
@@ -270,15 +310,32 @@ class CommonsImporter
 
   # === HTTP ===
 
+  # deepcategory is expensive and Commons occasionally returns a transient
+  # 5xx (502/503/504 upstream timeout) or the connection times out. Retry
+  # those a few times with linear backoff before giving up — one blip
+  # shouldn't kill a whole import.
   def self.api_get(params)
     uri = API.dup
     uri.query = URI.encode_www_form(params)
-    res = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true, read_timeout: READ_TIMEOUT) do |h|
-      req = Net::HTTP::Get.new(uri)
-      req["User-Agent"] = USER_AGENT
-      h.request(req)
+    attempt = 0
+    loop do
+      attempt += 1
+      begin
+        res = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true, read_timeout: READ_TIMEOUT) do |h|
+          req = Net::HTTP::Get.new(uri)
+          req["User-Agent"] = USER_AGENT
+          h.request(req)
+        end
+        if res.is_a?(Net::HTTPServerError) && attempt < HTTP_MAX_ATTEMPTS
+          sleep(attempt)
+          next
+        end
+        raise Error, "Commons API HTTP #{res.code}: #{res.body.to_s.slice(0, 300)}" unless res.is_a?(Net::HTTPSuccess)
+        return JSON.parse(res.body)
+      rescue Net::OpenTimeout, Net::ReadTimeout, Errno::ECONNRESET, SocketError => e
+        raise Error, "Commons API network error after #{attempt} attempts: #{e.class}" if attempt >= HTTP_MAX_ATTEMPTS
+        sleep(attempt)
+      end
     end
-    raise Error, "Commons API HTTP #{res.code}: #{res.body.to_s.slice(0, 300)}" unless res.is_a?(Net::HTTPSuccess)
-    JSON.parse(res.body)
   end
 end

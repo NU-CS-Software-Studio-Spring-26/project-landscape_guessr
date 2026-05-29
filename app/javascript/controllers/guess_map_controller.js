@@ -27,6 +27,9 @@ export default class extends Controller {
     // hide the whole layer set in one pass after the style loads.
     this.map.on("load", () => {
       hideOutdoorTrails(this.map)
+      // Open each round focused on the area the set's images cover (when the
+      // server passed a bbox), instead of the whole-world default.
+      this.fitToBbox()
       this.#hideLoader()
     })
     this.map.on("error", () => this.#hideLoader())

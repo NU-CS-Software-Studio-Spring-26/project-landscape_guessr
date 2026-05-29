@@ -487,11 +487,12 @@ class ImageSetsController < ApplicationController
       "topic_qid"                 => result[:topic_qid],
       "combined_qid"              => result[:combined_qid],
       "commons_intitle_fallback"  => result[:commons_intitle_fallback],
-      "mapillary_min_year"        => result[:mapillary_min_year]
+      "mapillary_min_year"        => result[:mapillary_min_year],
+      "expected_count"            => gen.result_count
     }.compact
 
     image_set = Current.user.image_sets.new(
-      name:             params[:name].to_s.strip.presence || result[:set_name].presence || "Untitled AI Set",
+      name:             uniquify_set_name(Current.user, params[:name].to_s.strip.presence || result[:set_name].presence || "Untitled AI Set"),
       visibility:       %w[public private].include?(params[:visibility]) ? params[:visibility] : "private",
       ai_prompt:        gen.user_message.to_s,
       ai_query:         result[:sparql_pattern],
@@ -581,6 +582,17 @@ class ImageSetsController < ApplicationController
   end
 
   private
+
+  # ImageSet names are unique per user. An AI-generated name (or one the user
+  # reused) can collide with an existing set, which used to fail the import
+  # with "Name has already been taken". Append " (2)", " (3)", … until free so
+  # the import always proceeds.
+  def uniquify_set_name(user, base)
+    base = base.to_s.strip.presence || "Untitled AI Set"
+    taken = ->(n) { user.image_sets.where("LOWER(name) = LOWER(?)", n).exists? }
+    return base unless taken.call(base)
+    (2..).each { |i| candidate = "#{base} (#{i})"; return candidate unless taken.call(candidate) }
+  end
 
   def set_image_set
     # The remove_item route is a non-member nested DELETE, so its parent id

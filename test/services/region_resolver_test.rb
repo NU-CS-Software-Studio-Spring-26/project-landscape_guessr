@@ -21,6 +21,18 @@ class RegionResolverTest < ActiveSupport::TestCase
     assert_nil RegionResolver.resolve({})
   end
 
+  test "world admin_level resolves to the global bbox without a DB lookup" do
+    r = RegionResolver.resolve(mode: "named", name: "World", admin_level: "world")
+    assert_not_nil r
+    assert_equal :global, r.source
+    assert_nil r.polygon
+    assert_operator r.bbox[:min_lng], :<=, -179
+    assert_operator r.bbox[:max_lng], :>=, 179
+    assert_operator (r.bbox[:max_lat] - r.bbox[:min_lat]), :>, 100
+    # mode: "global" works too
+    assert_equal :global, RegionResolver.resolve(mode: "global").source
+  end
+
   test "Mode B single POI builds bbox around best_match" do
     sample = { lat: 48.8584, lng: 2.2945, bbox: { min_lat: 48.85, max_lat: 48.87, min_lng: 2.28, max_lng: 2.31 }, display_name: "Eiffel Tower", class: "man_made", area_km2: 1.0, importance: 0.6 }
     stub_geocoder_match("Eiffel Tower", sample)

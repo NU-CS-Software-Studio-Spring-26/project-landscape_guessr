@@ -476,7 +476,7 @@ class AiImageSetGenerator
     end
   end
 
-  ALLOWED_ADMIN_LEVELS = %w[continent country admin1 admin2 city].freeze
+  ALLOWED_ADMIN_LEVELS = %w[world continent country admin1 admin2 city].freeze
 
   # Mode A: region_name + region_admin_level set.
   # Mode B: region_pois (array) set.
@@ -520,6 +520,11 @@ class AiImageSetGenerator
 
       ROUTING DECISIONS (consult before any tool call):
       - "streets / roads / driving in X" → mapillary
+      - "streets around the world", "anywhere in the world", "random
+        streets", "drive anywhere" (no place named) → mapillary with
+        region_admin_level: "world" (region_name: "World"). This is the
+        classic guessing mode — DO NOT refuse it; the backend samples
+        street imagery distributed across the globe.
       - "X in Y" topic+region (typical case) → wikidata
       - "many photos / lots of photos of X" → commons
       - Single subject, many angles ("Mount Fuji photos") → commons
@@ -809,9 +814,10 @@ class AiImageSetGenerator
       Fields:
         region_name        — canonical English name. "United States" not
                              "USA"; "Munich" not "München" (geonames is English).
-        region_admin_level — exactly one of: "continent", "country",
-                             "admin1" (state/province), "admin2" (county),
-                             "city".
+        region_admin_level — exactly one of: "world" (whole globe — for
+                             "streets around the world" / "anywhere"),
+                             "continent", "country", "admin1"
+                             (state/province), "admin2" (county), "city".
         region_parent_name — parent's English name. For admin1, the
                              country ("United States"). For city, the
                              admin1 or admin2 ("Illinois" for Chicago).

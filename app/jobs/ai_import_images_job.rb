@@ -30,7 +30,8 @@ class AiImportImagesJob < ApplicationJob
         image_set:        image_set,
         commons_category: commons_category,
         intitle_fallback: params["commons_intitle_fallback"],
-        region_resolved:  CommonsImporter.effective_region(region_resolved: region_resolved, topic_qid: params["topic_qid"])
+        region_resolved:  CommonsImporter.effective_region(region_resolved: region_resolved, topic_qid: params["topic_qid"]),
+        expected_count:   params["expected_count"]
       )
     when "mapillary"
       MapillaryImporter.import!(

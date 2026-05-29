@@ -64,7 +64,7 @@ export default class extends Controller {
   // plain wrong for Commons/Mapillary sets.
   static fetchingLabels = {
     wikidata:  ["Fetching matching items from Wikidata", "categories"],
-    commons:   ["Searching Wikimedia Commons", "areas"],
+    commons:   ["Searching Wikimedia Commons", "photos"],
     mapillary: ["Fetching street-imagery tiles", "tiles"],
   }
 

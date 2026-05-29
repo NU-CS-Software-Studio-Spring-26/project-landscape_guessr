@@ -29,24 +29,35 @@ class MapillaryImporter
   ZOOM  = 14
   LAYER = "image"
 
-  # The `sequence` layer (drive paths) exists at low zooms and acts as a
-  # cheap coverage map: a handful of these tiles tells us which z=14 tiles
-  # actually have imagery, so we aim the expensive z=14 fetches at real
-  # coverage instead of gridding mostly-empty wilderness. z=8 gives the best
-  # ratio (verified: 4 z=8 tiles over Yellowstone → 330 covered z=14 tiles,
-  # vs a blind 140-tile z=14 grid that found only 12).
-  COVERAGE_ZOOM        = 8
-  COVERAGE_PROBE_TILES = 8
+  # The `sequence` layer (drive paths) acts as a cheap COVERAGE MAP: it tells
+  # us which z=14 tiles actually have imagery, so we aim the expensive z=14
+  # fetches at real coverage instead of gridding mostly-empty wilderness.
+  #
+  # The key to even distribution (not clusters) is COMPLETENESS: we fetch
+  # EVERY coverage tile that tiles the bbox, at the highest zoom whose full
+  # tiling fits the cap (more zoom = more geometry detail). A city lands at
+  # ~z12 (detailed), a country at ~z6 (whole-country breadth). Only when even
+  # z6 exceeds the cap (continent / whole world) do we stratified-SAMPLE the
+  # coverage tiles — accepting coarser global spread. z<6 has no usable
+  # sequence geometry (verified: z3 returns nothing), so we never go below it.
+  COVERAGE_MIN_ZOOM   = 6
+  COVERAGE_MAX_ZOOM   = 12
+  # Cap for fetching EVERY tile that tiles the bbox. ~28 keeps a country like
+  # Sweden (24 z6 tiles) a complete fetch-all, while pushing a dense city off
+  # the heaviest zoom (Tokyo z12 = 32 tiles → z11 = 8) so the probe stays fast.
+  COVERAGE_FETCH_CAP  = 28
+  COVERAGE_SAMPLE_CAP = 96     # cap when stratified-sampling (continent / world)
+  COVERAGE_CACHE_TTL  = 5.minutes
 
   # Tunables.
-  TILE_FETCH_CAP     = 140     # max z=14 tile fetches per import (spread across coverage)
-  SAMPLE_TILE_BUDGET = 16      # z=14 tiles fetched for the 30-row preview
-  COUNT_PROBE_TILES  = 6       # covered tiles sampled to estimate the count
-  PER_TILE_CAP       = 1500    # max features kept per tile
+  TILE_FETCH_CAP     = 300     # max z=14 tile fetches per import (one image cluster each)
+  SAMPLE_TILE_BUDGET = 24      # z=14 tiles fetched for the 30-row preview
+  COUNT_PROBE_TILES  = 8       # covered tiles sampled to estimate the count
+  PER_TILE_CAP       = 1000    # max features kept per tile (memory bound)
   PER_SEQUENCE_CAP   = 3       # avoid drive-clusters
   EMPTY_TILE_BYTES   = 200     # < this = ocean / no coverage
   HARD_CAP           = 4000    # final image count per import
-  CONCURRENT_FETCHES = 4
+  CONCURRENT_FETCHES = 8
 
   class Error < StandardError; end
 
@@ -63,13 +74,15 @@ class MapillaryImporter
     bbox = region_resolved&.bbox
     return 0 unless bbox
 
-    tiles = tiles_to_fetch(bbox, TILE_FETCH_CAP)
+    tiles = tiles_to_fetch(region_resolved, TILE_FETCH_CAP)
     return 0 if tiles.empty?
 
     polygon = region_resolved.polygon
     probes = tiles.sample([ COUNT_PROBE_TILES, tiles.size ].min)
-    counts = probes.map do |x, y|
-      bytes = fetch_tile(z: ZOOM, x: x, y: y)
+    # Probe tiles concurrently — a dense-city z=14 tile is ~1MB to fetch +
+    # decode, so 8 sequential probes was the bulk of count latency.
+    counts = Concurrent::Array.new
+    each_tile_concurrent(probes, ZOOM) do |bytes, x, y|
       feats = Mapillary::TileDecoder.decode(bytes, LAYER, ZOOM, x, y).reject { |f| f[:is_pano] }
       # Mirror the import's filtering so the per-tile figure reflects what
       # actually survives to insert (not raw, often-10× tile density): bbox +
@@ -77,13 +90,12 @@ class MapillaryImporter
       # the per-sequence cap. This is what keeps "up to N" honest.
       feats = bbox_filter(feats, bbox)
       feats = polygon_refine(feats, polygon) if polygon
-      limit_per_sequence(feats, PER_SEQUENCE_CAP).size
-    rescue StandardError
-      0
+      counts << limit_per_sequence(feats, PER_SEQUENCE_CAP).size
     end
+    counts = counts.to_a
 
     nonempty = counts.reject(&:zero?)
-    return 0 if nonempty.empty?
+    return 0 if counts.empty? || nonempty.empty?
 
     avg_per_tile = nonempty.sum.to_f / nonempty.size
     coverage     = nonempty.size.to_f / counts.size
@@ -146,17 +158,16 @@ class MapillaryImporter
 
   # === Tile fetch + decode ===
 
-  # Fetches up to `tile_budget` z=14 `image` tiles, decodes them
-  # concurrently, then filters (pano / year / bbox / polygon / per-sequence)
-  # and spatially thins so the result is spread, not clustered. Tiles come
-  # from the coverage map (see `tiles_to_fetch`) so we don't waste the budget
-  # on empty wilderness. `tile_budget` lets the preview probe cheaply (16
-  # tiles) while the import samples broadly (140).
+  # Fetches `tile_budget` z=14 `image` tiles, decodes them concurrently, then
+  # filters (pano / year / bbox / polygon / per-sequence) and spatially thins
+  # so the result is spread, not clustered. Tiles come from the coverage map
+  # (see `tiles_to_fetch`) so the budget isn't wasted on empty wilderness.
+  # `tile_budget` lets the preview probe cheaply while the import samples broadly.
   def self.fetch_features(region_resolved:, max_features:, min_year: nil, tile_budget: TILE_FETCH_CAP, progress_image_set: nil)
     bbox = region_resolved.bbox
     polygon = region_resolved.polygon
 
-    tiles = tiles_to_fetch(bbox, tile_budget)
+    tiles = tiles_to_fetch(region_resolved, tile_budget)
 
     progress_image_set&.update_columns(import_total: tiles.size, import_progress: 0)
 
@@ -165,34 +176,17 @@ class MapillaryImporter
     decoded = Concurrent::Array.new
     progress = Concurrent::AtomicFixnum.new(0)
 
-    pool_size = [ tiles.size, CONCURRENT_FETCHES ].min
-    queue = Queue.new
-    tiles.each { |t| queue << t }
-
-    threads = Array.new(pool_size) do
-      Thread.new do
-        loop do
-          tile = queue.pop(true) rescue nil
-          break unless tile
-          x, y = tile
-          begin
-            bytes = fetch_tile(z: ZOOM, x: x, y: y)
-            features = Mapillary::TileDecoder.decode(bytes, LAYER, ZOOM, x, y)
-            features = features.first(PER_TILE_CAP) if features.size > PER_TILE_CAP
-            decoded.concat(features) if features.any?
-          rescue StandardError => e
-            Rails.logger.warn "[mly tile] z=#{ZOOM} x=#{x} y=#{y}: #{e.class}: #{e.message.slice(0, 200)}"
-          end
-          done = progress.increment
-          if progress_image_set
-            ActiveRecord::Base.connection_pool.with_connection do
-              progress_image_set.update_columns(import_progress: done)
-            end
-          end
+    each_tile_concurrent(tiles, ZOOM) do |bytes, x, y|
+      features = Mapillary::TileDecoder.decode(bytes, LAYER, ZOOM, x, y)
+      features = features.first(PER_TILE_CAP) if features.size > PER_TILE_CAP
+      decoded.concat(features) if features.any?
+      done = progress.increment
+      if progress_image_set
+        ActiveRecord::Base.connection_pool.with_connection do
+          progress_image_set.update_columns(import_progress: done)
         end
       end
     end
-    threads.each(&:join)
 
     features = decoded.to_a
     features = features.reject { |f| f[:is_pano] }
@@ -210,36 +204,94 @@ class MapillaryImporter
 
   # Chooses which z=14 `image` tiles to fetch. Small regions: take them all.
   # Larger regions: use the sequence-layer coverage map to fetch only tiles
-  # that actually have imagery, spread across the region. Falls back to a
-  # blind stratified grid only if the coverage probe finds nothing (so we
-  # never regress to zero where coverage exists but the probe missed it).
-  def self.tiles_to_fetch(bbox, budget)
+  # that actually have imagery, dropping any outside the region polygon (so a
+  # country's budget isn't spent on a neighbour sharing its bbox), then spread
+  # them. Falls back to a blind stratified grid only if the coverage probe
+  # finds nothing (so we never regress to zero where coverage exists).
+  def self.tiles_to_fetch(region_resolved, budget)
+    bbox = region_resolved.bbox
+    polygon = region_resolved.polygon
     total = Mapillary::TileDecoder.tile_count_in_bbox(bbox, zoom: ZOOM)
     return Mapillary::TileDecoder.tiles_for_bbox(bbox, zoom: ZOOM) if total <= budget
 
     covered = covered_z14_tiles(bbox)
+    covered = filter_tiles_in_polygon(covered, polygon) if polygon
     return Mapillary::TileDecoder.stratified_tiles_for_bbox(bbox, zoom: ZOOM, target: budget) if covered.empty?
     return covered if covered.size <= budget
 
     spread_sample_tiles(covered, budget, bbox)
   end
 
-  # The set of z=14 tiles with Mapillary coverage, discovered from a few
-  # cheap low-zoom `sequence` tiles. Each sequence LINESTRING vertex is a
-  # drive position; we map it to its z=14 tile.
+  # Keep only tiles whose centre falls inside the region polygon.
+  def self.filter_tiles_in_polygon(tiles, polygon)
+    factory = RGeo::Geographic.spherical_factory(srid: 4326)
+    kept = tiles.select do |x, y|
+      lat, lng = Mapillary::TileDecoder.tile_to_latlng(ZOOM, x, y, 2048, 2048, 4096)
+      polygon.contains?(factory.point(lng, lat)) rescue true
+    end
+    kept.empty? ? tiles : kept # never strand the import if the polygon is odd
+  end
+
+  # The set of z=14 tiles with Mapillary coverage, discovered from low-zoom
+  # `sequence` tiles. Each sequence LINESTRING vertex is a drive position; we
+  # map it to its z=14 tile. Coverage tiles are fetched concurrently. The
+  # result is cached briefly so the count and preview phases (same region,
+  # seconds apart) share one probe instead of each paying the decode cost.
   def self.covered_z14_tiles(bbox)
-    seq_tiles = Mapillary::TileDecoder.stratified_tiles_for_bbox(bbox, zoom: COVERAGE_ZOOM, target: COVERAGE_PROBE_TILES)
-    z14 = {}
-    seq_tiles.each do |x, y|
-      bytes = fetch_tile(z: COVERAGE_ZOOM, x: x, y: y)
-      Mapillary::TileDecoder.coverage_points(bytes, COVERAGE_ZOOM, x, y).each do |lat, lng|
+    key = "mly:cov:#{bbox.values_at(:min_lat, :max_lat, :min_lng, :max_lng).map { |v| v.round(3) }.join(',')}"
+    cached = Rails.cache.read(key)
+    return cached if cached
+
+    cz, seq_tiles = coverage_probe_tiles(bbox)
+    z14 = Concurrent::Hash.new
+    each_tile_concurrent(seq_tiles, cz) do |bytes, x, y|
+      Mapillary::TileDecoder.coverage_points(bytes, cz, x, y).each do |lat, lng|
         next unless lat.between?(bbox[:min_lat], bbox[:max_lat]) && lng.between?(bbox[:min_lng], bbox[:max_lng])
         z14[Mapillary::TileDecoder.lonlat_to_tile(lng, lat, ZOOM)] = true
       end
-    rescue StandardError => e
-      Rails.logger.warn "[mly coverage] z=#{COVERAGE_ZOOM} #{x},#{y}: #{e.class}: #{e.message.slice(0, 120)}"
     end
-    z14.keys
+    result = z14.keys
+    Rails.cache.write(key, result, expires_in: COVERAGE_CACHE_TTL) if result.size <= 50_000
+    result
+  end
+
+  # Returns [zoom, tiles] for the coverage probe. Fetch EVERY tile that tiles
+  # the bbox at the highest zoom (most geometry detail) whose full tiling fits
+  # the cap — a city resolves to ~z12, a country to ~z6, both COMPLETE. If even
+  # z6 exceeds the cap (continent / world) we stratified-sample z6 tiles up to
+  # the cap, accepting coarser spread for those very large regions.
+  def self.coverage_probe_tiles(bbox)
+    z = COVERAGE_MAX_ZOOM.downto(COVERAGE_MIN_ZOOM).find do |zz|
+      Mapillary::TileDecoder.tile_count_in_bbox(bbox, zoom: zz) <= COVERAGE_FETCH_CAP
+    end
+    return [ z, Mapillary::TileDecoder.tiles_for_bbox(bbox, zoom: z) ] if z
+    [ COVERAGE_MIN_ZOOM,
+      Mapillary::TileDecoder.stratified_tiles_for_bbox(bbox, zoom: COVERAGE_MIN_ZOOM, target: COVERAGE_SAMPLE_CAP) ]
+  end
+
+  # Fetch a list of tiles concurrently, yielding (bytes, x, y) per tile. Errors
+  # on one tile are logged and skipped. Shared by the coverage probe and the
+  # main image fetch.
+  def self.each_tile_concurrent(tiles, zoom)
+    return if tiles.empty?
+    queue = Queue.new
+    tiles.each { |t| queue << t }
+    pool = [ tiles.size, CONCURRENT_FETCHES ].min
+    threads = Array.new(pool) do
+      Thread.new do
+        loop do
+          tile = queue.pop(true) rescue nil
+          break unless tile
+          x, y = tile
+          begin
+            yield fetch_tile(z: zoom, x: x, y: y), x, y
+          rescue StandardError => e
+            Rails.logger.warn "[mly tile] z=#{zoom} #{x},#{y}: #{e.class}: #{e.message.slice(0, 120)}"
+          end
+        end
+      end
+    end
+    threads.each(&:join)
   end
 
   # Pick `budget` tiles from `covered` spread evenly across the bbox: lay a
