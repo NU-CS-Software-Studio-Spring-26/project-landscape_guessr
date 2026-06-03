@@ -250,6 +250,56 @@ class ImageSet < ApplicationRecord
     Region.where(id: region_ids)
   end
 
+  # Geographic bounding box of the set's items as
+  # { min_lat:, max_lat:, min_lng:, max_lng: }, or nil when the set has no
+  # item with coordinates. Per-item coord overrides win, falling back to the
+  # underlying image's GPS via COALESCE. One aggregate SQL pass — no rows
+  # loaded into Ruby. This is the "boundaries extracted from the photos'
+  # metadata" that drives both the guess-map fit and per-set scoring.
+  def geo_bbox
+    row = image_set_items
+            .joins(:image)
+            .pick(
+              Arel.sql("MIN(COALESCE(image_set_items.latitude,  images.latitude))"),
+              Arel.sql("MAX(COALESCE(image_set_items.latitude,  images.latitude))"),
+              Arel.sql("MIN(COALESCE(image_set_items.longitude, images.longitude))"),
+              Arel.sql("MAX(COALESCE(image_set_items.longitude, images.longitude))")
+            )
+    return nil unless row
+    min_lat, max_lat, min_lng, max_lng = row
+    return nil unless min_lat && max_lat && min_lng && max_lng
+    { min_lat: min_lat.to_f, max_lat: max_lat.to_f, min_lng: min_lng.to_f, max_lng: max_lng.to_f }
+  end
+
+  # Diagonal of the set's bounding box in kilometres — how geographically
+  # spread out the set is. nil when the set has no usable coordinates.
+  def geo_extent_km
+    b = geo_bbox
+    return nil unless b
+    Game.haversine_km(b[:min_lat], b[:min_lng], b[:max_lat], b[:max_lng])
+  end
+
+  # Pole-to-pole great-circle distance — the extent of a globe-spanning set.
+  # The classic GeoGuessr decay (Game::GEOGUESSR_DECAY_KM) is calibrated for
+  # this extent, so it's our reference point for scaling smaller sets down.
+  WORLD_EXTENT_KM = 20_015.0
+  # Never scale the decay below this — keeps scoring on a tightly-clustered
+  # set (e.g. a single neighbourhood) from becoming punishingly steep.
+  SCORING_DECAY_MIN_KM = 25.0
+
+  # Per-set characteristic length (km) for the exponential score curve.
+  # A set confined to a small region gets a proportionally smaller decay so
+  # close guesses are still differentiated; a globe-spanning set keeps the
+  # classic world decay. Derived from the set's own image coordinates, so it
+  # adapts automatically as images are added. Falls back to the world default
+  # when the set has no usable coordinate spread.
+  def scoring_decay_km
+    extent = geo_extent_km
+    return Game::GEOGUESSR_DECAY_KM unless extent && extent.positive?
+    scaled = Game::GEOGUESSR_DECAY_KM * (extent / WORLD_EXTENT_KM)
+    scaled.clamp(SCORING_DECAY_MIN_KM, Game::GEOGUESSR_DECAY_KM)
+  end
+
   def materialize_filtered_items!
     return unless filtered?
 

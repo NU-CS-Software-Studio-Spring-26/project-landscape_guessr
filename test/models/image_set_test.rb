@@ -104,4 +104,26 @@ class ImageSetTest < ActiveSupport::TestCase
   test "normalize_tag_names keeps exact casing" do
     assert_equal [ "Forest", "forest" ], ImageSet.normalize_tag_names([ " Forest ", "forest", "" ])
   end
+
+  # --- geographic extent + per-set score scaling ---
+
+  test "geo_bbox spans the set's item coordinates" do
+    bbox = image_sets(:alice_private).geo_bbox
+    assert_in_delta 1.0, bbox[:min_lat], 0.001
+    assert_in_delta 5.0, bbox[:max_lat], 0.001
+    assert_in_delta 2.0, bbox[:min_lng], 0.001
+    assert_in_delta 6.0, bbox[:max_lng], 0.001
+  end
+
+  test "scoring_decay_km scales below the world default for a small set" do
+    decay = image_sets(:alice_private).scoring_decay_km
+    assert decay.positive?
+    assert decay < Game::GEOGUESSR_DECAY_KM
+    assert decay >= ImageSet::SCORING_DECAY_MIN_KM
+  end
+
+  test "scoring_decay_km falls back to the world default when items share one point" do
+    # The default set's items all sit at (9.99, 9.99) — zero spread.
+    assert_equal Game::GEOGUESSR_DECAY_KM, image_sets(:default).scoring_decay_km
+  end
 end

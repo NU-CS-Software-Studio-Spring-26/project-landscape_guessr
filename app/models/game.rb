@@ -32,8 +32,12 @@ class Game < ApplicationRecord
     rel.order(sort => direction).limit(20)
   }
 
-  def self.geoguessr_round_score(distance_km)
-    (GEOGUESSR_MAX_ROUND_SCORE * Math.exp(-distance_km / GEOGUESSR_DECAY_KM)).round.clamp(0, GEOGUESSR_MAX_ROUND_SCORE)
+  # `decay_km` is the characteristic length of the exponential score curve.
+  # Defaults to the classic world value, but callers pass a per-set decay
+  # (see ImageSet#scoring_decay_km) so a geographically small set is scored
+  # on its own scale instead of everyone landing near 5000.
+  def self.geoguessr_round_score(distance_km, decay_km: GEOGUESSR_DECAY_KM)
+    (GEOGUESSR_MAX_ROUND_SCORE * Math.exp(-distance_km / decay_km)).round.clamp(0, GEOGUESSR_MAX_ROUND_SCORE)
   end
 
   # Great-circle distance in kilometers via the Haversine formula. Used

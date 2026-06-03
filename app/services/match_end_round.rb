@@ -26,12 +26,15 @@ class MatchEndRound
   end
 
   def self.score_guesses_for(round)
+    # Scale the score curve to the set's geographic size once per round, so a
+    # city-sized set still differentiates guesses (see ImageSet#scoring_decay_km).
+    decay_km = round.match.image_set&.scoring_decay_km || Game::GEOGUESSR_DECAY_KM
     round.match_guesses.find_each do |g|
       dist_km = Game.haversine_km(
         g.latitude.to_f, g.longitude.to_f,
         round.answer_latitude.to_f, round.answer_longitude.to_f
       )
-      score = Game.geoguessr_round_score(dist_km)
+      score = Game.geoguessr_round_score(dist_km, decay_km: decay_km)
       g.update_columns(distance_km: dist_km, score: score)
       MatchPlayer.where(id: g.match_player_id)
                  .update_all([ "total_score = total_score + ?", score.to_i ])
