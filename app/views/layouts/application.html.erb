@@ -34,8 +34,14 @@
       <%# Desktop + mobile top bar %>
       <nav aria-label="Primary" class="container mx-auto px-5 h-14 flex justify-between items-center">
         <div class="flex items-center gap-6">
-          <%= link_to "Landscape Guessr", root_path,
-                class: "font-display font-semibold text-forest-800 text-lg tracking-tight hover:text-forest-600 transition-colors" %>
+          <%= link_to root_path,
+                class: "inline-flex items-center gap-2 font-display font-semibold text-forest-800 text-lg tracking-tight hover:text-forest-600 transition-colors" do %>
+            <svg class="w-6 h-6 text-forest-600 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <circle cx="18" cy="6.5" r="2.5"/>
+              <path d="M1.5 21 9 8l4.5 7 3-5 6 11z"/>
+            </svg>
+            <span>Landscape Guessr</span>
+          <% end %>
           <%# Desktop nav links %>
           <div class="hidden sm:flex items-center gap-5">
             <% if authenticated? %>
