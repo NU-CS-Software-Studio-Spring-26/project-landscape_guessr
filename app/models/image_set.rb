@@ -66,6 +66,7 @@ class ImageSet < ApplicationRecord
   validate :system_default_has_no_user
   validate :only_one_system_default, if: :is_system_default?
   validate :name_not_reserved
+  validate :public_visibility_permitted
 
   # `prepend: true` so this runs BEFORE the `dependent: :delete_all` on
   # image_set_items (declared above) — dependent destroy strategies are
@@ -83,6 +84,15 @@ class ImageSet < ApplicationRecord
     where(is_system_default: true)
       .or(public_catalog)
       .or(where(user_id: user&.id))
+  }
+
+  # Most-played first. Popularity = number of games started on the set, the
+  # app's primary play signal. LEFT JOIN + grouped count so sets that have
+  # never been played still appear (just last), then break ties by name.
+  scope :by_popularity, -> {
+    left_joins(:games)
+      .group("image_sets.id")
+      .order(Arel.sql("COUNT(games.id) DESC"), :name)
   }
 
   scope :tagged_with, ->(tag_slug_or_names, match: "all", case_sensitive: false) {
@@ -188,6 +198,13 @@ class ImageSet < ApplicationRecord
     parent_image_set_id.present?
   end
 
+  # AI-generated sets carry the SPARQL pattern the import job ran. The
+  # controller already uses this same signal to gate the retry-import flow,
+  # so `ai_query` present is the canonical "this was AI-generated" check.
+  def ai_generated?
+    ai_query.present?
+  end
+
   # AI-import states that mean a background job is mid-flight (or just
   # crashed and left us here). Centralized so the show view, the retry
   # button gate, and any future caller stay in sync — duplicating the
@@ -248,6 +265,56 @@ class ImageSet < ApplicationRecord
 
   def selected_regions
     Region.where(id: region_ids)
+  end
+
+  # Geographic bounding box of the set's items as
+  # { min_lat:, max_lat:, min_lng:, max_lng: }, or nil when the set has no
+  # item with coordinates. Per-item coord overrides win, falling back to the
+  # underlying image's GPS via COALESCE. One aggregate SQL pass — no rows
+  # loaded into Ruby. This is the "boundaries extracted from the photos'
+  # metadata" that drives both the guess-map fit and per-set scoring.
+  def geo_bbox
+    row = image_set_items
+            .joins(:image)
+            .pick(
+              Arel.sql("MIN(COALESCE(image_set_items.latitude,  images.latitude))"),
+              Arel.sql("MAX(COALESCE(image_set_items.latitude,  images.latitude))"),
+              Arel.sql("MIN(COALESCE(image_set_items.longitude, images.longitude))"),
+              Arel.sql("MAX(COALESCE(image_set_items.longitude, images.longitude))")
+            )
+    return nil unless row
+    min_lat, max_lat, min_lng, max_lng = row
+    return nil unless min_lat && max_lat && min_lng && max_lng
+    { min_lat: min_lat.to_f, max_lat: max_lat.to_f, min_lng: min_lng.to_f, max_lng: max_lng.to_f }
+  end
+
+  # Diagonal of the set's bounding box in kilometres — how geographically
+  # spread out the set is. nil when the set has no usable coordinates.
+  def geo_extent_km
+    b = geo_bbox
+    return nil unless b
+    Game.haversine_km(b[:min_lat], b[:min_lng], b[:max_lat], b[:max_lng])
+  end
+
+  # Pole-to-pole great-circle distance — the extent of a globe-spanning set.
+  # The classic GeoGuessr decay (Game::GEOGUESSR_DECAY_KM) is calibrated for
+  # this extent, so it's our reference point for scaling smaller sets down.
+  WORLD_EXTENT_KM = 20_015.0
+  # Never scale the decay below this — keeps scoring on a tightly-clustered
+  # set (e.g. a single neighbourhood) from becoming punishingly steep.
+  SCORING_DECAY_MIN_KM = 25.0
+
+  # Per-set characteristic length (km) for the exponential score curve.
+  # A set confined to a small region gets a proportionally smaller decay so
+  # close guesses are still differentiated; a globe-spanning set keeps the
+  # classic world decay. Derived from the set's own image coordinates, so it
+  # adapts automatically as images are added. Falls back to the world default
+  # when the set has no usable coordinate spread.
+  def scoring_decay_km
+    extent = geo_extent_km
+    return Game::GEOGUESSR_DECAY_KM unless extent && extent.positive?
+    scaled = Game::GEOGUESSR_DECAY_KM * (extent / WORLD_EXTENT_KM)
+    scaled.clamp(SCORING_DECAY_MIN_KM, Game::GEOGUESSR_DECAY_KM)
   end
 
   def materialize_filtered_items!
@@ -435,6 +502,23 @@ class ImageSet < ApplicationRecord
     return if name.blank?
     return if persisted? && !will_save_change_to_name?
     errors.add(:name, "is reserved") if name.casecmp?(SAVED_FOR_PRACTICE_NAME)
+  end
+
+  # Defensive: a user-created custom set may only be made public by an admin
+  # or when it's AI-generated. Enforced at the model so every path (the form,
+  # ai_create, console, any future API) is covered, not just the UI. Only the
+  # *act* of going public is blocked — a set that's already public (e.g. a
+  # legacy row, or one made public by an admin) isn't re-invalidated when it's
+  # edited for unrelated reasons, mirroring `name_not_reserved`.
+  def public_visibility_permitted
+    return unless visibility == "public"
+    # Ownerless sets come only from trusted flows (seeds, the system default,
+    # admin console) — never a user's custom set, which always carries a
+    # user_id from `Current.user.image_sets.new`.
+    return if user_id.blank?
+    return if is_system_default? || ai_generated? || user&.admin?
+    return if persisted? && !will_save_change_to_visibility?
+    errors.add(:visibility, "can only be set to public by an admin or for AI-generated sets")
   end
 
   # Snapshot member image_ids before dependent: :delete_all wipes the

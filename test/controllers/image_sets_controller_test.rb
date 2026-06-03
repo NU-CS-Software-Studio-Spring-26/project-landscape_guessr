@@ -516,6 +516,7 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
     sign_in_as @bob
     set = ImageSet.create!(user: @alice, name: "Alice's failing set",
                             visibility: "public", import_state: "failed",
+                            ai_query: "?item wdt:P31 wd:Q8072 .",
                             import_error: "Net::ReadTimeout: query.wikidata.org timed out at /app/lib/foo.rb")
     get import_status_image_set_path(set)
     # @bob shouldn't see Alice's import_error message — require_owner
@@ -530,7 +531,8 @@ class ImageSetsControllerTest < ActionDispatch::IntegrationTest
     # body and the client's res.json() threw.
     sign_in_as @bob
     set = ImageSet.create!(user: @alice, name: "Alice's set",
-                            visibility: "public", import_state: "importing")
+                            visibility: "public", import_state: "importing",
+                            ai_query: "?item wdt:P31 wd:Q8072 .")
     get import_status_image_set_path(set), headers: { "Accept" => "application/json" }
     assert_response :forbidden
     assert_equal "application/json", response.media_type

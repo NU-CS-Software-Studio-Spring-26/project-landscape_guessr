@@ -145,6 +145,7 @@ class GamesController < ApplicationController
   def results
     game_images_by_image_id = @game.game_images.index_by(&:image_id)
     guesses = @game.guesses.includes(:image).order(:created_at).to_a
+    decay_km = @game.image_set&.scoring_decay_km || Game::GEOGUESSR_DECAY_KM
 
     @rounds = guesses.each_with_index.map do |guess, idx|
       gi = game_images_by_image_id[guess.image_id]
@@ -158,7 +159,7 @@ class GamesController < ApplicationController
         answer_lat: ans_lat,
         answer_lng: ans_lng,
         round_number: idx + 1,
-        round_score: Game.geoguessr_round_score(dist_km),
+        round_score: Game.geoguessr_round_score(dist_km, decay_km: decay_km),
         round_duration_seconds: (guess.created_at - round_start).to_i
       }
     end
@@ -234,21 +235,9 @@ class GamesController < ApplicationController
     end
 
     # Returns { min_lat:, max_lat:, min_lng:, max_lng: } over the set's items,
-    # or nil if the set has no item with coords. Image lat/lng falls back to
-    # the underlying image's GPS via COALESCE. One scan over the set's items.
+    # or nil if the set has no item with coords. Used to fit the guess map at
+    # round start. See ImageSet#geo_bbox for the computation.
     def compute_set_image_bbox(image_set)
-      return nil unless image_set
-      row = image_set.image_set_items
-                     .joins(:image)
-                     .pick(
-                       Arel.sql("MIN(COALESCE(image_set_items.latitude,  images.latitude))  AS min_lat"),
-                       Arel.sql("MAX(COALESCE(image_set_items.latitude,  images.latitude))  AS max_lat"),
-                       Arel.sql("MIN(COALESCE(image_set_items.longitude, images.longitude)) AS min_lng"),
-                       Arel.sql("MAX(COALESCE(image_set_items.longitude, images.longitude)) AS max_lng")
-                     )
-      return nil unless row && row.compact.any?
-      min_lat, max_lat, min_lng, max_lng = row
-      return nil unless min_lat && max_lat && min_lng && max_lng
-      { min_lat: min_lat.to_f, max_lat: max_lat.to_f, min_lng: min_lng.to_f, max_lng: max_lng.to_f }
+      image_set&.geo_bbox
     end
 end
