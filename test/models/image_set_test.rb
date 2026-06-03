@@ -137,4 +137,39 @@ class ImageSetTest < ActiveSupport::TestCase
     ordered = ImageSet.where(id: [ a.id, b.id ]).by_popularity
     assert_equal [ a.id, b.id ], ordered.map(&:id)
   end
+
+  # --- defensive: public visibility is gated ---
+
+  test "non-admin cannot make their custom set public" do
+    set = users(:alice).image_sets.new(name: "Alice Public", visibility: "public")
+    assert_not set.valid?
+    assert_includes set.errors[:visibility], "can only be set to public by an admin or for AI-generated sets"
+  end
+
+  test "non-admin cannot flip an existing private set to public" do
+    set = image_sets(:alice_private)
+    set.visibility = "public"
+    assert_not set.valid?
+  end
+
+  test "admin can make their custom set public" do
+    set = users(:admin).image_sets.new(name: "Admin Public", visibility: "public")
+    assert set.valid?, set.errors.full_messages.to_sentence
+  end
+
+  test "AI-generated custom set may be public" do
+    set = users(:alice).image_sets.new(name: "AI Public", visibility: "public", ai_query: "?item wdt:P31 wd:Q8072 .")
+    assert set.valid?, set.errors.full_messages.to_sentence
+  end
+
+  test "ownerless set may be public" do
+    set = ImageSet.new(name: "Ownerless Public", visibility: "public")
+    assert set.valid?, set.errors.full_messages.to_sentence
+  end
+
+  test "already-public set stays valid when edited for unrelated reasons" do
+    set = image_sets(:alice_public)
+    set.name = "Renamed Public"
+    assert set.valid?, set.errors.full_messages.to_sentence
+  end
 end

@@ -66,6 +66,7 @@ class ImageSet < ApplicationRecord
   validate :system_default_has_no_user
   validate :only_one_system_default, if: :is_system_default?
   validate :name_not_reserved
+  validate :public_visibility_permitted
 
   # `prepend: true` so this runs BEFORE the `dependent: :delete_all` on
   # image_set_items (declared above) — dependent destroy strategies are
@@ -195,6 +196,13 @@ class ImageSet < ApplicationRecord
 
   def filtered?
     parent_image_set_id.present?
+  end
+
+  # AI-generated sets carry the SPARQL pattern the import job ran. The
+  # controller already uses this same signal to gate the retry-import flow,
+  # so `ai_query` present is the canonical "this was AI-generated" check.
+  def ai_generated?
+    ai_query.present?
   end
 
   # AI-import states that mean a background job is mid-flight (or just
@@ -494,6 +502,23 @@ class ImageSet < ApplicationRecord
     return if name.blank?
     return if persisted? && !will_save_change_to_name?
     errors.add(:name, "is reserved") if name.casecmp?(SAVED_FOR_PRACTICE_NAME)
+  end
+
+  # Defensive: a user-created custom set may only be made public by an admin
+  # or when it's AI-generated. Enforced at the model so every path (the form,
+  # ai_create, console, any future API) is covered, not just the UI. Only the
+  # *act* of going public is blocked — a set that's already public (e.g. a
+  # legacy row, or one made public by an admin) isn't re-invalidated when it's
+  # edited for unrelated reasons, mirroring `name_not_reserved`.
+  def public_visibility_permitted
+    return unless visibility == "public"
+    # Ownerless sets come only from trusted flows (seeds, the system default,
+    # admin console) — never a user's custom set, which always carries a
+    # user_id from `Current.user.image_sets.new`.
+    return if user_id.blank?
+    return if is_system_default? || ai_generated? || user&.admin?
+    return if persisted? && !will_save_change_to_visibility?
+    errors.add(:visibility, "can only be set to public by an admin or for AI-generated sets")
   end
 
   # Snapshot member image_ids before dependent: :delete_all wipes the
