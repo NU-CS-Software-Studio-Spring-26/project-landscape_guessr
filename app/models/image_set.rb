@@ -85,6 +85,15 @@ class ImageSet < ApplicationRecord
       .or(where(user_id: user&.id))
   }
 
+  # Most-played first. Popularity = number of games started on the set, the
+  # app's primary play signal. LEFT JOIN + grouped count so sets that have
+  # never been played still appear (just last), then break ties by name.
+  scope :by_popularity, -> {
+    left_joins(:games)
+      .group("image_sets.id")
+      .order(Arel.sql("COUNT(games.id) DESC"), :name)
+  }
+
   scope :tagged_with, ->(tag_slug_or_names, match: "all", case_sensitive: false) {
     if ActiveModel::Type::Boolean.new.cast(case_sensitive)
       names = normalize_tag_names(tag_slug_or_names)

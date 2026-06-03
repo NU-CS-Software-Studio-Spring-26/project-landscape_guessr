@@ -126,4 +126,15 @@ class ImageSetTest < ActiveSupport::TestCase
     # The default set's items all sit at (9.99, 9.99) — zero spread.
     assert_equal Game::GEOGUESSR_DECAY_KM, image_sets(:default).scoring_decay_km
   end
+
+  # --- popularity ordering ---
+
+  test "by_popularity orders most-played sets first" do
+    a = ImageSet.create!(name: "Pop A", visibility: "public")
+    b = ImageSet.create!(name: "Pop B", visibility: "public")
+    users(:alice).games.create!(status: "completed", image_set: a, completed_at: Time.current, score: 1)
+
+    ordered = ImageSet.where(id: [ a.id, b.id ]).by_popularity
+    assert_equal [ a.id, b.id ], ordered.map(&:id)
+  end
 end

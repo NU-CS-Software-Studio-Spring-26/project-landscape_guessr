@@ -210,7 +210,7 @@ class MatchesController < ApplicationController
   end
 
   def available_image_sets
-    ImageSet.visible_to(Current.user).order(:name)
+    ImageSet.visible_to(Current.user).by_popularity
   end
 
   def resolve_image_set
