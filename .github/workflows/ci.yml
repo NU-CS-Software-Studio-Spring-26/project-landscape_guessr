@@ -20,15 +20,15 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-        
-      - name: Configure bundler (allow frozen false for CI)
-        run: bundle config set frozen false
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
           bundler-cache: true
           bundler: default
+
+      - name: Allow Bundler to update lockfile if needed
+        run: bundle config set --local frozen false
 
       - name: Scan for common Rails security vulnerabilities using static analysis
         run: bin/brakeman --no-pager
@@ -48,6 +48,9 @@ jobs:
         with:
           bundler-cache: true
 
+      - name: Allow Bundler to update lockfile if needed
+        run: bundle config set --local frozen false
+
       - name: Scan for security vulnerabilities in JavaScript dependencies
         run: bin/importmap audit
 
@@ -63,6 +66,9 @@ jobs:
         uses: ruby/setup-ruby@v1
         with:
           bundler-cache: true
+
+      - name: Allow Bundler to update lockfile if needed
+        run: bundle config set --local frozen false
 
       - name: Prepare RuboCop cache
         uses: actions/cache@v4
@@ -108,6 +114,9 @@ jobs:
         with:
           bundler-cache: true
 
+      - name: Allow Bundler to update lockfile if needed
+        run: bundle config set --local frozen false
+
       - name: Run tests
         env:
           RAILS_ENV: test
@@ -146,6 +155,9 @@ jobs:
         uses: ruby/setup-ruby@v1
         with:
           bundler-cache: true
+
+      - name: Allow Bundler to update lockfile if needed
+        run: bundle config set --local frozen false
 
       - name: Run System Tests
         env:
