@@ -19,7 +19,8 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
-  test "show includes AI hint controls when ai hints enabled" do
+  test "show includes AI hint controls when ai hints enabled for verified user" do
+    sign_in_as @alice
     with_ai_hints_config(enabled: true) do
       get practice_path
     end
@@ -27,12 +28,26 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
     assert_response :success
     assert_includes response.body, 'data-practice-type-param="visual"'
     assert_includes response.body, "AI hint"
+    assert_includes response.body, "No hint"
     assert_includes response.body, "Subtle"
     assert_includes response.body, "Medium"
     assert_includes response.body, "Strong"
     assert_includes response.body, "data-practice-hint-url-value"
     assert_includes response.body, "data-practice-hint-quota-used-value"
     assert_includes response.body, "(0/100)"
+  end
+
+  test "show renders disabled AI hint button with tooltip for unverified user when ai hints enabled" do
+    with_ai_hints_config(enabled: true) do
+      get practice_path
+    end
+
+    assert_response :success
+    assert_includes response.body, "AI hint"
+    assert_includes response.body, "Only for verified users"
+    assert_includes response.body, "cursor-not-allowed"
+    assert_not_includes response.body, "data-practice-hint-url-value"
+    assert_not_includes response.body, "data-practice-hint-quota-used-value"
   end
 
   test "show omits AI hint controls when ai hints disabled" do
