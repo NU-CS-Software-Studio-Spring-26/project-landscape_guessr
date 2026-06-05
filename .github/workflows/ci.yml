@@ -20,6 +20,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        
+      - name: Configure bundler (allow frozen false for CI)
+        run: bundle config set frozen false
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
