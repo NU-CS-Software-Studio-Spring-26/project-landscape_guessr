@@ -127,7 +127,7 @@ class AiImageSetGenerator
             sparql_pattern:           { type: "STRING" },  # wikidata only
             topic_qid:                { type: "STRING" },  # commons (for P373 lookup)
             combined_qid:             { type: "STRING" },  # commons (optional combined-concept Q-ID)
-            commons_intitle_fallback: { type: "STRING" },  # commons (when no category)
+            commons_intitle_fallback: { type: "STRING" },  # commons (when no category): ONE singular title keyword, e.g. "skyline"
             mapillary_min_year:       { type: "STRING" },  # mapillary (optional)
             # Sub-region — exactly one BASE mode populated.
             # Mode A (in-DB)
@@ -918,7 +918,17 @@ class AiImageSetGenerator
                                   Q1130516 → its own P373 category). Rarely
                                   needed now (see below).
         commons_intitle_fallback — Only when no Q-ID has a clean P373:
-                                   an intitle: free-text search, 1-4 words.
+                                   a SINGLE distinctive keyword, matched as a
+                                   literal title substring. Real Commons files
+                                   are titled "Chicago skyline.jpg", "Boston
+                                   lighthouse.jpg" — so give the bare noun that
+                                   appears in those titles, usually SINGULAR:
+                                   "skyline", "lighthouse", "waterfall". NEVER a
+                                   descriptive phrase ("city skylines", "tall
+                                   skyscrapers"): a multi-word value must appear
+                                   verbatim in the title and almost never does
+                                   (intitle:"city skylines" ≈ 1 hit nationwide,
+                                   intitle:skyline ≈ thousands per city).
 
       What the backend does with these (you don't engineer around it):
         * topic_qid + region → it builds the REGION-ANCHORED category

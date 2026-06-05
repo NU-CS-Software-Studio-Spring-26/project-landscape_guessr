@@ -182,8 +182,28 @@ class CommonsImporter
     polygon = region_resolved.polygon
     return probes unless polygon
     factory = RGeo::Geographic.spherical_factory(srid: 4326)
-    inside = probes.select { |p| polygon.contains?(factory.point(p[:lng], p[:lat])) rescue true }
+    inside = probes.select { |p| probe_touches_polygon?(p, polygon, factory) }
     inside.presence || probes
+  end
+
+  # A probe is useful if its search CIRCLE overlaps the region — not only when
+  # its centre is inside. A country's tiling probes sit on a coarse lattice with
+  # a large radius (≈400km for the US); the coastal centres fall just offshore
+  # (NYC, LA, Miami, Seattle), so a centre-only test silently strands the
+  # country's biggest skyline cities. Approximate "circle ∩ polygon" by testing
+  # the centre plus a ring of points at the probe radius — cheap, and reliable
+  # because a country's landmass dwarfs the sample gap. For small (30km) probes
+  # this barely differs from a centre test.
+  RING_OFFSETS = [ [ 0, 0 ], [ 1, 0 ], [ -1, 0 ], [ 0, 1 ], [ 0, -1 ],
+                   [ 0.7, 0.7 ], [ 0.7, -0.7 ], [ -0.7, 0.7 ], [ -0.7, -0.7 ] ].freeze
+  def self.probe_touches_polygon?(probe, polygon, factory)
+    r = probe[:radius_km].to_f
+    dlat = r / 111.0
+    dlng = r / (111.0 * Math.cos(probe[:lat] * Math::PI / 180.0))
+    RING_OFFSETS.any? do |dy, dx|
+      pt = factory.point(probe[:lng] + dx * dlng, probe[:lat] + dy * dlat)
+      polygon.contains?(pt) rescue false
+    end
   end
 
   # Builds the CirrusSearch query string. Quoting handled by us — Cirrus
@@ -221,7 +241,16 @@ class CommonsImporter
   # total so the progress bar advances even within a single probe.
   def self.collect_rows(commons_category:, intitle_fallback:, region_resolved:, max_rows:, probe_cap: IMPORT_PROBE_CAP, on_rows: nil)
     probes = sample_probes(probes_for(region_resolved), probe_cap)
+    return [] if probes.empty?
     rows = []
+
+    # Even geographic spread: cap each probe at its fair share of the budget so
+    # a photo-dense city (LA alone has thousands of "skyline" files) can't fill
+    # the whole set before a sparser region is ever queried — otherwise both the
+    # 30-image preview and the import come back lopsidedly Californian for "US
+    # skylines". A ×1.5 headroom lets dense probes backfill the shortfall left
+    # by sparse ones without any single probe dominating.
+    per_probe = [ (max_rows.to_f / probes.size * 1.5).ceil, 1 ].max
 
     probes.each do |probe|
       break if rows.size >= max_rows
@@ -229,7 +258,7 @@ class CommonsImporter
       begin
         fetched = fetch_probe_rows(
           commons_category: commons_category, intitle_fallback: intitle_fallback,
-          probe: probe, limit: [ max_rows - rows.size, PER_PROBE_CAP ].min,
+          probe: probe, limit: [ per_probe, max_rows - rows.size, PER_PROBE_CAP ].min,
           on_page: on_rows ? ->(probe_rows) { on_rows.call(base + probe_rows) } : nil
         )
         rows.concat(fetched)

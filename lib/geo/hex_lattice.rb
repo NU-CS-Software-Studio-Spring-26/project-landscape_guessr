@@ -27,10 +27,24 @@ module Geo
         return [ { lat: avg_lat, lng: (min_lng + max_lng) / 2.0, radius_km: radius_km } ]
       end
 
-      # Hex lattice: rows offset by r*sqrt(3); cols offset by r*sqrt(3)*sqrt(3)/2 = 1.5r.
-      # Convert km spacing back to degrees.
+      # A fixed-radius (30km) lattice over a continent-sized bbox is tens of
+      # thousands of points. Capping that by truncation strands every probe in
+      # the bottom rows — the US bbox's FIRST row alone (at American Samoa's
+      # latitude, marching across the empty Pacific) is 200+ points, so the
+      # continental US never gets a probe and the count comes back 0. Instead,
+      # when the fixed-radius lattice would exceed max_probes, scale the RADIUS
+      # up so ~max_probes circles still TILE the whole bbox (spacing stays
+      # r*sqrt(3), so there are no coverage gaps). Small regions are untouched
+      # (30km); a country gets a few hundred large covering circles spread
+      # evenly across all of it.
       lat_step = radius_km * OVERLAP_FACTOR / 111.0
       lng_step = radius_km * OVERLAP_FACTOR / (111.0 * Math.cos(avg_lat * Math::PI / 180.0))
+      full = ((max_lat - min_lat) / lat_step + 1) * ((max_lng - min_lng) / lng_step + 1)
+      if full > max_probes
+        radius_km *= Math.sqrt(full / max_probes)
+        lat_step = radius_km * OVERLAP_FACTOR / 111.0
+        lng_step = radius_km * OVERLAP_FACTOR / (111.0 * Math.cos(avg_lat * Math::PI / 180.0))
+      end
 
       probes = []
       lat = min_lat
@@ -44,9 +58,14 @@ module Geo
         end
         lat += lat_step
         row += 1
-        break if probes.size >= max_probes
       end
-      probes.first(max_probes)
+
+      # Scaling targets ~max_probes, but boundary slack can leave a few extra.
+      # Thin by an even stride (not first(), which would re-introduce the
+      # bottom-row bias the scaling just removed).
+      return probes if probes.size <= max_probes
+      stride = probes.size.to_f / max_probes
+      (0...max_probes).map { |i| probes[(i * stride).floor] }
     end
   end
 end

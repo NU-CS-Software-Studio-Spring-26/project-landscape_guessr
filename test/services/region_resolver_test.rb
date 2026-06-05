@@ -80,6 +80,101 @@ class RegionResolverTest < ActiveSupport::TestCase
     restore_geocoder
   end
 
+  test "primary_landmass_bbox keeps the dominant hemisphere, dropping the dateline-wrap fragment" do
+    factory = RGeo::Geographic.spherical_factory(srid: 4326)
+    # A big western-hemisphere landmass (mimics the contiguous US) ...
+    west = factory.polygon(factory.linear_ring([
+      factory.point(-125, 25), factory.point(-67, 25),
+      factory.point(-67, 49), factory.point(-125, 49), factory.point(-125, 25)
+    ]))
+    # ... plus a tiny eastern-hemisphere islet across the dateline (mimics the
+    # westernmost Aleutians at ~+178).
+    east = factory.polygon(factory.linear_ring([
+      factory.point(177, 51), factory.point(179, 51),
+      factory.point(179, 52), factory.point(177, 52), factory.point(177, 51)
+    ]))
+    multi = factory.multi_polygon([ west, east ])
+
+    # Naive min/max bbox wraps the planet (max_lng from the +178 islet).
+    naive = { min_lat: 25.0, max_lat: 52.0, min_lng: -125.0, max_lng: 179.0 }
+    bbox = RegionResolver.primary_landmass_bbox(naive, multi)
+
+    assert_operator (bbox[:max_lng] - bbox[:min_lng]), :<=, 180.0, "narrowed span must clear the antimeridian guard"
+    assert_in_delta(-125.0, bbox[:min_lng], 0.001)
+    assert_in_delta(-67.0,  bbox[:max_lng], 0.001) # eastern islet dropped
+  end
+
+  test "primary_landmass_bbox keeps two comparable landmasses, dropping only the far-side fragment (NZ-like)" do
+    factory = RGeo::Geographic.spherical_factory(srid: 4326)
+    south = factory.polygon(factory.linear_ring([
+      factory.point(166, -47), factory.point(174, -47),
+      factory.point(174, -40), factory.point(166, -40), factory.point(166, -47)
+    ]))
+    north = factory.polygon(factory.linear_ring([
+      factory.point(173, -41), factory.point(178, -41),
+      factory.point(178, -34), factory.point(173, -34), factory.point(173, -41)
+    ]))
+    chatham = factory.polygon(factory.linear_ring([
+      factory.point(-177, -44), factory.point(-176, -44),
+      factory.point(-176, -43), factory.point(-177, -43), factory.point(-177, -44)
+    ]))
+    multi = factory.multi_polygon([ south, north, chatham ])
+
+    naive = { min_lat: -47.0, max_lat: -34.0, min_lng: -177.0, max_lng: 178.0 } # span 355°
+    bbox = RegionResolver.primary_landmass_bbox(naive, multi)
+
+    assert_operator (bbox[:max_lng] - bbox[:min_lng]), :<=, 180.0
+    assert_in_delta 166.0, bbox[:min_lng], 0.001 # south island kept
+    assert_in_delta 178.0, bbox[:max_lng], 0.001 # north island kept, chatham dropped
+  end
+
+  test "primary_landmass_bbox drops far territories that fit under 180 but are distant (France-like)" do
+    factory = RGeo::Geographic.spherical_factory(srid: 4326)
+    metropole = factory.polygon(factory.linear_ring([
+      factory.point(-5, 42), factory.point(10, 42),
+      factory.point(10, 51), factory.point(-5, 51), factory.point(-5, 42)
+    ]))
+    reunion = factory.polygon(factory.linear_ring([
+      factory.point(55, -21), factory.point(56, -21),
+      factory.point(56, -20), factory.point(55, -20), factory.point(55, -21)
+    ]))
+    new_caledonia = factory.polygon(factory.linear_ring([
+      factory.point(164, -22), factory.point(167, -22),
+      factory.point(167, -20), factory.point(164, -20), factory.point(164, -22)
+    ]))
+    polynesia = factory.polygon(factory.linear_ring([ # west hemisphere, makes the naive span > 180
+      factory.point(-150, -18), factory.point(-149, -18),
+      factory.point(-149, -17), factory.point(-150, -17), factory.point(-150, -18)
+    ]))
+    multi = factory.multi_polygon([ metropole, reunion, new_caledonia, polynesia ])
+
+    naive = { min_lat: -22.0, max_lat: 51.0, min_lng: -150.0, max_lng: 167.0 } # span 317°
+    bbox = RegionResolver.primary_landmass_bbox(naive, multi)
+
+    # Only the metropole survives — Réunion/New Caledonia/Polynesia each fit
+    # under 180° when unioned with it, but are >1500km away, so the box stays
+    # tight (dense probes) instead of spanning the whole Indian/Pacific Ocean.
+    assert_in_delta(-5.0, bbox[:min_lng], 0.001)
+    assert_in_delta 10.0, bbox[:max_lng], 0.001
+    assert_in_delta 42.0, bbox[:min_lat], 0.001
+    assert_in_delta 51.0, bbox[:max_lat], 0.001
+  end
+
+  test "primary_landmass_bbox leaves a non-degenerate bbox untouched" do
+    factory = RGeo::Geographic.spherical_factory(srid: 4326)
+    poly = factory.polygon(factory.linear_ring([
+      factory.point(6, 47), factory.point(15, 47),
+      factory.point(15, 55), factory.point(6, 55), factory.point(6, 47)
+    ]))
+    naive = { min_lat: 47.0, max_lat: 55.0, min_lng: 6.0, max_lng: 15.0 } # span 9° (Germany)
+    assert_equal naive, RegionResolver.primary_landmass_bbox(naive, poly)
+  end
+
+  test "primary_landmass_bbox returns the naive bbox when no polygon is available" do
+    naive = { min_lat: -47.0, max_lat: -34.0, min_lng: -180.0, max_lng: 180.0 }
+    assert_equal naive, RegionResolver.primary_landmass_bbox(naive, nil)
+  end
+
   test "legacy bare-fields descriptor (no mode key) is treated as Mode A" do
     # Pre-v2 ai_region_filter rows have shape {name:, parent_name:, admin_level:}.
     # The resolver should infer mode="named". We can't run the actual Region

@@ -106,12 +106,14 @@ class RegionResolver
     region.fetch_real_boundary! if region.boundary.blank?
     return nil unless region.min_lat && region.max_lat && region.min_lng && region.max_lng
 
+    polygon = region.rgeo_boundary
+    naive_bbox = {
+      min_lat: region.min_lat, max_lat: region.max_lat,
+      min_lng: region.min_lng, max_lng: region.max_lng
+    }
     Result.new(
-      bbox: {
-        min_lat: region.min_lat, max_lat: region.max_lat,
-        min_lng: region.min_lng, max_lng: region.max_lng
-      },
-      polygon: region.rgeo_boundary,
+      bbox: primary_landmass_bbox(naive_bbox, polygon),
+      polygon: polygon,
       label: region.name,
       source: :named,
       admin_level: d[:admin_level],
@@ -127,6 +129,89 @@ class RegionResolver
     query = [ d[:name], d[:parent_name] ].compact.map(&:to_s).reject(&:blank?).join(", ")
     return nil if query.blank?
     resolve_pois({ pois: [ query ], label: d[:name].to_s.presence || query })
+  end
+
+  # A country whose territory straddles the 180° meridian (US via the
+  # Aleutians, Russia via Chukotka, New Zealand via the Chatham Is.) gets a
+  # naive min/max bbox that wraps the whole planet in longitude (≈360° span),
+  # which corrupts every importer's tile/probe math — they'd sweep the empty
+  # Pacific and find almost nothing, so the pipeline would just refuse the
+  # prompt outright.
+  #
+  # OSM splits these multipolygons at the dateline, so the country sits as a
+  # dominant landmass plus far-flung fragments (across 180° AND scattered across
+  # oceans — the US's American Samoa, France's Kerguelen + New Caledonia). We
+  # seed the bbox with the dominant landmass (largest cos-lat-weighted envelope)
+  # and greedily merge other parts only while BOTH hold:
+  #   * the union keeps a ≤180° longitude span (guarantees a non-degenerate
+  #     result — a dateline fragment always blows past 180° raw, so it's
+  #     rejected), and
+  #   * the part is within LANDMASS_GAP_KM of the seed (so a tiny island 9000km
+  #     away doesn't inflate the box into a mostly-empty ocean rectangle, which
+  #     would starve the importers' probes — France went from a 177°-wide box
+  #     with 5 coarse probes to a tight metropole box).
+  # The full polygon is still used for filtering, so points stay constrained to
+  # the real country. Cost: outlying territories (Hawaii/Samoa for the US,
+  # Réunion/New Caledonia for France) aren't searched — negligible for a
+  # location-guessing game. Non-degenerate regions (span ≤ 180°) are untouched.
+  ANTIMERIDIAN_MAX_SPAN = 180.0
+  LANDMASS_GAP_KM = 1500.0
+
+  def self.primary_landmass_bbox(naive_bbox, polygon)
+    return naive_bbox unless polygon
+    return naive_bbox if (naive_bbox[:max_lng] - naive_bbox[:min_lng]) <= ANTIMERIDIAN_MAX_SPAN
+
+    boxes = polygon_parts(polygon).filter_map { |p| ring_envelope(p.exterior_ring) }
+    return naive_bbox if boxes.size <= 1
+
+    ranked = boxes.sort_by { |b| -box_area(b) }
+    seed = ranked.first
+    acc = seed
+    ranked.drop(1).each do |b|
+      merged = union_boxes([ acc, b ])
+      next if (merged[:max_lng] - merged[:min_lng]) > ANTIMERIDIAN_MAX_SPAN
+      next if bbox_gap_km(seed, b) > LANDMASS_GAP_KM
+      acc = merged
+    end
+    acc
+  end
+
+  # Nearest-edge gap (km) between two envelope hashes — 0 if they overlap.
+  def self.bbox_gap_km(a, b)
+    dlat = [ a[:min_lat] - b[:max_lat], b[:min_lat] - a[:max_lat], 0.0 ].max
+    dlng = [ a[:min_lng] - b[:max_lng], b[:min_lng] - a[:max_lng], 0.0 ].max
+    lat0 = (a[:min_lat] + a[:max_lat]) / 2.0
+    Math.sqrt((dlat * 111.0)**2 + (dlng * 111.0 * Math.cos(lat0 * Math::PI / 180.0))**2)
+  end
+
+  def self.polygon_parts(polygon)
+    return [ polygon ] unless polygon.respond_to?(:num_geometries)
+    (0...polygon.num_geometries).map { |i| polygon.geometry_n(i) }
+  end
+
+  def self.ring_envelope(ring)
+    pts = ring.points
+    return nil if pts.empty?
+    xs = pts.map(&:x)
+    ys = pts.map(&:y)
+    { min_lat: ys.min, max_lat: ys.max, min_lng: xs.min, max_lng: xs.max }
+  end
+
+  # Envelope area weighted by cos(latitude) so a wide but near-empty high-
+  # latitude envelope (Svalbard, Greenland) can't outrank a compact temperate
+  # landmass when choosing the dominant piece.
+  def self.box_area(b)
+    midlat = (b[:min_lat] + b[:max_lat]) / 2.0
+    (b[:max_lng] - b[:min_lng]) * (b[:max_lat] - b[:min_lat]) * Math.cos(midlat * Math::PI / 180.0).abs
+  end
+
+  def self.union_boxes(boxes)
+    {
+      min_lat: boxes.map { |b| b[:min_lat] }.min,
+      max_lat: boxes.map { |b| b[:max_lat] }.max,
+      min_lng: boxes.map { |b| b[:min_lng] }.min,
+      max_lng: boxes.map { |b| b[:max_lng] }.max
+    }
   end
 
   def self.resolve_pois(d)
