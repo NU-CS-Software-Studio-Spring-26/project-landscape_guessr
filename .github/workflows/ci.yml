@@ -13,6 +13,13 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Prevent Bundler from running bundle install in frozen/deployment mode.
+# ruby/setup-ruby sets --local deployment true before its internal bundle
+# install call, but Bundler reads env vars at higher priority than local
+# config, so this env var wins and bundle install never enforces the lockfile.
+env:
+  BUNDLE_DEPLOYMENT: "false"
+
 jobs:
   scan_ruby:
     runs-on: ubuntu-latest
