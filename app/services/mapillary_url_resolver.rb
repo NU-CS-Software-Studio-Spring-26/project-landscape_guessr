@@ -10,8 +10,8 @@ require "json"
 #   GET https://graph.mapillary.com/<image_id>?fields=thumb_2048_url
 #   Authorization: OAuth <token>
 #
-# Batch endpoint is `?ids=A,B,C&fields=thumb_2048_url`. Up to 100
-# IDs per request observed working in our tests.
+# Batch endpoint is `?ids=A,B,C&fields=thumb_2048_url`. We send BATCH_SIZE
+# (50) IDs per request — comfortably within what the Graph API accepts.
 class MapillaryUrlResolver
   API = URI("https://graph.mapillary.com").freeze
   CACHE_TTL = 6.hours

@@ -210,8 +210,11 @@ class PracticeController < ApplicationController
       progress = PracticeSetProgress.start(session, @practice_set, all_ids: all_ids)
     end
 
+    # Only credit completion for an image that's actually in this set — a
+    # crafted ?completed_image_id=999999 must not inflate the count and fake
+    # the "finished" redirect (finished? is completed-count vs total).
     completed_id = params[:completed_image_id].to_i
-    progress.complete!(completed_id) if completed_id.positive?
+    progress.complete!(completed_id) if completed_id.positive? && all_ids.include?(completed_id)
 
     if progress.finished?
       redirect_to practice_complete_path(practice_set_id: @practice_set.id)

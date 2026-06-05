@@ -60,7 +60,6 @@ class MapillaryImporter
   COUNT_PROBE_TILES  = 8       # covered tiles sampled to estimate the count
   PER_TILE_CAP       = 1000    # max features kept per tile (memory bound)
   PER_SEQUENCE_CAP   = 3       # avoid drive-clusters
-  EMPTY_TILE_BYTES   = 200     # < this = ocean / no coverage
   HARD_CAP           = 4000    # final image count per import
   CONCURRENT_FETCHES = 8
 
@@ -229,6 +228,15 @@ class MapillaryImporter
   # tiles too sparsely, so use the global `overview` layer instead. Threshold
   # mirrors the coverage probe's own fetch-all cap — if we can't fetch every z6
   # coverage tile, the region is overview-scale.
+  #
+  # KNOWN LIMITATION: this counts z6 tiles over the bbox RECTANGLE, so an
+  # archipelago country with a huge ocean-filled bbox (Japan z6=49, Indonesia
+  # 50, Chile 90, Norway 342) is wrongly sent to the sparse overview layer even
+  # though its land would tile well at z14. Gating on the land polygon at z6
+  # doesn't work either: a z6 tile is ~600km, so center-in-polygon undercounts
+  # big blocky countries (Brazil, Australia drop below the cap and would lose
+  # the overview layer they need). The correct fix is a polygon-AREA (km²)
+  # threshold; deferred until that can be measured and tuned.
   def self.use_overview?(bbox)
     Mapillary::TileDecoder.tile_count_in_bbox(bbox, zoom: COVERAGE_MIN_ZOOM) > COVERAGE_FETCH_CAP
   end
@@ -449,8 +457,8 @@ class MapillaryImporter
   end
 
   # https://tiles.mapillary.com/maps/vtp/<tileset>/2/<z>/<x>/<y>?access_token=<token>
-  # Empty tiles are valid 200 responses with tiny payloads — caller treats
-  # < EMPTY_TILE_BYTES as no coverage.
+  # Empty tiles are valid 200 responses with tiny payloads — the decoder treats
+  # bytes < TileDecoder::EMPTY_TILE_BYTES as no coverage.
   def self.fetch_tile(z:, x:, y:)
     uri = URI("https://#{TILE_HOST}/maps/vtp/#{TILESET_NAME}/2/#{z}/#{x}/#{y}")
     uri.query = URI.encode_www_form(access_token: token)

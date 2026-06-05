@@ -71,16 +71,38 @@ class AiImageSetGeneratorTest < ActiveSupport::TestCase
     end
   end
 
-  test "submit_answer with SELECT in pattern is rejected" do
+  test "submit_answer with SELECT in pattern is rejected (ValidationError) after one resubmit chance" do
     gen = AiImageSetGenerator.new(api_key: "stub")
-    args = {
+    bad = {
       sparql_pattern: "SELECT * WHERE { ?item wdt:P31 wd:Q8072 . }",
       set_name: "X", explanation: "x", cannot_answer: false
     }
-    queue_gemini_responses([ submit_answer_envelope(args) ]) do
-      assert_raises(AiImageSetGenerator::InvalidResponseError) do
+    # The model gets ONE in-conversation chance to fix it; if it emits SELECT
+    # again, the deterministic ValidationError surfaces (a kind the pipeline
+    # must NOT escalate to Pro).
+    queue_gemini_responses([ submit_answer_envelope(bad), submit_answer_envelope(bad) ]) do
+      assert_raises(AiImageSetGenerator::ValidationError) do
         gen.generate(conversation: [ { role: "user", text: "x" } ])
       end
+    end
+  end
+
+  test "submit_answer self-corrects a rejected pattern on the resubmit turn" do
+    gen = AiImageSetGenerator.new(api_key: "stub")
+    bad = {
+      sparql_pattern: "SELECT * WHERE { ?item wdt:P31 wd:Q8072 . }",
+      set_name: "X", explanation: "x", cannot_answer: false
+    }
+    good = {
+      sparql_pattern: "?item wdt:P31/wdt:P279* wd:Q8072 ; wdt:P625 ?coord .",
+      set_name: "Volcanoes", explanation: "Volcanoes.", cannot_answer: false
+    }
+    # Feeding the validator error back lets Flash fix a stray sub-SELECT in one
+    # turn instead of hard-failing — this is the "english countryside" recovery.
+    queue_gemini_responses([ submit_answer_envelope(bad), submit_answer_envelope(good) ]) do
+      r = gen.generate(conversation: [ { role: "user", text: "volcanoes" } ])
+      assert_equal "wikidata", r[:image_source]
+      assert_match(/P279/, r[:sparql_pattern])
     end
   end
 

@@ -24,6 +24,11 @@ class AiGenerationPipeline
   # sample) fits, but a runaway doesn't.
   MAX_DURATION = 180
 
+  # Below this many matched items a Flash wikidata route is treated as a miss
+  # and retried on Pro — a handful of items makes for an unplayable set, and
+  # Pro frequently re-routes (commons) or broadens a too-narrow class.
+  MIN_VIABLE_COUNT = 5
+
   def initialize(generation:)
     @generation = generation
   end
@@ -95,12 +100,15 @@ class AiGenerationPipeline
     bail_if_canceled!
     @generation.update!(result_count: count)
 
-    # Pro retry ONLY on count == 0, NOT on nil.
-    if count == 0 && model == :flash && source == "wikidata"
+    # Pro retry when Flash's wikidata route came back empty or near-empty (a
+    # 2-item set is not playable). A genuinely sparse topic stays small even on
+    # Pro, but Pro often re-routes (e.g. to commons) or fixes a too-narrow class.
+    # Guard against nil (that's a query error, handled separately below).
+    if count && count < MIN_VIABLE_COUNT && model == :flash && source == "wikidata"
       check_deadline!
       @generation.update!(
         phase:            "thinking",
-        progress_message: "Flash matched 0 — trying again with a stronger model…"
+        progress_message: "Flash matched #{count} — trying again with a stronger model…"
       )
       pro_result = retry_on_pro(conversation[0..-2])
       bail_if_canceled!
@@ -189,7 +197,15 @@ class AiGenerationPipeline
   def generate_with_fallback(conversation)
     flash = AiImageSetGenerator.new(model: :flash, progress_callback: progress_callback)
     [ flash.generate(conversation: conversation), :flash ]
+  rescue AiImageSetGenerator::ValidationError => e
+    # DETERMINISTIC rejection (bad SPARQL / missing field) that already got one
+    # in-model fix attempt on Flash. Pro would re-run the identical prompt and
+    # almost certainly repeat the same structural choice — a wasted ~$0.10-0.30
+    # call. Surface it instead of masking it behind an expensive retry.
+    raise
   rescue AiImageSetGenerator::Error => e
+    # Transient failure (rate limit / 5xx / MALFORMED-exhausted / stuck) — Pro
+    # is more robust, so escalate for one attempt.
     Rails.logger.warn "[ai_pipeline flash] #{e.class}: #{e.message}"
     pro = AiImageSetGenerator.new(model: :pro, progress_callback: progress_callback)
     [ pro.generate(conversation: conversation), :pro ]

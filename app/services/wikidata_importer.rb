@@ -69,15 +69,8 @@ class WikidataImporter
   # flap; more just multiplies the wasted wall time.
   MAX_RETRIES = 2
 
-  # Non-photo filename patterns lifted from db/seeds.rb. No \b word
-  # boundaries — Ruby's \b treats `_` as a word char, so \bMODIS\b
-  # fails to match "MODIS_satellite.jpg". Do not re-add \b without
-  # testing against real filenames.
-  NON_PHOTO_PATTERNS = [
-    /ASTER|MODIS|Landsat|LANDSAT|Sentinel|MISR|Messtischblatt/i,
-    /_map[._]|location[_\s-]map|relief[_\s-]map|system[_\s-]map/i,
-    /topographic|schematic|Harper.?s[_\s-]New/i
-  ].freeze
+  # Non-photo filename patterns now live in MediaFilter (shared with Commons).
+  NON_PHOTO_PATTERNS = MediaFilter::NON_PHOTO_PATTERNS
 
   class Error < StandardError; end
   class TimeoutError < Error; end
@@ -183,7 +176,10 @@ class WikidataImporter
     # when available, P18 fallback otherwise). No reason to ever skip
     # this step.
     WikipediaImageFetcher.refresh_images!(rows: rows)
-    candidates = dedupe_by_url(rows.select { |r| r[:url].present? && r[:lat] && r[:lng] })
+    # Apply the SAME non-photo filter as import! (keepable) so the preview
+    # doesn't show maps/engravings (e.g. "Grampian_Map_..png") that the import
+    # would drop — the preview must match what actually gets imported.
+    candidates = dedupe_by_url(rows.select { |r| r[:url].present? && r[:lat] && r[:lng] && photo_url?(r[:url]) })
     # No server-side existence check. Broken thumbnails (deleted/renamed
     # files on Commons) are handled at render time by hide_broken_image
     # — the wrapper collapses on img.onerror so the preview shows only
@@ -859,9 +855,6 @@ class WikidataImporter
   # URL passes the "looks like a photo" sniff test? Drops obvious maps,
   # schematics, satellite imagery that Wikidata sometimes records as P18.
   def self.photo_url?(url)
-    return false if url.blank? || url.length > 500
-    return false unless url.match?(/\.(jpe?g|png)\z/i)
-    decoded = URI.decode_www_form_component(url.split("/").last.to_s)
-    !NON_PHOTO_PATTERNS.any? { |p| decoded.match?(p) }
+    MediaFilter.photo_url?(url)
   end
 end

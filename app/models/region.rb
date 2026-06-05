@@ -60,7 +60,6 @@ class Region < ApplicationRecord
     # - continent boost: keeps the 7 continent rows near the top
     # - similarity*5: rewards exact name matches over partial ("Paris" > "Parish")
     # - distance penalty (only when map_center given): tiebreaker for nearby places
-    full_query = words.join(" ")
     similarity_sql = sanitize_sql_array([
       "GREATEST(similarity(unaccent(regions.name), unaccent(?)), " \
       "COALESCE(similarity(unaccent(parents.name), unaccent(?)), 0))", full_query, full_query

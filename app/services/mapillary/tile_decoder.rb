@@ -109,8 +109,7 @@ module Mapillary
     end
 
     # Decode a single tile to an array of feature hashes:
-    #   { id:, lat:, lng:, is_pano:, sequence_id:, captured_at:,
-    #     compass_angle:, creator_id: }
+    #   { id:, lat:, lng:, is_pano:, sequence_id:, captured_at:, creator_id: }
     # Skips tiles below EMPTY_TILE_BYTES (ocean/no-coverage).
     def self.decode(tile_bytes, layer_name, z, x, y)
       return [] if tile_bytes.nil? || tile_bytes.bytesize < EMPTY_TILE_BYTES
@@ -155,7 +154,6 @@ module Mapillary
           is_pano:       truthy?(props["is_pano"]),
           sequence_id:   props["sequence_id"]&.to_s,
           captured_at:   to_int(props["captured_at"]),
-          compass_angle: props["compass_angle"],
           creator_id:    props["creator_id"]&.to_s
         }
       end

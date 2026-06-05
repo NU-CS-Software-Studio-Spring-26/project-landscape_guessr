@@ -173,7 +173,7 @@ class CommonsImporter
 
   def self.probes_for(region_resolved)
     return [ nil ] if region_resolved.nil?
-    probes = Geo::HexLattice.probes_for_bbox(region_resolved.bbox, radius_km: PROBE_RADIUS_KM, max_probes: 200)
+    probes = Geo::HexLattice.probes_for_bbox(region_resolved.bbox, radius_km: PROBE_RADIUS_KM, max_probes: MAX_PROBES)
     # Keep only probes whose centre is inside the region polygon. A country's
     # bbox is mostly ocean/neighbours at the corners; without this the strided
     # count/import sample wastes most of its budget on empty water (the "churches
@@ -319,6 +319,9 @@ class CommonsImporter
 
         title = p["title"].to_s.sub(/\AFile:/, "")
         next unless title.match?(IMAGE_EXTENSIONS)
+        # Same non-photo guard Wikidata applies: a deepcategory walk can pull in
+        # relief maps / satellite tiles / schematics that are real .jpg files.
+        next unless MediaFilter.photo_url?(title)
 
         ii = (p["imageinfo"] || []).first
         rows << {

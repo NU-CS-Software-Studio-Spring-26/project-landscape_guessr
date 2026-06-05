@@ -29,16 +29,23 @@ class AiImageSetGenerator
   class Error < StandardError; end
   class RateLimitError < Error; end
   class InvalidResponseError < Error; end
+  # A DETERMINISTIC rejection of the model's submit_answer payload (bad SPARQL,
+  # missing required field). Unlike a transient InvalidResponseError (MALFORMED,
+  # empty parts), re-running the same prompt won't help — so the pipeline must
+  # NOT escalate it to Pro. We give the model one in-conversation chance to fix
+  # it first (see the submit branch in #generate).
+  class ValidationError < InvalidResponseError; end
 
   FLASH_MODEL = "gemini-2.5-flash".freeze
   PRO_MODEL   = "gemini-2.5-pro".freeze
   API_BASE    = "https://generativelanguage.googleapis.com/v1beta/models".freeze
 
   # Cap the function-call cycle. The AI typically resolves 2-4 Q-IDs per
-  # query, plus the final submit_answer — so 8 turns is generous. Going
-  # over means the AI is stuck in a loop; better to fail and let the
+  # query, plus the final submit_answer — so 10 turns is generous even with
+  # the occasional MALFORMED / text-only / submit-rejection recovery round.
+  # Going over means the AI is stuck in a loop; better to fail and let the
   # user refine.
-  MAX_TOOL_ROUNDS = 8
+  MAX_TOOL_ROUNDS = 10
 
   # Property list IS load-bearing — these are the SPARQL grammar, not
   # entity lookups. Search-tool results for property concepts are noisy
@@ -185,13 +192,14 @@ class AiImageSetGenerator
     end
 
     text_only_retried = false
+    submit_retried = false
     malformed_retries = 0
     started = Time.now
     gemini_time = 0.0
     tool_time = 0.0
     tool_counts = Hash.new(0)
 
-    MAX_TOOL_ROUNDS.times do |i|
+    MAX_TOOL_ROUNDS.times do
       t0 = Time.now
       response = call_gemini(contents)
       gemini_time += Time.now - t0
@@ -200,10 +208,10 @@ class AiImageSetGenerator
       if parts.empty?
         finish = candidate["finishReason"]
         # MALFORMED_FUNCTION_CALL is non-deterministic on Flash with
-        # multi-round prompts — retry the SAME conversation once or twice
-        # before giving up. The retry uses temperature 0.0 already so
-        # we'd ordinarily expect determinism, but Flash structured-output
-        # behavior has stochastic edge cases.
+        # multi-round prompts — retry the SAME conversation up to 4 times
+        # before giving up. The retry runs at temperature 0.2, so there's
+        # some variance to shake it loose; Flash structured-output behavior
+        # has stochastic edge cases.
         if finish == "MALFORMED_FUNCTION_CALL" && malformed_retries < 4
           malformed_retries += 1
           next
@@ -243,8 +251,30 @@ class AiImageSetGenerator
       submit = function_calls.find { |fc| fc.dig("functionCall", "name") == "submit_answer" }
       if submit
         tool_counts["submit_answer"] += 1
-        log_generate_summary(started, gemini_time, tool_time, tool_counts)
-        return parse_submit(submit["functionCall"]["args"])
+        begin
+          payload = parse_submit(submit["functionCall"]["args"])
+          log_generate_summary(started, gemini_time, tool_time, tool_counts)
+          return payload
+        rescue ValidationError => e
+          # The payload was DETERMINISTICALLY rejected (bad SPARQL, missing
+          # field). Re-running the whole prompt on Pro would likely repeat the
+          # same mistake, so instead feed the exact error back and let the model
+          # self-correct ONCE in-conversation — Flash reliably fixes e.g. a
+          # stray sub-SELECT when told precisely what was wrong. Still failing
+          # after that re-raises (a real ValidationError the pipeline surfaces).
+          raise if submit_retried
+          submit_retried = true
+          report_progress("Adjusting the query…")
+          contents << {
+            role: "user",
+            parts: function_calls.map { |fc|
+              fname = fc.dig("functionCall", "name")
+              content = fname == "submit_answer" ? { error: e.message } : run_tool(fname, fc.dig("functionCall", "args") || {})
+              { functionResponse: { name: fname, response: { content: content } } }
+            } + [ { text: "submit_answer was rejected: #{e.message}. Fix exactly that and call submit_answer again. Reminder: sparql_pattern is ONLY a WHERE-clause body — no SELECT/sub-SELECT, LIMIT, or SERVICE; subnational regions use region_admin_level, not wdt:P17." } ]
+          }
+          next
+        end
       end
 
       # All search_wikidata responses go in ONE user turn with multiple
@@ -453,14 +483,14 @@ class AiImageSetGenerator
 
     case source
     when "wikidata"
-      raise InvalidResponseError, "wikidata source requires sparql_pattern" if payload[:sparql_pattern].strip.empty?
+      raise ValidationError, "wikidata source requires sparql_pattern" if payload[:sparql_pattern].strip.empty?
       validate_sparql!(payload[:sparql_pattern])
     when "commons"
       unless payload[:topic_qid] || payload[:combined_qid] || payload[:commons_intitle_fallback]
-        raise InvalidResponseError, "commons source requires topic_qid, combined_qid, or commons_intitle_fallback"
+        raise ValidationError, "commons source requires topic_qid, combined_qid, or commons_intitle_fallback"
       end
     when "mapillary"
-      raise InvalidResponseError, "mapillary source requires a region (Mode A or B)" if payload[:region].nil?
+      raise ValidationError, "mapillary source requires a region (Mode A or B)" if payload[:region].nil?
     end
 
     payload
@@ -472,7 +502,7 @@ class AiImageSetGenerator
 
   def validate_sparql!(pattern)
     FORBIDDEN_SPARQL_KEYWORDS.each do |kw|
-      raise InvalidResponseError, "AI returned #{kw} in sparql_pattern (not allowed)" if pattern =~ /\b#{kw}\b/i
+      raise ValidationError, "AI returned #{kw} in sparql_pattern (not allowed)" if pattern =~ /\b#{kw}\b/i
     end
   end
 
@@ -528,7 +558,11 @@ class AiImageSetGenerator
       - "X in Y" topic+region (typical case) → wikidata
       - "many photos / lots of photos of X" → commons
       - Single subject, many angles ("Mount Fuji photos") → commons
-      - Sparse Wikidata topics (street art, graffiti, murals) → commons
+      - Subjects Wikidata models as a generic CLASS instead of discrete
+        geotagged items → commons. This covers land-cover & agriculture
+        (rice terraces, vineyards, fields, hedgerows, moorland, pastures,
+        orchards) and sparse cultural topics (street art, graffiti, murals):
+        a wdt:P31/P279* walk on these returns a handful of items or zero.
       - Living things (wildlife, animals, birds, fish, plants, trees) →
         commons. Wikidata has SPECIES/taxa, which carry no coordinates, so a
         Wikidata query returns 0; Commons has geotagged photos of them.
@@ -580,8 +614,9 @@ class AiImageSetGenerator
       - sparql_pattern: SPARQL WHERE-clause body. MUST bind ?item and
         ?coord. The matched-item variable MUST be exactly ?item (not
         ?place, ?building, etc.) — the backend rewrites the type triple
-        and assumes that name. MUST NOT contain SELECT, LIMIT, or
-        SERVICE blocks — the server adds those, plus its own
+        and assumes that name. MUST NOT contain SELECT (not even a
+        sub-SELECT), LIMIT, or SERVICE blocks — the server adds those,
+        plus its own
         OPTIONAL+FILTER trailer for the image/article fallback. Empty
         string is OK when cannot_answer=true. Basic shape:
         `?item wdt:P31/wdt:P279* wd:Q##### ; wdt:P17 wd:Q## ; wdt:P625 ?coord .`
@@ -627,6 +662,19 @@ class AiImageSetGenerator
         PHOTOS of them exist) or, if Commons coverage is doubtful, refuse.
         Never emit a Wikidata pattern whose ?item is a taxon/person/vehicle.
 
+      - **A named large AREA is a REGION, not a subject.** A mountain range,
+        desert, plateau, basin, or natural region used as the subject ("the
+        Alps", "the Swiss Alps", "the Sahara", "the Rockies", "the Outback",
+        "the Amazon") is NOT a single point and NOT a Wikidata class — a
+        P31/P279* walk on its Q-ID returns ~0, and a bare commons topic_qid
+        with no region collapses the whole import to a 30km circle at the
+        area's centroid. Instead treat the AREA as the region: set
+        region_pois to its name (geocode returns its real bbox), or use a
+        Mode A admin region when the user scoped it to one ("the swiss alps"
+        → region_name "Switzerland"), and pair it with image_source="commons"
+        using the area's own Commons category (topic_qid). The category
+        keeps it on-topic; the region spreads it across the whole area.
+
       - **Designations & statuses (use a UNION, don't guess the property).**
         Designations like World Heritage Site, listed/heritage building,
         national monument, protected-area status are modeled INCONSISTENTLY
@@ -656,12 +704,11 @@ class AiImageSetGenerator
       - **Exclude nuisance subclasses with MINUS.** A broad
         wdt:P31/wdt:P279* walk can drag in a high-volume subclass the user
         doesn't mean, which then dominates the random sample. The canonical
-        case is "churches" (wd:Q16970): Wikidata models cemetery
-        tomb-chapels as "sepulchral chapel" (wd:Q1424583, a subclass of
-        church building) and individual "grave" (wd:Q173387) items, and in
-        cities like Paris or Rome these graves outnumber real churches ~3:1
-        — a plain Q16970 walk returns mostly items labelled "Grave of …".
-        Exclude them:
+        case is "churches" (wd:Q16970): Wikidata models cemetery tomb-chapels
+        as "sepulchral chapel" (wd:Q1424583, a subclass of church building)
+        and individual "grave" (wd:Q173387) items, which in dense old cities
+        can outnumber real churches — so a plain Q16970 walk returns mostly
+        items labelled "Grave of …". Exclude them:
           ?item wdt:P31/wdt:P279* wd:Q16970 ; wdt:P625 ?coord .
           MINUS { ?item wdt:P31/wdt:P279* wd:Q1424583 }   # sepulchral chapels (graves)
           MINUS { ?item wdt:P31 wd:Q173387 }              # graves
@@ -830,9 +877,16 @@ class AiImageSetGenerator
         ?item wdt:P31/wdt:P279* wd:Q23397 ; wdt:P625 ?coord .
 
       Country-level note: for wikidata source you MAY use wdt:P17 wd:Q##
-      directly in the SPARQL instead of region_admin_level="country" —
-      either works, P17 is slightly faster for countries with odd
-      bbox shapes (Russia, USA).
+      directly in the SPARQL instead of region_admin_level="country" — but
+      ONLY for a SOVEREIGN state (a UN member: France Q142, Japan Q17, USA
+      Q30). P17 is the *sovereign country*, so a CONSTITUENT country or any
+      subnational area — Scotland (Q22), Wales, England, Northern Ireland,
+      Bavaria, California, Catalonia, Québec — has P17 = its sovereign parent
+      (a castle in Scotland is P17 United Kingdom, NOT P17 Scotland), so
+      `wdt:P17 wd:Q22` matches ZERO items. For ANYTHING subnational, set
+      region_admin_level="admin1" (no geo triple in the SPARQL) and let the
+      backend's bbox + polygon filter it. P17 is slightly faster only for
+      whole sovereign countries with odd bbox shapes (Russia, USA).
 
       ---- MODE B (POI hull / single landmark) ----
       Use when:
