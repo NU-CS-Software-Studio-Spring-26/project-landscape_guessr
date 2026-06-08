@@ -354,7 +354,7 @@ Then("I should see {string} listed before {string} in the standings") do |first,
   # usernames also appear in nav bars and other structural elements.
   match = @matches.values.find { |m| m.status == "finished" } || Match.finished.last
   standings = match.match_players.includes(:user)
-                   .sort_by { |p| [-p.total_score.to_i, p.joined_at.to_i] }
+                   .sort_by { |p| [ -p.total_score.to_i, p.joined_at.to_i ] }
   names = standings.map { |p| p.user.username }
   expect(names.index(first)).to be < names.index(second),
     "Expected #{first} to rank above #{second} but got standings: #{names.inspect}"
