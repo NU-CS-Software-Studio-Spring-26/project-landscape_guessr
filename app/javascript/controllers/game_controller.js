@@ -1,7 +1,13 @@
 import { Controller } from "@hotwired/stimulus"
 
+// GeoGuessr formula constants — mirror Game::GEOGUESSR_MAX_ROUND_SCORE and
+// Game::GEOGUESSR_DECAY_KM in app/models/game.rb so the live client-side
+// display matches what the backend computes at the results page.
+const GEOGUESSR_MAX_ROUND_SCORE = 5000
+const GEOGUESSR_DECAY_KM = 1492.7
+
 export default class extends Controller {
-  static targets = ["latitude", "longitude", "readout", "submit", "next", "result", "otherGuesses", "leaveModal", "timer"]
+  static targets = ["latitude", "longitude", "readout", "submit", "next", "result", "otherGuesses", "leaveModal", "timer", "score", "roundScore"]
   static values = { gamePath: String }
 
   connect() {
@@ -23,6 +29,7 @@ export default class extends Controller {
     document.addEventListener("turbo:before-visit", this.#boundBeforeVisit)
     window.addEventListener("beforeunload", this.#boundBeforeUnload)
     this.#startTimer()
+    this.#renderRunningScore()
   }
 
   disconnect() {
@@ -93,6 +100,7 @@ export default class extends Controller {
     this.nextTarget.classList.remove("hidden")
 
     const dist = this.#formatDistance(km)
+    const roundScore = this.#geoguessrScore(km)
     let text, color
     if (km < 50) {
       text = `${dist} away — Excellent!`
@@ -111,6 +119,13 @@ export default class extends Controller {
     this.resultTarget.textContent = text
     this.resultTarget.className = `text-lg font-medium ${color}`
     this.readoutTarget.classList.add("hidden")
+
+    // Show per-round score badge and accumulate running total.
+    if (this.hasRoundScoreTarget) {
+      this.roundScoreTarget.textContent = `+${roundScore.toLocaleString()} pts`
+      this.roundScoreTarget.classList.remove("hidden")
+    }
+    this.#addToRunningScore(roundScore)
 
     if (data.other_guesses?.length) {
       mapCtrl.showOtherGuesses(data.other_guesses, answerLat, answerLng)
@@ -252,6 +267,38 @@ export default class extends Controller {
 
   // Mirrors GamesHelper#format_distance_compact so sub-km guesses
   // don't render as "0 km" and 1.x km don't get rounded up to "2 km".
+  // ── Score helpers ────────────────────────────────────────────────────────
+
+  // GeoGuessr exponential score curve. Mirrors Game.geoguessr_round_score.
+  // Using the world-default decay; the backend uses a per-set decay on the
+  // results page but client-side we don't have that value without an extra
+  // API call — the approximation is close enough for the live display.
+  #geoguessrScore(km) {
+    return Math.round(GEOGUESSR_MAX_ROUND_SCORE * Math.exp(-km / GEOGUESSR_DECAY_KM))
+  }
+
+  // Persistent running total across Turbo navigations (same game session).
+  // Key is the game path so scores don't bleed between concurrent tabs.
+  #scoreKey() {
+    return `landscape_guessr_score_${this.gamePathValue}`
+  }
+
+  #getRunningScore() {
+    return parseInt(sessionStorage.getItem(this.#scoreKey()) || "0", 10)
+  }
+
+  #addToRunningScore(points) {
+    const newTotal = this.#getRunningScore() + points
+    sessionStorage.setItem(this.#scoreKey(), String(newTotal))
+    this.#renderRunningScore()
+  }
+
+  #renderRunningScore() {
+    if (!this.hasScoreTarget) return
+    const total = this.#getRunningScore()
+    this.scoreTarget.textContent = `${total.toLocaleString()} pts`
+  }
+
   #formatDistance(km) {
     if (km < 1) return `${Math.round(km * 1000)} m`
     if (km < 10) {

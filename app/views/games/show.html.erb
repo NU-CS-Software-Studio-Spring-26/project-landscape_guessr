@@ -9,7 +9,10 @@
   <meta name="turbo-cache-control" content="no-preview">
 <% end %>
 
-<div class="w-full space-y-4">
+<div data-controller="game"
+     data-action="guess-map:pinned->game#pinChanged"
+     data-game-game-path-value="<%= game_path(@game) %>"
+     class="w-full space-y-4">
   <div class="flex justify-between items-center">
     <h1 class="heading-page">
       <% if @image %>
@@ -18,14 +21,20 @@
         Game complete
       <% end %>
     </h1>
-    <%= link_to "Back to games", games_path, class: "btn-secondary text-sm py-2" %>
+    <div class="flex items-center gap-3">
+      <%# Live running-score badge — starts at 0 and increments after each round
+          via the game Stimulus controller (sessionStorage-backed across Turbo navs). %>
+      <span class="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-sm font-semibold text-emerald-700 tabular-nums"
+            data-game-target="score"
+            title="Running score (approximate — final score calculated at results)">
+        0 pts
+      </span>
+      <%= link_to "Back to games", games_path, class: "btn-secondary text-sm py-2" %>
+    </div>
   </div>
 
   <% if @image %>
-    <div data-controller="game"
-         data-action="guess-map:pinned->game#pinChanged"
-         data-game-game-path-value="<%= game_path(@game) %>"
-         class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <%# Photo column. Wrap the zoomable container + hint + "view
           original" link in one div so they all share grid column 1;
           the map is column 2. (Earlier the hint <p> sat as a sibling
@@ -86,6 +95,10 @@
           <div class="flex items-center gap-2">
             <span data-game-target="readout" class="text-sm text-gray-600">Click the map to drop a pin.</span>
             <p data-game-target="result" class="text-lg font-medium"></p>
+            <%# Per-round score badge — hidden until a guess resolves, then shown by game controller %>
+            <span data-game-target="roundScore"
+                  class="hidden inline-flex items-center rounded-full bg-blue-50 border border-blue-200 px-2.5 py-0.5 text-sm font-semibold text-blue-700 tabular-nums">
+            </span>
             <p data-game-target="otherGuesses" class="hidden text-xs text-gray-500"></p>
             <span data-game-target="timer" class="ml-auto text-xs text-gray-400 tabular-nums">0:00</span>
             <%= submit_tag "Submit guess", data: { game_target: "submit", action: "game#submitGuess" }, disabled: true,

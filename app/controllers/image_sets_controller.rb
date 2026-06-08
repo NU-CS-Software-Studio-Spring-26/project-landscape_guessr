@@ -355,6 +355,18 @@ class ImageSetsController < ApplicationController
     blob = ActiveStorage::Blob.find_signed(signed_id)
     return render json: { error: "invalid signed_id" }, status: :not_found unless blob
 
+    # Screen the upload for inappropriate content via AWS Rekognition before
+    # attaching it to any record. Pass the S3 key so Rekognition reads directly
+    # from S3 — the Rails process never downloads the bytes.
+    # Fails open when AWS_REKOGNITION_REGION is absent (dev/test/CI).
+    require "aws-sdk-rekognition"
+    unless ImageModerationService.safe?(s3_key: blob.key)
+      return render json: {
+        error: "This image was flagged as potentially inappropriate and cannot be uploaded. " \
+               "Please ensure all images comply with our content policy."
+      }, status: :unprocessable_entity
+    end
+
     title = File.basename(blob.filename.to_s, ".*").gsub(/[_-]+/, " ").titleize
     image = Image.create!(title: title)
     image.photo.attach(blob)
