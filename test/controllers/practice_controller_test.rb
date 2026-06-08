@@ -37,15 +37,15 @@ class PracticeControllerTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "(0/100)"
   end
 
-  test "show renders disabled AI hint button with tooltip for unverified user when ai hints enabled" do
+  test "show renders gated AI hint dropdown for unverified user when ai hints enabled" do
     with_ai_hints_config(enabled: true) do
       get practice_path
     end
 
     assert_response :success
     assert_includes response.body, "AI hint"
-    assert_includes response.body, "Only for verified users"
-    assert_includes response.body, "cursor-not-allowed"
+    assert_includes response.body, "aria-haspopup"
+    assert_includes response.body, "Sign in to unlock AI hints"
     assert_not_includes response.body, "data-practice-hint-url-value"
     assert_not_includes response.body, "data-practice-hint-quota-used-value"
   end
