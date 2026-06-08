@@ -67,6 +67,7 @@ class ImageSet < ApplicationRecord
   validate :only_one_system_default, if: :is_system_default?
   validate :name_not_reserved
   validate :public_visibility_permitted
+  validate :name_not_profane
 
   # `prepend: true` so this runs BEFORE the `dependent: :delete_all` on
   # image_set_items (declared above) — dependent destroy strategies are
@@ -502,6 +503,17 @@ class ImageSet < ApplicationRecord
     return if name.blank?
     return if persisted? && !will_save_change_to_name?
     errors.add(:name, "is reserved") if name.casecmp?(SAVED_FOR_PRACTICE_NAME)
+  end
+
+  # Profanity check on set names. Bypassed for system-managed sets (the
+  # auto-created "Saved for Practice" set) and the system default set
+  # so those internal names are never incorrectly rejected.
+  def name_not_profane
+    return if system_managed || is_system_default?
+    return if name.blank?
+    unless ProfanityFilter.clean?(name)
+      errors.add(:name, "contains inappropriate language and cannot be saved")
+    end
   end
 
   # Defensive: a user-created custom set may only be made public by an admin

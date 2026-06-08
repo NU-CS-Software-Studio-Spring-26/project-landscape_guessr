@@ -9,6 +9,8 @@ class Image < ApplicationRecord
   has_many :saved_by_users, through: :saved_practice_items, source: :user
   has_many :ai_hints, class_name: "ImageAiHint", dependent: :destroy
 
+  validate :title_not_profane
+
   # Images visible to a given user: only those that live in at least one
   # set the user is allowed to see. Pass nil for the unauthenticated case.
   scope :visible_to, ->(user) {
@@ -60,6 +62,17 @@ class Image < ApplicationRecord
     return if guesses.exists?
     destroy
   end
+
+  private
+
+  def title_not_profane
+    return if title.blank?
+    unless ProfanityFilter.clean?(title)
+      errors.add(:title, "contains inappropriate language and cannot be saved")
+    end
+  end
+
+  public
 
   # True once ProcessImageJob has run on this Image's current attachment.
   # The marker is set on the freshly-attached processed JPEG blob; the

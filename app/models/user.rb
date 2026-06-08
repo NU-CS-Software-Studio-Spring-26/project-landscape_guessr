@@ -39,6 +39,7 @@ class User < ApplicationRecord
                        uniqueness: { case_sensitive: false },
                        allow_blank: true
   validates :password, length: { minimum: 8 }, allow_nil: true
+  validate :username_not_profane
 
   def pending_username_setup?
     username.blank? && connected_services.any?
@@ -56,6 +57,15 @@ class User < ApplicationRecord
       find_by(email_address: s.downcase)
     else
       where("LOWER(username) = ?", s.downcase).first
+    end
+  end
+
+  private
+
+  def username_not_profane
+    return if username.blank?
+    unless ProfanityFilter.clean?(username)
+      errors.add(:username, "contains inappropriate language and cannot be used")
     end
   end
 end
