@@ -91,6 +91,9 @@ GEM
     aws-sdk-kms (1.128.0)
       aws-sdk-core (~> 3, >= 3.248.0)
       aws-sigv4 (~> 1.5)
+    aws-sdk-rekognition (1.133.0)
+      aws-sdk-core (~> 3, >= 3.248.0)
+      aws-sigv4 (~> 1.5)
     aws-sdk-s3 (1.224.0)
       aws-sdk-core (~> 3, >= 3.248.0)
       aws-sdk-kms (~> 1)
@@ -298,6 +301,7 @@ GEM
       rack (>= 1.2, < 4)
       snaky_hash (~> 2.0, >= 2.0.3)
       version_gem (~> 1.1, >= 1.1.9)
+    obscenity (1.0.2)
     omniauth (2.1.4)
       hashie (>= 3.4.6)
       logger
@@ -538,6 +542,7 @@ PLATFORMS
   x86_64-linux-musl
 
 DEPENDENCIES
+  aws-sdk-rekognition
   aws-sdk-s3
   bcrypt (~> 3.1.7)
   bootsnap
@@ -555,6 +560,7 @@ DEPENDENCIES
   importmap-rails
   jbuilder
   kamal
+  obscenity
   omniauth
   omniauth-google-oauth2
   omniauth-rails_csrf_protection
@@ -595,6 +601,7 @@ CHECKSUMS
   aws-partitions (1.1252.0) sha256=b44c74136ebd634d35f3fb8fd37def5214db21b9375f22c6954dbe7a7f2a449d
   aws-sdk-core (3.248.0) sha256=3e40f3e0ccd812c6ac4934964901298d1639c7122a3f2d2b3415170ea6eab293
   aws-sdk-kms (1.128.0) sha256=20ce3957f80c7b40b3115a7e902af52b15a6eef42fe6b2e19db72f8e8c9e5658
+  aws-sdk-rekognition (1.133.0) sha256=a235ed90e2443aba45e6990f0c2c3238b47852e4794472556799ae9d46cd9695
   aws-sdk-s3 (1.224.0) sha256=7d443c4ae9eda795b60e081d41f49b498e2483f1fc204f3239176ec922ed7879
   aws-sigv4 (1.12.1) sha256=6973ff95cb0fd0dc58ba26e90e9510a2219525d07620c8babeb70ef831826c00
   base64 (0.3.0) sha256=27337aeabad6ffae05c265c450490628ef3ebd4b67be58257393227588f5a97b
@@ -691,6 +698,7 @@ CHECKSUMS
   nokogiri (1.19.3-x86_64-linux-gnu) sha256=2f5078620fe12e83669b5b17311b32532a8153d02eee7ad06948b926d6080976
   nokogiri (1.19.3-x86_64-linux-musl) sha256=248c906d2166eca5efb56d52fdee5f9a1f51d69a72e2b64fdac647b4ce39ea3f
   oauth2 (2.0.18) sha256=bacf11e470dfb963f17348666d0a75c7b29ca65bc48fd47be9057cf91a403287
+  obscenity (1.0.2) sha256=6d6bb4e651b4d028714be13b9de5214870f6964288487a99f1f78104407c52d7
   omniauth (2.1.4) sha256=42a05b0496f0d22e1dd85d42aaf602f064e36bb47a6826a27ab55e5ba608763c
   omniauth-google-oauth2 (1.2.2) sha256=74c3f3d0221c048f938846092fb15a1f15237526f50a7c93d9793f9a4ff1be11
   omniauth-oauth2 (1.9.0) sha256=ed15f6d9d20991807ce114cc5b9c1453bce3645b64e51c68c90cff5ff153fee8

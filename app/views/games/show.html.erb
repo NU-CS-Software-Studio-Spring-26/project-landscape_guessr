@@ -9,7 +9,10 @@
   <meta name="turbo-cache-control" content="no-preview">
 <% end %>
 
-<div class="w-full space-y-4">
+<div data-controller="game"
+     data-action="guess-map:pinned->game#pinChanged"
+     data-game-game-path-value="<%= game_path(@game) %>"
+     class="w-full space-y-4">
   <div class="flex justify-between items-center">
     <h1 class="heading-page">
       <% if @image %>
@@ -31,10 +34,7 @@
   </div>
 
   <% if @image %>
-    <div data-controller="game"
-         data-action="guess-map:pinned->game#pinChanged"
-         data-game-game-path-value="<%= game_path(@game) %>"
-         class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <%# Photo column. Wrap the zoomable container + hint + "view
           original" link in one div so they all share grid column 1;
           the map is column 2. (Earlier the hint <p> sat as a sibling

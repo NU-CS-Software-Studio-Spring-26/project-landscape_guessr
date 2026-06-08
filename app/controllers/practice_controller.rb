@@ -19,7 +19,7 @@ class PracticeController < ApplicationController
 
     @time_limit_seconds = practice_seconds_param
     @attempts = practice_attempts_param
-    @ai_hints_enabled = GeminiConfig.enabled?
+    @ai_hints_enabled = true # TEMP: force-enable to preview hint UI locally — revert before committing
     @ai_hint_quota_used = hint_quota.used if @ai_hints_enabled
     @available_sets = available_practice_sets if email_verified?
     load_random_located_image
