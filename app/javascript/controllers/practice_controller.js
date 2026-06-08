@@ -1,7 +1,7 @@
 import { Controller } from "@hotwired/stimulus"
 import { MAPTILER_KEY } from "lib/maptiler"
 
-const HINT_VISUAL_TIERS = [ 1, 2, 3 ]
+const HINT_VISUAL_TIERS = [ 0, 1, 2, 3 ]
 const HINT_VISUAL_POLL_MS = 2000
 const HINT_VISUAL_POLL_MAX_ATTEMPTS = 30
 const AI_HINT_UNAVAILABLE_MESSAGE =
@@ -144,7 +144,10 @@ export default class extends Controller {
     if (!allowed.includes(type)) return
     this.hintType = type
     if (type === "location") this.hintLocationLevel = "none"
-    if (type === "visual") this.#hintVisualRetry = this.#shouldRetryVisualHint()
+    if (type === "visual") {
+      this.hintVisualTier = 0
+      this.#hintVisualRetry = false
+    }
     this.#applyHintSelection()
   }
 
@@ -153,7 +156,7 @@ export default class extends Controller {
     if (!HINT_VISUAL_TIERS.includes(tier)) return
     this.hintType = "visual"
     this.hintVisualTier = tier
-    this.#hintVisualRetry = this.#shouldRetryVisualHint()
+    this.#hintVisualRetry = tier !== 0 && this.#shouldRetryVisualHint()
     this.#applyHintSelection()
   }
 
@@ -592,7 +595,7 @@ export default class extends Controller {
     else this.hintType = "off"
 
     this.hintLocationLevel = ["none", "continent", "country"].includes(level) ? level : "none"
-    this.hintVisualTier = HINT_VISUAL_TIERS.includes(tier) ? tier : 1
+    this.hintVisualTier = HINT_VISUAL_TIERS.includes(tier) ? tier : 0
   }
 
   async #showLocationHint() {
@@ -720,6 +723,12 @@ export default class extends Controller {
   async #showVisualHint() {
     if (!this.hasHintUrlValue) {
       this.hintVisualMessage = AI_HINT_UNAVAILABLE_MESSAGE
+      this.#syncHintUi()
+      return
+    }
+
+    if (this.hintVisualTier === 0) {
+      this.hintVisualMessage = ""
       this.#syncHintUi()
       return
     }
