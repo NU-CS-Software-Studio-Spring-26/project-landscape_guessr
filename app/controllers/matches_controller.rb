@@ -229,12 +229,13 @@ class MatchesController < ApplicationController
   # Per-round payload while the round is still live. Critical: NEVER include
   # the answer coords here, and don't echo other players' guess coords —
   # those reveal atomically in build_last_round_result once the round ends.
+  # The image title is also withheld: it can name the location and give the
+  # answer away. The title is only shown afterward on the match results page.
   def build_current_round_payload(round, player)
     return nil if round.nil? || round.ended?
     {
       index:        round.index,
       image_url:    helpers.image_src(round.image, width: 1600),
-      image_title:  round.image.title,
       started_at:   round.started_at.iso8601(3),
       deadline_at:  round.deadline_at.iso8601(3),
       my_guess_submitted: player.present? &&
