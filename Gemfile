@@ -92,6 +92,7 @@ group :test do
   gem "faker"
 end
 gem "aws-sdk-s3", require: false
+gem "aws-sdk-rekognition", require: false
 
 # Geographic region filtering (point-in-polygon via RGeo)
 gem "rgeo", "~> 3.0"
