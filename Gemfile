@@ -83,6 +83,13 @@ group :test do
   gem "capybara"
   gem "selenium-webdriver"
   gem "webmock"
+
+  # RSpec + Cucumber test suite for multiplayer (Matches + Challenges)
+  gem "rspec-rails"
+  gem "factory_bot_rails"
+  gem "cucumber-rails", require: false
+  gem "database_cleaner-active_record"
+  gem "faker"
 end
 gem "aws-sdk-s3", require: false
 
