@@ -15,7 +15,7 @@ export default class extends Controller {
     intervalMs: { type: Number, default: 2000 }
   }
   static targets = [
-    "image", "imageTitle", "roundLabel", "timer", "status",
+    "image", "roundLabel", "timer", "status",
     "scoreboard", "reveal", "guessHint", "lockedBadge", "finished"
   ]
 
@@ -85,7 +85,6 @@ export default class extends Controller {
       }
 
       if (this.hasImageTarget)      this.imageTarget.src = cr.image_url
-      if (this.hasImageTitleTarget) this.imageTitleTarget.textContent = cr.image_title || ""
       if (this.hasRoundLabelTarget) {
         this.roundLabelTarget.textContent = `Round ${cr.index} / ${state.match.rounds_total}`
       }

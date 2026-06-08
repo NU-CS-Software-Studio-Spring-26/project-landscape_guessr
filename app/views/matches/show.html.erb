@@ -40,9 +40,6 @@
                alt="Guess this location"
                class="max-w-full max-h-full object-contain">
         </div>
-        <p class="text-xs text-gray-500" data-match-poll-target="imageTitle">
-          <%= @match.current_round&.image&.title %>
-        </p>
 
         <%= render "shared/guess_map",
               style: @match.image_set.map_style || "outdoor-v2",
